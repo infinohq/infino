@@ -9,7 +9,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "*"
 axum = { version = "0.6.11" }
 chrono = "0.4.24"
 crossbeam = "0.8.2"     # Only used by examples/sample*.rs

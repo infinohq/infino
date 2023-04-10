@@ -24,7 +24,7 @@ impl RabbitMQ {
   pub async fn new(container_name: &str, image_name: &str, image_tag: &str) -> Self {
     let channel =
       Self::create_rmq_connection("amqp://guest:guest@localhost:5672", "connection_name").await;
-    Self::create_stream(&channel).await.unwrap();
+    Self::create_stream(&channel).await;
     let environment = Environment::builder()
       .host("localhost")
       .username("guest")
@@ -110,7 +110,7 @@ impl RabbitMQ {
   }
 
   /// Helper function to create a stream.
-  async fn create_stream(channel: &Channel) -> anyhow::Result<()> {
+  async fn create_stream(channel: &Channel) {
     //creating exchange
     let declare_options = ExchangeDeclareOptions {
       durable: true,
@@ -157,8 +157,6 @@ impl RabbitMQ {
       )
       .await
       .unwrap();
-
-    Ok(())
   }
 
   /// Publish a message to the queue.
