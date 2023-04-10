@@ -68,8 +68,21 @@ impl Index {
     if !Path::new(index_dir_path).is_dir() {
       // Directory does not exist. Create it.
       std::fs::create_dir_all(index_dir_path).unwrap();
+    } else if Path::new(&io::get_joined_path(index_dir_path, METADATA_FILE_NAME)).is_file() {
+      // index_dir_path has metadata file, refresh the index instead of creating new one
+      match Self::refresh(index_dir_path) {
+        Ok(sl) => {
+          return sl;
+        }
+        Err(err) => {
+          // Received a error while refreshing index, so panic instead of continuing whichi will override the index
+          panic!(
+            "Received error refreshing index from path {} with error {}",
+            index_dir_path, err
+          );
+        }
+      }
     }
-    // TODO: if the index_dir_path has metadata file, refresh the index instead of creating new one.
 
     // Create an initial segment.
     let segment = Segment::new();
@@ -952,5 +965,27 @@ mod tests {
 
     assert_eq!(expected_len, received_logs_len);
     assert_eq!(expected_len, received_data_points_len);
+  }
+
+  #[test]
+  fn test_reusing_index_when_available() {
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+
+    let start_time = Utc::now().timestamp_millis();
+    // Create a new index
+    let index = Index::new_with_max_params(index_dir_path, 1, 1);
+    index.append_log_message(start_time as u64, "some_message_1");
+    index.commit(true);
+
+    // Create one more new index using same dir location
+    let index2 = Index::new_with_max_params(index_dir_path, 1, 1);
+    let search_result = index2.search(
+      "some_message_1",
+      start_time as u64,
+      Utc::now().timestamp_millis() as u64,
+    );
+
+    assert_eq!(search_result.len(), 1);
   }
 }
