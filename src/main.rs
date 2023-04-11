@@ -77,7 +77,10 @@ async fn app(
   let suffix = Uuid::new_v4();
   let index_dir_path = format!("/tmp/index-{suffix}");
   create_dir(&index_dir_path).unwrap();
-  let tsldb = Tsldb::new(&index_dir_path);
+  let tsldb = match Tsldb::new(&index_dir_path) {
+    Ok(tsldb) => tsldb,
+    Err(err) => panic!("Unable to initialize tsldb with err {}", err),
+  };
 
   // Create RabbitMQ to store incoming requests.
   let queue = create_queue(container_name, image_name, image_tag).await;

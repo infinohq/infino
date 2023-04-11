@@ -19,11 +19,13 @@ pub struct Metadata {
 
   /// Maximum number of log messages per segment. This is only approximate and a segment can
   /// contain more messages than this number depending on the frequecy at which commit() is called.
-  approx_max_log_message_count_per_segment: u32,
+  #[serde(with = "atomic_cell_serde")]
+  approx_max_log_message_count_per_segment:  AtomicCell<u32>,
 
   /// Maximum number of data points per segment. This is only approximate and a segment can
   /// contain more data points than this number depending on the frequecy at which commit() is called.
-  approx_max_data_point_count_per_segment: u32,
+  #[serde(with = "atomic_cell_serde")]
+  approx_max_data_point_count_per_segment:  AtomicCell<u32>,
 }
 
 impl Metadata {
@@ -37,8 +39,8 @@ impl Metadata {
     Metadata {
       segment_count: AtomicCell::new(segment_count),
       current_segment_number: AtomicCell::new(current_segment_number),
-      approx_max_log_message_count_per_segment: max_log_messges,
-      approx_max_data_point_count_per_segment: max_data_points,
+      approx_max_log_message_count_per_segment: AtomicCell::new(max_log_messges),
+      approx_max_data_point_count_per_segment: AtomicCell::new(max_data_points),
     }
   }
 
@@ -65,12 +67,22 @@ impl Metadata {
 
   /// Get the (approx) max log message count per segment.
   pub fn get_approx_max_log_message_count_per_segment(&self) -> u32 {
-    self.approx_max_log_message_count_per_segment
+    self.approx_max_log_message_count_per_segment.load()
   }
 
   /// Get the (approx) max data point count per segment.
   pub fn get_approx_max_data_point_count_per_segment(&self) -> u32 {
-    self.approx_max_data_point_count_per_segment
+    self.approx_max_data_point_count_per_segment.load()
+  }
+
+  /// Update the current segment number to the given value.
+  pub fn update_max_log_message_count_per_segment(&self, value: u32) {
+    self.approx_max_log_message_count_per_segment.store(value);
+  }
+
+  /// Update the current segment number to the given value.
+  pub fn update_max_data_point_count_per_segment(&self, value: u32) {
+    self.approx_max_data_point_count_per_segment.store(value);
   }
 }
 

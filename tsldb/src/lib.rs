@@ -6,6 +6,8 @@ pub(crate) mod utils;
 
 use std::collections::HashMap;
 
+use utils::error::TsldbError;
+
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
 use crate::ts::data_point::DataPoint;
@@ -18,9 +20,15 @@ pub struct Tsldb {
 
 impl Tsldb {
   /// Create a new tsldb at the given directory path.
-  pub fn new(index_dir_path: &str) -> Self {
-    let index = Index::new(index_dir_path);
-    Tsldb { index }
+  pub fn new(index_dir_path: &str) -> Result<Self, TsldbError> {
+    match Index::new(index_dir_path) {
+      Ok(index) => {
+         Ok(Tsldb { index })
+      }
+      Err(err) => {
+        Err(err)
+      }
+    }
   }
 
   /// Create a new tsldb at the given directory path, with specified parameters for
@@ -29,9 +37,15 @@ impl Tsldb {
     index_dir_path: &str,
     max_log_messages: u32,
     max_data_points: u32,
-  ) -> Self {
-    let index = Index::new_with_max_params(index_dir_path, max_log_messages, max_data_points);
-    Tsldb { index }
+  ) -> Result<Self, TsldbError> {
+    match Index::new_with_max_params(index_dir_path, max_log_messages, max_data_points) {
+      Ok(index) => { 
+        Ok(Tsldb {index})
+      }
+      Err(err) => {
+        Err(err)
+      }
+    }
   }
 
   /// Append a log message.

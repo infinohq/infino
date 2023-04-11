@@ -48,7 +48,10 @@ pub struct Index {
 
 impl Index {
   /// Create a new index with default max log messages / max data points parameters.
-  pub fn new(index_dir_path: &str) -> Self {
+  /// However, if a directory with the same path already exists and has a metadata file in it, 
+  /// the function will refresh the existing index instead of creating a new one. 
+  /// If the refresh process fails, an error will be thrown to indicate the issue.
+  pub fn new(index_dir_path: &str) -> Result<Self, TsldbError> {
     Index::new_with_max_params(
       index_dir_path,
       DEFAULT_APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT,
@@ -56,12 +59,15 @@ impl Index {
     )
   }
 
-  /// Create a new index with specified max log messages / max data points parameters.
+  /// Creates a new index at the specified directory(index_dir_path) path with customizable parameters for maximum log messages and data points. 
+  /// However, if a directory with the same path already exists and has a metadata file in it, 
+  /// the function will refresh the existing index instead of creating a new one. 
+  /// If the refresh process fails, an error will be thrown to indicate the issue.
   pub fn new_with_max_params(
     index_dir_path: &str,
     max_log_messages: u32,
     max_data_points: u32,
-  ) -> Self {
+  ) -> Result<Self, TsldbError>  {
     info!("Creating index - dir {}, max log messages per segment (approx): {}, max data points per segment {}",
           index_dir_path, max_log_messages, max_data_points);
 
@@ -71,15 +77,15 @@ impl Index {
     } else if Path::new(&io::get_joined_path(index_dir_path, METADATA_FILE_NAME)).is_file() {
       // index_dir_path has metadata file, refresh the index instead of creating new one
       match Self::refresh(index_dir_path) {
-        Ok(sl) => {
-          return sl;
+        Ok(index) => {
+          // Update metadata with max log message and data points
+          index.metadata.update_max_log_message_count_per_segment(max_log_messages);
+          index.metadata.update_max_data_point_count_per_segment(max_data_points);
+          return Ok(index);
         }
         Err(err) => {
-          // Received a error while refreshing index, so panic instead of continuing whichi will override the index
-          panic!(
-            "Received error refreshing index from path {} with error {}",
-            index_dir_path, err
-          );
+          // Received a error while refreshing index
+          return Err(err);
         }
       }
     }
@@ -107,7 +113,7 @@ impl Index {
     // Commit the empty index so that the index directory will be created.
     index.commit(false);
 
-    index
+    Ok(index)
   }
 
   /// Get the reference for the current segment.
@@ -303,7 +309,7 @@ impl Index {
     let all_segment_ids: Vec<u32> = serialize::read(all_segments_list_path.as_str());
     if all_segment_ids.is_empty() {
       // No all_segments_map present - so this may not be an index directory. Return an empty index.
-      return Ok(Index::new(index_dir_path));
+      return Ok(Index::new(index_dir_path).unwrap());
     }
 
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
@@ -381,7 +387,7 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
 
-    let index = Index::new(index_dir_path);
+    let index = Index::new(index_dir_path).unwrap();
     let segment_ref = index.get_current_segment_ref();
     let segment = segment_ref.value();
     assert_eq!(segment.get_log_message_count(), 0);
@@ -408,7 +414,7 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
 
-    let expected = Index::new(index_dir_path);
+    let expected = Index::new(index_dir_path).unwrap();
     let num_log_messages = 5;
     let message_prefix = "content#";
     let num_data_points = 5;
@@ -460,7 +466,7 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
 
-    let index = Index::new(index_dir_path);
+    let index = Index::new(index_dir_path).unwrap();
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -494,7 +500,7 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
 
-    let index = Index::new(index_dir_path);
+    let index = Index::new(index_dir_path).unwrap();
     let num_data_points = 1000;
     let mut expected_data_points: Vec<DataPoint> = Vec::new();
 
@@ -520,7 +526,7 @@ mod tests {
       let index_dir = TempDir::new("index_test").unwrap();
       let index_dir_path = index_dir.path().to_str().unwrap();
 
-      let index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+      let index = Index::new_with_max_params(index_dir_path, 1000, 2000).unwrap();
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
         Path::new(index_dir_path).join(original_segment_number.to_string().as_str());
@@ -704,7 +710,7 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
 
-    let mut index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+    let mut index = Index::new_with_max_params(index_dir_path, 1000, 2000).unwrap();
     let message_prefix = "message";
     let num_segments = 3;
     let num_log_messages = num_segments
@@ -763,7 +769,7 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
 
-    let mut index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+    let mut index = Index::new_with_max_params(index_dir_path, 1000, 2000).unwrap();
     let num_segments = 100;
     let num_data_points =
       num_segments * (index.metadata.get_approx_max_data_point_count_per_segment() + 1);
@@ -831,7 +837,7 @@ mod tests {
 
     // Create a path within index_dir that does not exist.
     let temp_path_buf = index_dir.path().join("-doesnotexist");
-    let index = Index::new(&temp_path_buf.to_str().unwrap());
+    let index = Index::new(&temp_path_buf.to_str().unwrap()).unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
     index.commit(false);
@@ -856,7 +862,7 @@ mod tests {
   fn test_overlap_one_segment() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new(index_dir_path);
+    let index = Index::new(index_dir_path).unwrap();
     index.append_log_message(1000, "message_1");
     index.append_log_message(2000, "message_2");
 
@@ -871,7 +877,7 @@ mod tests {
   fn test_overlap_multiple_segments() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_max_params(index_dir_path, 1, 1);
+    let index = Index::new_with_max_params(index_dir_path, 1, 1).unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -911,7 +917,7 @@ mod tests {
   fn test_concurrent_append() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+    let index = Index::new_with_max_params(index_dir_path, 1000, 2000).unwrap();
     let arc_index = Arc::new(index);
     let num_threads = 20;
     let num_appends_per_thread = 5000;
@@ -974,12 +980,12 @@ mod tests {
 
     let start_time = Utc::now().timestamp_millis();
     // Create a new index
-    let index = Index::new_with_max_params(index_dir_path, 1, 1);
+    let index = Index::new_with_max_params(index_dir_path, 1, 1).unwrap();
     index.append_log_message(start_time as u64, "some_message_1");
     index.commit(true);
 
     // Create one more new index using same dir location
-    let index2 = Index::new_with_max_params(index_dir_path, 1, 1);
+    let index2 = Index::new_with_max_params(index_dir_path, 1, 1).unwrap();
     let search_result = index2.search(
       "some_message_1",
       start_time as u64,
