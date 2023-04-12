@@ -139,7 +139,7 @@ impl Index {
 
     // Append the data point to the current segment.
     current_segment
-      .append_data_point(metric_name, &labels, time, value)
+      .append_data_point(metric_name, labels, time, value)
       .unwrap();
   }
 

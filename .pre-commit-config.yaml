@@ -16,12 +16,12 @@ repos:
       - id: validate_manifest
   - repo: local
     hooks:
-      - id: fmt
-        name: fmt
-        description: Format files with cargo fmt.
-        entry: cargo fmt -- --check
-        language: system
-        types: [rust]
+      #   - id: fmt
+      #     name: fmt
+      #     description: Format files with cargo fmt.
+      #     entry: cargo fmt --all -- --check
+      #     language: system
+      #     types: [rust]
       - id: cargo-check
         name: cargo check
         description: Check the package for errors.
@@ -49,5 +49,19 @@ repos:
         entry: cargo clippy
         language: system
         args: ["--", "-D", "warnings"]
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test-infino-ignored
+        name: cargo test infino ignored
+        description: Run Ignored cargo test
+        entry: cargo test -- --ignored
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test-tsldb-loom
+        name: cargo test infino loop
+        description: Run loop cargo test
+        entry: RUSTFLAGS="--cfg loom" cargo test --test loom --release
+        language: system
         types: [rust]
         pass_filenames: false

@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
-use serde_json;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
@@ -61,7 +60,7 @@ async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
   loop {
     let now = chrono::Utc::now().to_rfc2822();
     println!("Committing at {}", now);
-    (*state).tsldb.commit(true);
+    state.tsldb.commit(true);
     sleep(Duration::from_secs(commit_interval_in_seconds as u64)).await;
   }
 }
@@ -131,7 +130,7 @@ async fn append_log(State(state): State<Arc<AppState>>, Json(log_message): Json<
   state.queue.publish(&log_message_string).await.unwrap();
   state
     .tsldb
-    .append_log_message(log_message.get_time(), &log_message.get_message());
+    .append_log_message(log_message.get_time(), log_message.get_message());
 }
 
 async fn append_ts(

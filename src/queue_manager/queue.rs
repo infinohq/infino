@@ -95,7 +95,7 @@ impl RabbitMQ {
       .with_executor(tokio_executor_trait::Tokio::current())
       .with_reactor(tokio_reactor_trait::Tokio);
     loop {
-      let connection = Connection::connect(connection_string.as_ref(), options.clone())
+      let connection = Connection::connect(connection_string, options.clone())
         .await
         .unwrap();
       if let Ok(channel) = connection.create_channel().await {
@@ -192,9 +192,8 @@ impl RabbitMQ {
 
     let handle = consumer.handle();
     let next = consumer.next().await;
-    let retval;
-    if next.is_none() {
-      retval = None
+    let retval = if next.is_none() {
+      None
     } else {
       let delivery = Some(next)
         .unwrap()
@@ -202,8 +201,8 @@ impl RabbitMQ {
         .expect("Could not get delivery");
       let data = delivery.message().data().unwrap();
       let str_data = std::str::from_utf8(data).unwrap();
-      retval = Some(str_data.to_owned())
-    }
+      Some(str_data.to_owned())
+    };
     handle.close().await.unwrap();
 
     retval
@@ -247,13 +246,13 @@ impl RabbitMQ {
   /// Stop the rabbitmq container.
   pub fn stop_queue_container(container_name: &str) -> Result<(), InfinoError> {
     let result = docker::stop_docker_container(container_name);
-    if result.is_err() {
-      return Err(InfinoError::QueueIOError(result.unwrap_err()));
+    if let Err(err) = result {
+      return Err(InfinoError::QueueIOError(err));
     }
 
     let result = docker::remove_docker_container(container_name);
-    if result.is_err() {
-      return Err(InfinoError::QueueIOError(result.unwrap_err()));
+    if let Err(err) = result {
+      return Err(InfinoError::QueueIOError(err));
     }
 
     Ok(())
