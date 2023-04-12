@@ -70,7 +70,10 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> Router
   let settings = Settings::new(&config_dir_path).unwrap();
 
   // Create a new tsldb.
-  let tsldb = Tsldb::new(&config_dir_path).unwrap();
+  let tsldb = match Tsldb::new(&config_dir_path) {
+    Ok(tsldb) => tsldb,
+    Err(err) => panic!("Unable to initialize tsldb with err {}", err),
+  };
 
   // Create RabbitMQ to store incoming requests.
   let container_name = settings.get_rabbitmq_settings().get_container_name();

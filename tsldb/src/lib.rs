@@ -20,7 +20,7 @@ pub struct Tsldb {
 }
 
 impl Tsldb {
-  /// Create a new tsldb at the given directory path.
+  /// Create a new tsldb at the directory path specified in the config.
   pub fn new(config_dir_path: &str) -> Result<Self, TsldbError> {
     let result = Settings::new(config_dir_path);
 
@@ -35,7 +35,7 @@ impl Tsldb {
           index_dir_path,
           num_log_messages_threshold,
           num_data_points_threshold,
-        );
+        )?;
 
         let tsldb = Tsldb { index, settings };
         return Ok(tsldb);
