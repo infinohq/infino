@@ -69,6 +69,7 @@ impl Settings {
     &self.rabbitmq
   }
 
+  #[cfg(test)]
   /// Get the default config file name.
   pub fn get_default_config_file_name() -> &'static str {
     &DEFAULT_CONFIG_FILE_NAME
