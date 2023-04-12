@@ -20,4 +20,7 @@ pub enum TsldbError {
 
   #[error("Cannot decode time series. {0}")]
   CannotDecodeTimeSeries(String),
+
+  #[error("Invalid configuration. {0}")]
+  InvalidConfiguration(String),
 }

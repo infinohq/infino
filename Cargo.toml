@@ -11,6 +11,7 @@ edition = "2021"
 [dependencies]
 axum = { version = "0.6.11" }
 chrono = "0.4.24"
+config = "0.13.1"
 crossbeam = "0.8.2"     # Only used by examples/sample*.rs
 hyper = { version = "0.14", features = ["full"] }
 lapin = "2.1.1"
@@ -36,6 +37,7 @@ features = [
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 serial_test = "2.0.0"
+tempdir = "*"
 
 [profile.release]
 opt-level = 3
