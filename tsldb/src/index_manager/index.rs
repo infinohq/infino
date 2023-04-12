@@ -985,8 +985,8 @@ mod tests {
     index.commit(true);
 
     // Create one more new index using same dir location
-    let index2 = Index::new_with_max_params(index_dir_path, 1, 1).unwrap();
-    let search_result = index2.search(
+    let index = Index::new_with_max_params(index_dir_path, 1, 1).unwrap();
+    let search_result = index.search(
       "some_message_1",
       start_time as u64,
       Utc::now().timestamp_millis() as u64,
