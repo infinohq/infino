@@ -66,10 +66,10 @@ async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
 
 async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> Router {
   // Read the settings from the config directory.
-  let settings = Settings::new(&config_dir_path).unwrap();
+  let settings = Settings::new(config_dir_path).unwrap();
 
   // Create a new tsldb.
-  let tsldb = match Tsldb::new(&config_dir_path) {
+  let tsldb = match Tsldb::new(config_dir_path) {
     Ok(tsldb) => tsldb,
     Err(err) => panic!("Unable to initialize tsldb with err {}", err),
   };

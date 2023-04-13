@@ -38,11 +38,11 @@ impl Tsldb {
         )?;
 
         let tsldb = Tsldb { index, settings };
-        return Ok(tsldb);
+        Ok(tsldb)
       }
       Err(e) => {
         let error = TsldbError::InvalidConfiguration(e.to_string());
-        return Err(error);
+        Err(error)
       }
     }
   }

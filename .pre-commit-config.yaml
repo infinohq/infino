@@ -16,12 +16,12 @@ repos:
       - id: validate_manifest
   - repo: local
     hooks:
-      - id: fmt
-        name: fmt
-        description: Format files with cargo fmt.
-        entry: cargo fmt --all -- --check
+      - id: rustfmt
+        name: rustfmt
+        description: Check if all files follow the rustfmt style
+        entry: cargo fmt --all -- --check --color always
         language: system
-        types: [rust]
+        pass_filenames: false
       - id: cargo-check
         name: cargo check
         description: Check the package for errors.
