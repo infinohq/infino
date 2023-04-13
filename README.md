@@ -3,7 +3,7 @@
 ## Getting started
 
 * Install docker
-* Install pre-commit by following [this](brew install pre-commit) guide
+* Install pre-commit by running `brew install pre-commit`
 * Run `pre-commit install`
 * Run `cargo run`
 
