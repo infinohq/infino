@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bitpacking = "0.8.4"
 chrono = "0.4.23"
+config = "0.13.1"
 crossbeam = "0.8.2"
 dashmap = { version = "5.4.0", features = ["serde"] }
 lazy_static = "1.4.0"

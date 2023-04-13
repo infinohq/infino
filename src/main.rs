@@ -2,14 +2,12 @@ mod queue_manager;
 mod utils;
 
 use std::collections::HashMap;
-use std::fs::create_dir;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
-use uuid::Uuid;
 
 // TODO: figure out a way to not have LogMessage and DataPoint way deep in tsldb / or change the API to time/value.
 use tsldb::log::log_message::LogMessage;
@@ -17,6 +15,7 @@ use tsldb::ts::data_point::DataPoint;
 use tsldb::Tsldb;
 
 use crate::queue_manager::queue::RabbitMQ;
+use crate::utils::settings::Settings;
 
 async fn create_queue(container_name: &str, image_name: &str, image_tag: &str) -> RabbitMQ {
   // TODO: make usage of existing queue possible rather than starting every time.
@@ -65,26 +64,27 @@ async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
   }
 }
 
-async fn app(
-  container_name: &str,
-  image_name: &str,
-  image_tag: &str,
-  commit_interval_in_seconds: u32,
-) -> Router {
-  // TODO: read the directory from a config.
+async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> Router {
+  // Read the settings from the config directory.
+  let settings = Settings::new(&config_dir_path).unwrap();
+
   // Create a new tsldb.
-  let suffix = Uuid::new_v4();
-  let index_dir_path = format!("/tmp/index-{suffix}");
-  create_dir(&index_dir_path).unwrap();
-  let tsldb = Tsldb::new(&index_dir_path);
+  let tsldb = match Tsldb::new(&config_dir_path) {
+    Ok(tsldb) => tsldb,
+    Err(err) => panic!("Unable to initialize tsldb with err {}", err),
+  };
 
   // Create RabbitMQ to store incoming requests.
+  let container_name = settings.get_rabbitmq_settings().get_container_name();
   let queue = create_queue(container_name, image_name, image_tag).await;
 
   let shared_state = Arc::new(AppState { queue, tsldb });
 
   // Start a thread to periodically commit tsldb.
-  println!("Spawning new thread");
+  println!("Spawning new thread to periodically commit");
+  let commit_interval_in_seconds = settings
+    .get_server_settings()
+    .get_commit_interval_in_seconds();
   tokio::spawn(commit_in_loop(
     shared_state.clone(),
     commit_interval_in_seconds,
@@ -102,19 +102,12 @@ async fn app(
 
 #[tokio::main]
 async fn main() {
-  let container_name = "infino-queue";
+  let config_dir_path = "config";
   let image_name = "rabbitmq";
   let image_tag = "3";
-  let commit_interval_in_seconds = 30;
 
   // Create app.
-  let app = app(
-    container_name,
-    image_name,
-    image_tag,
-    commit_interval_in_seconds,
-  )
-  .await;
+  let app = app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -181,51 +174,62 @@ async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
 
 #[cfg(test)]
 mod tests {
-  use chrono::Utc;
-  use serial_test::serial;
-
-  use super::*;
+  use std::fs::File;
+  use std::io::Write;
 
   use axum::{
     body::Body,
     http::{self, Request, StatusCode},
   };
+  use chrono::Utc;
+  use serial_test::serial;
+  use tempdir::TempDir;
   use tower::Service;
+  use tsldb::utils::io::get_joined_path;
 
-  async fn get_index_dir(app: &mut Router) -> String {
-    let response = app
-      .call(
-        Request::builder()
-          .method(http::Method::GET)
-          .uri("/get_index_dir")
-          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-          .body(Body::from(serde_json::to_string("").unwrap()))
-          .unwrap(),
-      )
-      .await
-      .unwrap();
+  use super::*;
 
-    println!("Response is {:?}", response);
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let index_dir_path_bytes = hyper::body::to_bytes(response.into_body())
-      .await
-      .unwrap()
-      .to_vec();
-
-    String::from_utf8(index_dir_path_bytes).unwrap()
+  fn create_test_config(config_dir_path: &str, index_dir_path: &str, container_name: &str) {
+    // Create a test config in the directory config_dir_path.
+    let config_file_path =
+      get_joined_path(config_dir_path, Settings::get_default_config_file_name());
+    {
+      let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
+      let container_name_line = format!("container_name = \"{}\"\n", container_name);
+      let mut file = File::create(&config_file_path).unwrap();
+      file.write_all(b"[tsldb]\n").unwrap();
+      file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file
+        .write_all(b"num_log_messages_threshold = 1000\n")
+        .unwrap();
+      file
+        .write_all(b"num_data_points_threshold = 10000\n")
+        .unwrap();
+      file.write_all(b"[server]\n").unwrap();
+      file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
+      file.write_all(b"[rabbitmq]\n").unwrap();
+      file.write_all(container_name_line.as_bytes()).unwrap();
+    }
   }
 
   #[ignore = "avoid port conflict in case the machine running tests also has infino running in production"]
   #[serial]
   #[tokio::test]
-  async fn test_log() {
-    let num_log_messages = 100;
+  async fn test_basic() {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test";
-    let mut app = app(container_name, "rabbitmq", "3", 1).await;
+    create_test_config(config_dir_path, index_dir_path, container_name);
+
+    println!("Config dir path {}", config_dir_path);
+    let mut app = app(config_dir_path, "rabbitmq", "3").await;
+
+    // **Part 1**: Test insertion and search of log messages
+    let num_log_messages = 100;
     let mut log_messages_expected = Vec::new();
     let search_query = "message";
-
     for i in 0..num_log_messages {
       let log_message = LogMessage::new(
         Utc::now().timestamp_millis() as u64,
@@ -276,23 +280,14 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let index_dir_path = get_index_dir(&mut app).await;
-    let refreshed_tsldb = Tsldb::refresh(index_dir_path.as_str());
+    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
     log_messages_received = refreshed_tsldb.search(search_query, 0, u64::MAX);
 
     assert_eq!(log_messages_received.len(), num_log_messages);
     assert_eq!(log_messages_expected, log_messages_received);
 
-    let _ = RabbitMQ::stop_queue_container(container_name);
-  }
-
-  #[ignore = "avoid port conflict in case the machine running tests also has infino running in production"]
-  #[serial]
-  #[tokio::test]
-  async fn test_time_series() {
+    // **Part 2**: Test insertion and search of time series data points.
     let num_data_points = 100;
-    let container_name = "infino-test";
-    let mut app = app(container_name, "rabbitmq", "3", 1).await;
     let mut data_points_expected = Vec::new();
     let label_name = "__name__";
     let label_value = "some_name";
@@ -353,8 +348,7 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let index_dir_path = get_index_dir(&mut app).await;
-    let refreshed_tsldb = Tsldb::refresh(index_dir_path.as_str());
+    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
     data_points_received = refreshed_tsldb.get_time_series(label_name, label_value, 0, u64::MAX);
 
     assert_eq!(data_points_received.len(), num_data_points);

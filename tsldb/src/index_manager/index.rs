@@ -21,13 +21,13 @@ const ALL_SEGMENTS_LIST_FILE_NAME: &str = "all_segments_list.bin";
 /// File name to store index metadata.
 const METADATA_FILE_NAME: &str = "metadata.bin";
 
-/// Default for the number of max log messages per segment. Note that since we create new segments only on commit,
+/// Default threshold for the number of max log messages per segment. Note that since we create new segments only on commit,
 /// this number will be approximate.
-const DEFAULT_APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT: u32 = 100_000;
+const DEFAULT_NUM_LOG_MESSAGES_THRESHOLD: u32 = 100_000;
 
-/// Default for the number of max data points per segment. Note that since we create new segments only on commit,
+/// Default threshold for the number of max data points per segment. Note that since we create new segments only on commit,
 /// this number will be approximate.
-const DEFAULT_APPROX_MAX_DATA_POINT_COUNT_PER_SEGMENT: u32 = 100_000;
+const DEFAULT_NUM_DATA_POINTS_THRESHOLD: u32 = 100_000;
 
 #[derive(Debug)]
 /// Index for storing log messages and time series data points.
@@ -47,33 +47,61 @@ pub struct Index {
 }
 
 impl Index {
-  /// Create a new index with default max log messages / max data points parameters.
-  pub fn new(index_dir_path: &str) -> Self {
-    Index::new_with_max_params(
+  /// Create a new index with default threshold log messages / threshold data points parameters.
+  /// However, if a directory with the same path already exists and has a metadata file in it,
+  /// the function will refresh the existing index instead of creating a new one.
+  /// If the refresh process fails, an error will be thrown to indicate the issue.
+  pub fn new(index_dir_path: &str) -> Result<Self, TsldbError> {
+    Index::new_with_threshold_params(
       index_dir_path,
-      DEFAULT_APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT,
-      DEFAULT_APPROX_MAX_DATA_POINT_COUNT_PER_SEGMENT,
+      DEFAULT_NUM_LOG_MESSAGES_THRESHOLD,
+      DEFAULT_NUM_DATA_POINTS_THRESHOLD,
     )
   }
 
-  /// Create a new index with specified max log messages / max data points parameters.
-  pub fn new_with_max_params(
+  /// Creates a new index at the specified directory(index_dir_path) path with customizable parameters for
+  /// threshold log messages and data points.
+  /// However, if a directory with the same path already exists and has a metadata file in it,
+  /// the function will refresh the existing index instead of creating a new one.
+  /// If the refresh process fails, an error will be thrown to indicate the issue.
+  pub fn new_with_threshold_params(
     index_dir_path: &str,
-    max_log_messages: u32,
-    max_data_points: u32,
-  ) -> Self {
+    num_log_messages_threshold: u32,
+    num_data_points_threshold: u32,
+  ) -> Result<Self, TsldbError> {
     info!("Creating index - dir {}, max log messages per segment (approx): {}, max data points per segment {}",
-          index_dir_path, max_log_messages, max_data_points);
+          index_dir_path, num_log_messages_threshold, num_data_points_threshold);
 
     if !Path::new(index_dir_path).is_dir() {
       // Directory does not exist. Create it.
       std::fs::create_dir_all(index_dir_path).unwrap();
+    } else if Path::new(&io::get_joined_path(index_dir_path, METADATA_FILE_NAME)).is_file() {
+      // index_dir_path has metadata file, refresh the index instead of creating new one
+      match Self::refresh(index_dir_path) {
+        Ok(index) => {
+          // Update metadata with max log message and data points
+          index
+            .metadata
+            .update_max_log_message_count_per_segment(num_log_messages_threshold);
+          index
+            .metadata
+            .update_max_data_point_count_per_segment(num_data_points_threshold);
+          return Ok(index);
+        }
+        Err(err) => {
+          // Received a error while refreshing index
+          return Err(err);
+        }
+      }
+    } else {
+      return Err(TsldbError::CannotFindIndexMetadataInDirectory(
+        String::from(index_dir_path),
+      ));
     }
-    // TODO: if the index_dir_path has metadata file, refresh the index instead of creating new one.
 
     // Create an initial segment.
     let segment = Segment::new();
-    let metadata = Metadata::new(0, 0, max_log_messages, max_data_points);
+    let metadata = Metadata::new(0, 0, num_log_messages_threshold, num_data_points_threshold);
 
     // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
@@ -94,7 +122,7 @@ impl Index {
     // Commit the empty index so that the index directory will be created.
     index.commit(false);
 
-    index
+    Ok(index)
   }
 
   /// Get the reference for the current segment.
@@ -290,7 +318,7 @@ impl Index {
     let all_segment_ids: Vec<u32> = serialize::read(all_segments_list_path.as_str());
     if all_segment_ids.is_empty() {
       // No all_segments_map present - so this may not be an index directory. Return an empty index.
-      return Ok(Index::new(index_dir_path));
+      return Ok(Index::new(index_dir_path).unwrap());
     }
 
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
@@ -366,9 +394,13 @@ mod tests {
     is_sync::<Index>();
 
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_empty_index"
+    );
 
-    let index = Index::new(index_dir_path);
+    let index = Index::new(&index_dir_path).unwrap();
     let segment_ref = index.get_current_segment_ref();
     let segment = segment_ref.value();
     assert_eq!(segment.get_log_message_count(), 0);
@@ -376,7 +408,7 @@ mod tests {
     assert_eq!(index.index_dir_path, index_dir_path);
 
     // Check that the index directory exists, and has expected structure.
-    let base = Path::new(index_dir_path);
+    let base = Path::new(&index_dir_path);
     assert!(base.is_dir());
     assert!(base.join(ALL_SEGMENTS_LIST_FILE_NAME).is_file());
     assert!(base
@@ -393,9 +425,13 @@ mod tests {
   #[test]
   fn test_commit_refresh() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_commit_refresh"
+    );
 
-    let expected = Index::new(index_dir_path);
+    let expected = Index::new(&index_dir_path).unwrap();
     let num_log_messages = 5;
     let message_prefix = "content#";
     let num_data_points = 5;
@@ -420,7 +456,7 @@ mod tests {
     }
 
     expected.commit(false);
-    let received = Index::refresh(index_dir_path).unwrap();
+    let received = Index::refresh(&index_dir_path).unwrap();
 
     assert_eq!(&expected.index_dir_path, &received.index_dir_path);
     assert_eq!(
@@ -445,9 +481,13 @@ mod tests {
   #[test]
   fn test_basic_search() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_basic_search"
+    );
 
-    let index = Index::new(index_dir_path);
+    let index = Index::new(&index_dir_path).unwrap();
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -479,9 +519,13 @@ mod tests {
   #[test]
   fn test_basic_time_series() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_basic_time_series"
+    );
 
-    let index = Index::new(index_dir_path);
+    let index = Index::new(&index_dir_path).unwrap();
     let num_data_points = 1000;
     let mut expected_data_points: Vec<DataPoint> = Vec::new();
 
@@ -505,12 +549,16 @@ mod tests {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
     for _ in 0..100 {
       let index_dir = TempDir::new("index_test").unwrap();
-      let index_dir_path = index_dir.path().to_str().unwrap();
+      let index_dir_path = format!(
+        "{}/{}",
+        index_dir.path().to_str().unwrap(),
+        "test_two_segments"
+      );
 
-      let index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+      let index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
-        Path::new(index_dir_path).join(original_segment_number.to_string().as_str());
+        Path::new(&index_dir_path).join(original_segment_number.to_string().as_str());
 
       let message_prefix = "message";
       let mut expected_log_messages: Vec<String> = Vec::new();
@@ -545,7 +593,7 @@ mod tests {
       // No new segment creation should happen right now as we are at exactly
       // APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT log messages.
       index.commit(false);
-      let index = Index::refresh(index_dir_path).unwrap();
+      let index = Index::refresh(&index_dir_path).unwrap();
       {
         // Write these in a separate block so that reference of current_segment from all_segments_map
         // does not persist when commit() is called (and all_segments_map is updated).
@@ -582,7 +630,7 @@ mod tests {
       // Force a commit and refresh. This will now create a second empty segment, which would now be
       // the current segment.
       index.commit(false);
-      let index = Index::refresh(index_dir_path).unwrap();
+      let index = Index::refresh(&index_dir_path).unwrap();
       let mut original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
 
       {
@@ -625,7 +673,7 @@ mod tests {
 
       // Force a commit and refresh.
       index.commit(false);
-      let index = Index::refresh(index_dir_path).unwrap();
+      let index = Index::refresh(&index_dir_path).unwrap();
       original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
 
       let current_segment_log_message_count;
@@ -662,11 +710,11 @@ mod tests {
 
       // Commit and refresh a few times. The index should not change.
       index.commit(false);
-      let index = Index::refresh(index_dir_path).unwrap();
+      let index = Index::refresh(&index_dir_path).unwrap();
       index.commit(false);
       index.commit(false);
-      Index::refresh(index_dir_path).unwrap();
-      let index_final = Index::refresh(index_dir_path).unwrap();
+      Index::refresh(&index_dir_path).unwrap();
+      let index_final = Index::refresh(&index_dir_path).unwrap();
       let index_final_current_segment_ref = index_final.get_current_segment_ref();
       let index_final_current_segment = index_final_current_segment_ref.value();
 
@@ -689,9 +737,13 @@ mod tests {
   #[test]
   fn test_multiple_segments_logs() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_multiple_segments_logs"
+    );
 
-    let mut index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+    let mut index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
     let message_prefix = "message";
     let num_segments = 3;
     let num_log_messages = num_segments
@@ -717,7 +769,7 @@ mod tests {
       }
     }
 
-    index = Index::refresh(index_dir_path).unwrap();
+    index = Index::refresh(&index_dir_path).unwrap();
     let current_segment_ref = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
@@ -748,9 +800,13 @@ mod tests {
   #[test]
   fn test_multiple_segments_data_points() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_multiple_segments_data_points"
+    );
 
-    let mut index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+    let mut index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
     let num_segments = 100;
     let num_data_points =
       num_segments * (index.metadata.get_approx_max_data_point_count_per_segment() + 1);
@@ -779,7 +835,7 @@ mod tests {
 
     let end_time = Utc::now().timestamp_millis() as u64;
 
-    index = Index::refresh(index_dir_path).unwrap();
+    index = Index::refresh(&index_dir_path).unwrap();
     let current_segment_ref = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
@@ -818,7 +874,7 @@ mod tests {
 
     // Create a path within index_dir that does not exist.
     let temp_path_buf = index_dir.path().join("-doesnotexist");
-    let index = Index::new(&temp_path_buf.to_str().unwrap());
+    let index = Index::new(&temp_path_buf.to_str().unwrap()).unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
     index.commit(false);
@@ -842,8 +898,12 @@ mod tests {
   #[test]
   fn test_overlap_one_segment() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new(index_dir_path);
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_overlap_one_segment"
+    );
+    let index = Index::new(&index_dir_path).unwrap();
     index.append_log_message(1000, "message_1");
     index.append_log_message(2000, "message_2");
 
@@ -857,8 +917,12 @@ mod tests {
   #[test]
   fn test_overlap_multiple_segments() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_max_params(index_dir_path, 1, 1);
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_overlap_multiple_segments"
+    );
+    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -897,8 +961,13 @@ mod tests {
   #[test]
   fn test_concurrent_append() {
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_max_params(index_dir_path, 1000, 2000);
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_concurrent_append"
+    );
+    let index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
+
     let arc_index = Arc::new(index);
     let num_threads = 20;
     let num_appends_per_thread = 5000;
@@ -941,7 +1010,7 @@ mod tests {
     // Commit again to cover the scenario that append threads run for more time than the commit thread,
     arc_index.commit(true);
 
-    let index = Index::refresh(index_dir_path).unwrap();
+    let index = Index::refresh(&index_dir_path).unwrap();
     let expected_len = num_threads * num_appends_per_thread;
 
     let results = index.search("message", 0, expected_len as u64);
@@ -952,5 +1021,41 @@ mod tests {
 
     assert_eq!(expected_len, received_logs_len);
     assert_eq!(expected_len, received_data_points_len);
+  }
+
+  #[test]
+  fn test_reusing_index_when_available() {
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_reusing_index_when_available"
+    );
+
+    let start_time = Utc::now().timestamp_millis();
+    // Create a new index
+    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
+    index.append_log_message(start_time as u64, "some_message_1");
+    index.commit(true);
+
+    // Create one more new index using same dir location
+    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
+    let search_result = index.search(
+      "some_message_1",
+      start_time as u64,
+      Utc::now().timestamp_millis() as u64,
+    );
+
+    assert_eq!(search_result.len(), 1);
+  }
+
+  #[test]
+  fn test_directory_without_metadata() {
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+
+    // Create a new index where directory already exist but metadata is not available
+    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1);
+    assert!(index.is_err());
   }
 }
