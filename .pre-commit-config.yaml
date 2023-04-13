@@ -16,12 +16,12 @@ repos:
       - id: validate_manifest
   - repo: local
     hooks:
-      #   - id: fmt
-      #     name: fmt
-      #     description: Format files with cargo fmt.
-      #     entry: cargo fmt --all -- --check
-      #     language: system
-      #     types: [rust]
+      - id: fmt
+        name: fmt
+        description: Format files with cargo fmt.
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
       - id: cargo-check
         name: cargo check
         description: Check the package for errors.
@@ -59,8 +59,8 @@ repos:
         types: [rust]
         pass_filenames: false
       - id: cargo-test-tsldb-loom
-        name: cargo test infino loop
-        description: Run loop cargo test
+        name: cargo test infino loom
+        description: Run loom cargo test
         entry: RUSTFLAGS="--cfg loom" cargo test --test loom --release
         language: system
         types: [rust]
