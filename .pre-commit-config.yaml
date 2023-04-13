@@ -1,0 +1,67 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: fix-byte-order-marker
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: https://github.com/pre-commit/pre-commit
+    rev: v3.2.2
+    hooks:
+      - id: validate_manifest
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: rustfmt
+        description: Check if all files follow the rustfmt style
+        entry: cargo fmt --all -- --check --color always
+        language: system
+        pass_filenames: false
+      - id: cargo-check
+        name: cargo check
+        description: Check the package for errors.
+        entry: cargo check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test-infino
+        name: cargo test infino
+        description: Run test for infino.
+        entry: cargo test
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test-tsldb
+        name: cargo test tsldb
+        description: Run test for tsldb.
+        entry: cargo test -p tsldb
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: clippy
+        name: clippy
+        description: Lint rust sources
+        entry: cargo clippy
+        language: system
+        args: ["--", "-D", "warnings"]
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test-infino-ignored
+        name: cargo test infino ignored
+        description: Run Ignored cargo test
+        entry: cargo test -- --ignored
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test-tsldb-loom
+        name: cargo test infino loom
+        description: Run loom cargo test
+        entry: RUSTFLAGS="--cfg loom" cargo test --test loom --release
+        language: system
+        types: [rust]
+        pass_filenames: false

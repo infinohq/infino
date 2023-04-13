@@ -2,48 +2,47 @@ pub(crate) mod index_manager;
 pub mod log;
 pub(crate) mod segment_manager;
 pub mod ts;
-pub(crate) mod utils;
+pub mod utils;
 
 use std::collections::HashMap;
-
-use utils::error::TsldbError;
 
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
 use crate::ts::data_point::DataPoint;
+use crate::utils::config::Settings;
+use crate::utils::error::TsldbError;
 
 /// Database for storing time series (ts) and logs (l).
 pub struct Tsldb {
   /// Index storing the time series and log data.
   index: Index,
+  settings: Settings,
 }
 
 impl Tsldb {
-  /// Create a new tsldb at the given directory path.
-  pub fn new(index_dir_path: &str) -> Result<Self, TsldbError> {
-    match Index::new(index_dir_path) {
-      Ok(index) => {
-         Ok(Tsldb { index })
-      }
-      Err(err) => {
-        Err(err)
-      }
-    }
-  }
+  /// Create a new tsldb at the directory path specified in the config.
+  pub fn new(config_dir_path: &str) -> Result<Self, TsldbError> {
+    let result = Settings::new(config_dir_path);
 
-  /// Create a new tsldb at the given directory path, with specified parameters for
-  /// the number of log messages and data points after which a new segment should be created.
-  pub fn new_with_max_params(
-    index_dir_path: &str,
-    max_log_messages: u32,
-    max_data_points: u32,
-  ) -> Result<Self, TsldbError> {
-    match Index::new_with_max_params(index_dir_path, max_log_messages, max_data_points) {
-      Ok(index) => { 
-        Ok(Tsldb {index})
+    match result {
+      Ok(settings) => {
+        let tsldb_settings = settings.get_tsldb_settings();
+        let index_dir_path = tsldb_settings.get_index_dir_path();
+        let num_log_messages_threshold = tsldb_settings.get_num_log_messages_threshold();
+        let num_data_points_threshold = tsldb_settings.get_num_data_points_threshold();
+
+        let index = Index::new_with_threshold_params(
+          index_dir_path,
+          num_log_messages_threshold,
+          num_data_points_threshold,
+        )?;
+
+        let tsldb = Tsldb { index, settings };
+        Ok(tsldb)
       }
-      Err(err) => {
-        Err(err)
+      Err(e) => {
+        let error = TsldbError::InvalidConfiguration(e.to_string());
+        Err(error)
       }
     }
   }
@@ -90,13 +89,24 @@ impl Tsldb {
   }
 
   /// Refresh the index from the given directory path.
-  pub fn refresh(index_dir_path: &str) -> Self {
+  pub fn refresh(config_dir_path: &str) -> Self {
+    // Read the settings and the index directory path.
+    let settings = Settings::new(config_dir_path).unwrap();
+    let index_dir_path = settings.get_tsldb_settings().get_index_dir_path();
+
+    // Refresh the index.
     let index = Index::refresh(index_dir_path).unwrap();
-    Tsldb { index }
+
+    Tsldb { index, settings }
   }
 
   /// Get the directory where the index is stored.
   pub fn get_index_dir(&self) -> String {
     self.index.get_index_dir()
+  }
+
+  /// Get the settings for this tsldb.
+  pub fn get_settings(&self) -> &Settings {
+    &self.settings
   }
 }

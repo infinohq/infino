@@ -13,7 +13,7 @@ pub fn start_docker_container(
     .arg("run")
     .arg("-d")
     .arg("--name")
-    .arg(format!("{}", name))
+    .arg(name)
     .args(extra_args)
     .arg(format!("{}:{}", image_name, image_tag));
 
@@ -34,7 +34,7 @@ pub fn start_docker_container(
 /// Execute given command in the container with the given name.
 pub fn exec_command(name: &str, args: &[&str]) -> Result<(), std::io::Error> {
   let mut command = Command::new("docker");
-  command.arg("exec").arg(format!("{}", name)).args(args);
+  command.arg("exec").arg(name).args(args);
 
   let output = command.output()?;
   if !output.status.success() {
@@ -51,7 +51,7 @@ pub fn exec_command(name: &str, args: &[&str]) -> Result<(), std::io::Error> {
 pub fn stop_docker_container(name: &str) -> Result<(), std::io::Error> {
   // Build the Docker run command
   let mut command = Command::new("docker");
-  command.arg("stop").arg(format!("{}", name));
+  command.arg("stop").arg(name);
 
   // Run the Docker command
   let output = command.output()?;
@@ -69,7 +69,7 @@ pub fn stop_docker_container(name: &str) -> Result<(), std::io::Error> {
 pub fn remove_docker_container(name: &str) -> Result<(), std::io::Error> {
   // Build the Docker run command
   let mut command = Command::new("docker");
-  command.arg("container").arg("rm").arg(format!("{}", name));
+  command.arg("container").arg("rm").arg(name);
 
   // Run the Docker command
   let output = command.output()?;

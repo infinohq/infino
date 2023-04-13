@@ -40,14 +40,14 @@ pub fn decompress_numeric_vector(compressed: &[u8]) -> Result<Vec<DataPoint>, Ts
   // of data_point::DataPoint directly.
   let data_points = tsz_data_points
     .into_iter()
-    .map(|tsz_dp| DataPoint::new_from_tsz_data_point(tsz_dp))
+    .map(DataPoint::new_from_tsz_data_point)
     .collect();
 
   Ok(data_points)
 }
 
 /// Compress a given DataPoint vector to a vector of u8 integers, using delta-of-delta compression.
-pub fn compress_data_point_vector(data_points: &Vec<DataPoint>) -> Vec<u8> {
+pub fn compress_data_point_vector(data_points: &[DataPoint]) -> Vec<u8> {
   let start_data_point = data_points.get(0).unwrap();
   let start_time = start_data_point.get_time();
 
@@ -55,7 +55,7 @@ pub fn compress_data_point_vector(data_points: &Vec<DataPoint>) -> Vec<u8> {
   // tsldb's public API. In future, to improve performance, we may implement the compression/decompression
   // of data_point::DataPoint directly.
   let tsz_data_points: Vec<tsz::DataPoint> = data_points
-    .into_iter()
+    .iter()
     .map(|dp| dp.get_tsz_data_point())
     .collect();
 
