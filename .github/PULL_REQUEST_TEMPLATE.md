@@ -22,5 +22,5 @@ Happy contributing!
 ## Checklist
 
 - [ ]  I have written the necessary rustdoc comments.
-- [ ]  I have added the necessary unit tests and integration tests.
+- [ ]  I have added the necessary unit tests and integration tests. (for non-documentation changes)
 
