@@ -4,6 +4,7 @@ num_log_messages_threshold = 100000
 num_data_points_threshold = 100000
 
 [server]
+port = 3000
 commit_interval_in_seconds = 30
 
 [rabbitmq]

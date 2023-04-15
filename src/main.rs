@@ -64,7 +64,7 @@ async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
   }
 }
 
-async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> Router {
+async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Router, Settings) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -91,13 +91,15 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> Router
   ));
 
   // Build our application with a route
-  Router::new()
+  let router = Router::new()
     .route("/append_log", post(append_log))
     .route("/append_ts", post(append_ts))
     .route("/search_log", get(search_log))
     .route("/search_ts", get(search_ts))
     .route("/get_index_dir", get(get_index_dir))
-    .with_state(shared_state)
+    .with_state(shared_state);
+
+  (router, settings)
 }
 
 #[tokio::main]
@@ -107,10 +109,11 @@ async fn main() {
   let image_tag = "3";
 
   // Create app.
-  let app = app(config_dir_path, image_name, image_tag).await;
+  let (app, settings) = app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
-  let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+  let port = settings.get_server_settings().get_port();
+  let addr = SocketAddr::from(([127, 0, 0, 1], port));
   println!("listening on {}", addr);
   axum::Server::bind(&addr)
     .serve(app.into_make_service())
@@ -224,7 +227,7 @@ mod tests {
     create_test_config(config_dir_path, index_dir_path, container_name);
 
     println!("Config dir path {}", config_dir_path);
-    let mut app = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // **Part 1**: Test insertion and search of log messages
     let num_log_messages = 100;

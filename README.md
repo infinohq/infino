@@ -3,7 +3,9 @@
 ## Getting started
 
 * Install docker
-* Run main.rs
+* Install pre-commit by running `brew install pre-commit`
+* Run `pre-commit install`
+* Run `cargo run`
 
 ## Development
 
