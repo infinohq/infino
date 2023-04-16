@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{extract::State, routing::get, routing::post, Json, Router};
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
 
@@ -104,6 +105,11 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Route
 
 #[tokio::main]
 async fn main() {
+  // Initialize logger from env. If no log level specified, default to info.
+  env_logger::init_from_env(
+    env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+  );
+
   let config_dir_path = "config";
   let image_name = "rabbitmq";
   let image_tag = "3";
@@ -121,12 +127,13 @@ async fn main() {
     .unwrap();
 }
 
-async fn append_log(State(state): State<Arc<AppState>>, Json(log_message): Json<LogMessage>) {
-  let log_message_string = serde_json::to_string(&log_message).unwrap();
-  state.queue.publish(&log_message_string).await.unwrap();
-  state
-    .tsldb
-    .append_log_message(log_message.get_time(), log_message.get_message());
+async fn append_log(State(state): State<Arc<AppState>>, Json(obj): Json<serde_json::Value>) {
+  info!("In append_log {}", obj);
+  //let log_message_string = serde_json::to_string(&log_message).unwrap();
+  //state.queue.publish(&log_message_string).await.unwrap();
+  //state
+  //  .tsldb
+  //  .append_log_message(log_message.get_time(), log_message.get_message());
 }
 
 async fn append_ts(
