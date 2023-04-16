@@ -1,17 +1,19 @@
-# Benchmark - Elasticsearch and Prometheus Comparison with Infino
+# Benchmark - Elasticsearch and Tantivy Comparison with Infino
 
 ## Setup
 
 ### Elasticsearch
-* Install elasticsearch:
-  * `$ wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.6.0-linux-x86_64.tar.gz`
-  * `$ tar xvfz elasticsearch-8.6.0-linux-x86_64.tar.gz`
-* Set `xpack.security.enabled` to `false` in `config/elasticsearch.yml`.
-* Start elasticsearch:
-  * `$ bin/elasticsearch`
+
+- Install elasticsearch:
+  - `$ wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.6.0-linux-x86_64.tar.gz`
+  - `$ tar xvfz elasticsearch-8.6.0-linux-x86_64.tar.gz`
+- Set `xpack.security.enabled` to `false` in `config/elasticsearch.yml`.
+- Start elasticsearch:
+  - `$ bin/elasticsearch`
 
 ### Infino
-* To run benchmark, cd into benches `cd benches` and run `cargo run`
+
+- To run benchmark, cd into benches `cd benches` and run `cargo run`
 
 ## Results
 
@@ -22,7 +24,9 @@ Elasticsearch index size in the following statement: [{"health":"green","status"
 ```
 
 ### Infino - Jan 2023 - no compression of inverted map, no support for blocks in postings list
+
 Details of the infino index folder with size per serialized file:
+
 ```
 Output of ls on infino index directory Output { status: ExitStatus(unix_wait_status(0)), stdout: "total 1.1M\n292K forward_map.bin\n584K inverted_map.bin\n4.0K metadata.bin\n164K terms.bin\n", stderr: "" }
 
@@ -30,7 +34,9 @@ Infino index size = 1059984 bytes
 ```
 
 ### Infino - Feb 5, 2023 - no compression of inverted map, block support in postings list
+
 Posting list has support for blocks, but they are not yet compressed. Note that inverted index size increased from 584K to 604K.
+
 ```
 Output of ls on infino index directory Output { status: ExitStatus(unix_wait_status(0)), stdout: "total 1.1M\n292K forward_map.bin\n604K inverted_map.bin\n4.0K metadata.bin\n164K terms.bin\n", stderr: "" }
 
@@ -38,8 +44,10 @@ Infino index size = 1080120 bytes
 ```
 
 ### Infino - Feb 6, 2023 - inverted map compressed
+
 Posting list has support for blocks, and it is compressed. Note that inverted index size reduced from 604K to 568K. Likely the savings
 will be higher for larger datasets with more keyword repetitions.
+
 ```
 Output of ls on infino index directory Output { status: ExitStatus(unix_wait_status(0)), stdout: "total 1.1M\n292K forward_map.bin\n568K inverted_map.bin\n4.0K metadata.bin\n164K terms.bin\n", stderr: "" }
 
@@ -47,17 +55,20 @@ Infino index size = 1040242 bytes
 ```
 
 ### Infino - Feb 20, 2023 - many changes (esp using DashMap instead of HashMap)
+
 Forward map size has increased quite a bit. Slight increase in terms as well. Inverted index increase is expected as last postings block is stored uncompressed.
+
 ```
 Output of ls on infino index directory Output { status: ExitStatus(unix_wait_status(0)), stdout: "/tmp/infino-index-e1a892d1-db14-4f69-b06e-dcee82724777:\ntotal 12K\n4.0K 0\n4.0K all_segments_list.bin\n4.0K metadata.bin\n\n/tmp/infino-index-e1a892d1-db14-4f69-b06e-dcee82724777/0:\ntotal 1.8M\n928K forward_map.bin\n660K inverted_map.bin\n4.0K metadata.bin\n4.0K tags.bin\n188K terms.bin\n4.0K time_series.bin\n", stderr: "" }
 Infino index size = 1813081 bytes
 ```
 
 ### Infino - Apr 2, 2023
+
 Comparision with Tantivy index
 
-
 Infino
+
 ```
 Output of ls on infino index directory Output { status: ExitStatus(unix_wait_status(0)), stdout: "total 16\n0 0\n8 all_segments_list.bin\n8 metadata.bin\n\n/tmp/infino-index-b87bd31b-e12b-45a7-9b82-79c4e1445cae/0
 :\ntotal 3560\n1760 forward_map.bin\n1360 inverted_map.bin\n   8 labels.bin\n   8 metadata.bin\n 416 terms.bin\n   8 time_series.bin\n", stderr: "" }
@@ -67,6 +78,7 @@ Infino time required for insertion: 2.44s
 ```
 
 Tantivy without STORED flag
+
 ```
 Output of ls on tantivy index directory Output { status: ExitStatus(unix_wait_status(0)), stdout: "total 4768\n  8 40771ae9a0004963a292cfb657366ce8.fast\n 16 40771ae9a0004963a292cfb657366ce8.fieldnorm\n256 40771a
 e9a0004963a292cfb657366ce8.idx\n128 40771ae9a0004963a292cfb657366ce8.pos\n 48 40771ae9a0004963a292cfb657366ce8.store\n 32 40771ae9a0004963a292cfb657366ce8.term\n  8 56ed5e64d71a4b86b28d8863f6b6747f.fast\n 16 56ed
@@ -85,6 +97,7 @@ Tantivy time required for insertion: 2.26s
 ```
 
 Tantivy with STORED flag
+
 ```
 Output of ls on tantivy index directory Output { status: ExitStatus(unix_wait_status(0)), stdout: "total 7120\n  8 0d79fe4d210046d89b00db58167b11f7.fast\n 16 0d79fe4d210046d89b00db58167b11f7.fieldnorm\n328 0d79fe
 4d210046d89b00db58167b11f7.idx\n160 0d79fe4d210046d89b00db58167b11f7.pos\n392 0d79fe4d210046d89b00db58167b11f7.store\n 32 0d79fe4d210046d89b00db58167b11f7.term\n  8 199c7e3bd80b471187f10b0de106d129.fast\n 16 199c
@@ -104,8 +117,8 @@ Tantivy time required for insertion: 2.03s
 
 ### Infino - Apr 16, 2023 - Search benchmark with Tantivy
 
-
 Infino
+
 ```
 Infino time required for insertion: 2.48s
 Infino index size = 1832848 bytes
@@ -114,6 +127,7 @@ Number of documents with term Directory are 6837
 ```
 
 Tantivy
+
 ```
 Tantivy time required for insertion: 2.25s
 Tantivy index size with STORED flag = 3207319 bytes
