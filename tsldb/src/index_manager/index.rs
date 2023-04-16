@@ -134,10 +134,10 @@ impl Index {
   }
 
   /// Append a log message to this index.
-  pub fn append_log_message(&self, time: u64, message: &str) {
+  pub fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, message: &str) {
     debug!(
-      "Appending log message, time: {}, message: {}",
-      time, message
+      "Appending log message, time: {}, fields: {:?}, message: {}",
+      time, fields, message
     );
 
     // Get the current segment.
@@ -145,7 +145,9 @@ impl Index {
     let current_segment = current_segment_ref.value();
 
     // Append the log message to the current segment.
-    current_segment.append_log_message(time, message).unwrap();
+    current_segment
+      .append_log_message(time, fields, message)
+      .unwrap();
   }
 
   /// Append a data point to this index.
@@ -438,7 +440,11 @@ mod tests {
 
     for i in 1..=num_log_messages {
       let message = format!("{}{}", message_prefix, i);
-      expected.append_log_message(Utc::now().timestamp_millis() as u64, &message);
+      expected.append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        &message,
+      );
     }
 
     let metric_name = "request_count";
@@ -494,11 +500,19 @@ mod tests {
 
     for i in 1..num_log_messages {
       let message = format!("{} {}", message_prefix, i);
-      index.append_log_message(Utc::now().timestamp_millis() as u64, &message);
+      index.append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        &message,
+      );
       expected_log_messages.push(message);
     }
     // Now add a unique log message.
-    index.append_log_message(Utc::now().timestamp_millis() as u64, "thisisunique");
+    index.append_log_message(
+      Utc::now().timestamp_millis() as u64,
+      &HashMap::new(),
+      "thisisunique",
+    );
 
     // For the query "message", we should expect num_log_messages-1 results.
     // We collect each message in received_log_messages and then compare it with expected_log_messages.
@@ -506,14 +520,14 @@ mod tests {
     assert_eq!(results.len(), num_log_messages - 1);
     let mut received_log_messages: Vec<String> = Vec::new();
     for i in 1..num_log_messages {
-      received_log_messages.push(results.get(i - 1).unwrap().get_message().to_owned());
+      received_log_messages.push(results.get(i - 1).unwrap().get_text().to_owned());
     }
     assert_eq!(expected_log_messages.sort(), received_log_messages.sort());
 
     // For the query "thisisunique", we should expect only 1 result.
     results = index.search("thisisunique", 0, u64::MAX);
     assert_eq!(results.len(), 1);
-    assert_eq!(results.get(0).unwrap().get_message(), "thisisunique");
+    assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
   }
 
   #[test]
@@ -579,7 +593,11 @@ mod tests {
 
       for i in 0..original_segment_num_log_messages {
         let message = format!("{} {}", message_prefix, i);
-        index.append_log_message(Utc::now().timestamp_millis() as u64, &message);
+        index.append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        );
         expected_log_messages.push(message);
       }
 
@@ -614,7 +632,11 @@ mod tests {
 
       // Now add a log message and/or a data point. This will still land in the one and only segment in the index.
       if append_log {
-        index.append_log_message(Utc::now().timestamp_millis() as u64, "some_message_1");
+        index.append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          "some_message_1",
+        );
         original_segment_num_log_messages += 1;
       }
       if append_data_point {
@@ -658,7 +680,11 @@ mod tests {
 
       // Add one more log message and/or a data point. This will land in the empty current_segment.
       if append_log {
-        index.append_log_message(Utc::now().timestamp_millis() as u64, "some_message_2");
+        index.append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          "some_message_2",
+        );
         new_segment_num_log_messages += 1;
       }
       if append_data_point {
@@ -755,7 +781,11 @@ mod tests {
     let mut num_log_messages_from_last_commit = 0;
     for i in 1..=num_log_messages {
       let message = format!("{} {}", message_prefix, i);
-      index.append_log_message(Utc::now().timestamp_millis() as u64, &message);
+      index.append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        &message,
+      );
 
       // Commit immediately after we have indexed more than APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT messages.
       num_log_messages_from_last_commit += 1;
@@ -904,8 +934,8 @@ mod tests {
       "test_overlap_one_segment"
     );
     let index = Index::new(&index_dir_path).unwrap();
-    index.append_log_message(1000, "message_1");
-    index.append_log_message(2000, "message_2");
+    index.append_log_message(1000, &HashMap::new(), "message_1");
+    index.append_log_message(2000, &HashMap::new(), "message_2");
 
     assert_eq!(index.get_overlapping_segments(500, 1500).len(), 1);
     assert_eq!(index.get_overlapping_segments(1500, 2500).len(), 1);
@@ -931,8 +961,8 @@ mod tests {
 
     for i in 0..num_segments {
       let start = i * 2 * 1000;
-      index.append_log_message(start, "message_1");
-      index.append_log_message(start + 1000, "message_2");
+      index.append_log_message(start, &HashMap::new(), "message_1");
+      index.append_log_message(start + 1000, &HashMap::new(), "message_2");
       index.commit(false);
     }
 
@@ -996,7 +1026,7 @@ mod tests {
       let handle = thread::spawn(move || {
         for j in 0..num_appends_per_thread {
           let time = start + j;
-          arc_index_clone.append_log_message(time as u64, "message");
+          arc_index_clone.append_log_message(time as u64, &HashMap::new(), "message");
           arc_index_clone.append_data_point("some_name", &label_map, time as u64, 1.0);
         }
       });
@@ -1035,7 +1065,7 @@ mod tests {
     let start_time = Utc::now().timestamp_millis();
     // Create a new index
     let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
-    index.append_log_message(start_time as u64, "some_message_1");
+    index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
     index.commit(true);
 
     // Create one more new index using same dir location
