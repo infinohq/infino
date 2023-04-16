@@ -2,6 +2,7 @@
 members = [
     "tsldb",
 ]
+exclude = ["benches"]
 
 [package]
 name = "infino"

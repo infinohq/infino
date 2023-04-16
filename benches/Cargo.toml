@@ -1,0 +1,20 @@
+[package]
+name = "benches"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "*"
+elasticsearch = "8.5.0-alpha.1"
+fs_extra = "1.2.0"
+serde = "~1"
+serde_json = "~1"
+tokio = { version = "*", features = ["full"] }
+url = "2.3.1"
+uuid = "1.2.2"
+tantivy = "0.19.2"
+tempfile = "*"
+tempdir = "*"
+
+[dependencies.tsldb]
+path = "../tsldb"

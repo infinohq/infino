@@ -13,3 +13,6 @@ Cargo.lock
 
 # the index created by tsldb if default config is used
 index
+
+benches/target
+benches/index
