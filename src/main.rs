@@ -6,7 +6,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{extract::State, routing::get, routing::post, Json, Router};
-use log::{debug, info};
+use hyper::StatusCode;
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
 
@@ -22,7 +23,12 @@ async fn create_queue(container_name: &str, image_name: &str, image_tag: &str) -
   // TODO: make usage of existing queue possible rather than starting every time.
   let _ = RabbitMQ::stop_queue_container(container_name);
 
+  info!(
+    "Starting rabbitmq container {} with image {}:{}",
+    container_name, image_name, image_tag
+  );
   let start_result = RabbitMQ::start_queue_container(container_name, image_name, image_tag).await;
+  info!("Start result: {:?}", start_result);
   assert!(start_result.is_ok());
   // The container is not immediately ready to accept connections - hence sleep for some time.
   sleep(Duration::from_millis(5000)).await;
@@ -32,6 +38,7 @@ async fn create_queue(container_name: &str, image_name: &str, image_tag: &str) -
 struct AppState {
   queue: RabbitMQ,
   tsldb: Tsldb,
+  settings: Settings,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -65,7 +72,7 @@ async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
   }
 }
 
-async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Router, Settings) {
+async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Router, u16) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -76,16 +83,21 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Route
   };
 
   // Create RabbitMQ to store incoming requests.
-  let container_name = settings.get_rabbitmq_settings().get_container_name();
+  let container_name = &settings.get_rabbitmq_settings().get_container_name();
   let queue = create_queue(container_name, image_name, image_tag).await;
 
-  let shared_state = Arc::new(AppState { queue, tsldb });
+  let shared_state = Arc::new(AppState {
+    queue,
+    tsldb,
+    settings,
+  });
+
+  let server_settings = shared_state.settings.get_server_settings();
+  let commit_interval_in_seconds = server_settings.get_commit_interval_in_seconds();
+  let port = server_settings.get_port();
 
   // Start a thread to periodically commit tsldb.
   println!("Spawning new thread to periodically commit");
-  let commit_interval_in_seconds = settings
-    .get_server_settings()
-    .get_commit_interval_in_seconds();
   tokio::spawn(commit_in_loop(
     shared_state.clone(),
     commit_interval_in_seconds,
@@ -100,7 +112,7 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Route
     .route("/get_index_dir", get(get_index_dir))
     .with_state(shared_state);
 
-  (router, settings)
+  (router, port)
 }
 
 #[tokio::main]
@@ -115,36 +127,87 @@ async fn main() {
   let image_tag = "3";
 
   // Create app.
-  let (app, settings) = app(config_dir_path, image_name, image_tag).await;
+  let (app, port) = app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
-  let port = settings.get_server_settings().get_port();
   let addr = SocketAddr::from(([127, 0, 0, 1], port));
-  println!("listening on {}", addr);
+
+  info!("Infino server listening on {}", addr);
   axum::Server::bind(&addr)
     .serve(app.into_make_service())
     .await
     .unwrap();
 }
 
-async fn append_log(State(state): State<Arc<AppState>>, Json(log_json): Json<serde_json::Value>) {
-  debug!("In append_log {}", log_json);
+async fn append_log(
+  State(state): State<Arc<AppState>>,
+  Json(log_json): Json<serde_json::Value>,
+) -> Result<(), (StatusCode, String)> {
+  debug!("Appending log entry {}", log_json);
 
   let mut log_json_objects = Vec::new();
   if log_json.is_object() {
-    log_json_objects.push(log_json);
+    log_json_objects.push(log_json.as_object().unwrap());
   } else if log_json.is_array() {
-    log_json_objects = log_json.as_array().unwrap().to_vec();
+    log_json_objects = log_json
+      .as_array()
+      .unwrap()
+      .iter()
+      .filter_map(|value| value.as_object())
+      .collect();
+  } else {
+    let msg = format!("Invalid log entry {}", log_json);
+    error!("{}", msg);
+    return Err((StatusCode::BAD_REQUEST, msg));
   }
 
+  let server_settings = state.settings.get_server_settings();
+  let timestamp_key = server_settings.get_timestamp_key();
+
   for obj in log_json_objects {
-    info!("{:?}", obj);
+    let obj_string = serde_json::to_string(&obj).unwrap();
+    state.queue.publish(&obj_string).await.unwrap();
+
+    let result = obj.get(timestamp_key);
+    let timestamp: u64;
+    match result {
+      Some(v) => {
+        if v.is_f64() {
+          timestamp = v.as_f64().unwrap() as u64;
+        } else if v.is_u64() {
+          timestamp = v.as_u64().unwrap();
+        } else {
+          let msg = format!("Invalid timestamp {}, ignoring log message {:?}", v, obj);
+          error!("{}", msg);
+          continue;
+        }
+      }
+      None => {
+        error!("Could not find timestamp in log message {:?}", obj);
+        continue;
+      }
+    }
+
+    let mut fields: HashMap<String, String> = HashMap::new();
+    let mut text = String::new();
+    let count = obj.len();
+    for (i, (key, value)) in obj.iter().enumerate() {
+      if key != timestamp_key && value.is_string() {
+        let value_str = value.as_str().unwrap();
+        fields.insert(key.to_owned(), value_str.to_owned());
+        text.push_str(value_str);
+
+        if i != count - 1 {
+          // Seperate different field entries in text by space, so that they can be tokenized.
+          text.push(' ');
+        }
+      }
+    }
+
+    state.tsldb.append_log_message(timestamp, &fields, &text);
   }
-  //let log_message_string = serde_json::to_string(&log_message).unwrap();
-  //state.queue.publish(&log_message_string).await.unwrap();
-  //state
-  //  .tsldb
-  //  .append_log_message(log_message.get_time(), log_message.get_message());
+
+  Ok(())
 }
 
 async fn append_ts(
@@ -203,6 +266,7 @@ mod tests {
     http::{self, Request, StatusCode},
   };
   use chrono::Utc;
+  use serde_json::json;
   use serial_test::serial;
   use tempdir::TempDir;
   use tower::Service;
@@ -210,6 +274,15 @@ mod tests {
 
   use super::*;
 
+  /// Helper function initialize logger for tests.
+  fn init() {
+    let _ = env_logger::builder()
+      .is_test(true)
+      .filter_level(log::LevelFilter::Info)
+      .try_init();
+  }
+
+  /// Helper function to create a test configuration.
   fn create_test_config(config_dir_path: &str, index_dir_path: &str, container_name: &str) {
     // Create a test config in the directory config_dir_path.
     let config_file_path =
@@ -227,6 +300,8 @@ mod tests {
         .write_all(b"num_data_points_threshold = 10000\n")
         .unwrap();
       file.write_all(b"[server]\n").unwrap();
+      file.write_all(b"port = 3000\n").unwrap();
+      file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"[rabbitmq]\n").unwrap();
       file.write_all(container_name_line.as_bytes()).unwrap();
@@ -237,25 +312,33 @@ mod tests {
   #[serial]
   #[tokio::test]
   async fn test_basic() {
+    init();
+
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test";
     create_test_config(config_dir_path, index_dir_path, container_name);
-
     println!("Config dir path {}", config_dir_path);
+
+    // Stop any container from a prior test - useful in case of test failures if the container is
+    // left around without terminating it.
+    let _ = RabbitMQ::stop_queue_container(container_name);
+
+    // Create the app.
     let (mut app, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // **Part 1**: Test insertion and search of log messages
     let num_log_messages = 100;
     let mut log_messages_expected = Vec::new();
-    let search_query = "message";
-    for i in 0..num_log_messages {
-      let log_message = LogMessage::new(
-        Utc::now().timestamp_millis() as u64,
-        &format!("this is my log message #{}", i),
-      );
+    for _ in 0..num_log_messages {
+      let time = Utc::now().timestamp_millis() as u64;
+
+      let mut log = HashMap::new();
+      log.insert("date", json!(time));
+      log.insert("field12", json!("value1 value2"));
+      log.insert("field34", json!("value3 value4"));
 
       let response = app
         .call(
@@ -263,15 +346,23 @@ mod tests {
             .method(http::Method::POST)
             .uri("/append_log")
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-            .body(Body::from(serde_json::to_string(&log_message).unwrap()))
+            .body(Body::from(serde_json::to_string(&log).unwrap()))
             .unwrap(),
         )
         .await
         .unwrap();
       assert_eq!(response.status(), StatusCode::OK);
-      log_messages_expected.push(log_message);
+
+      // Create the expected LogMessage.
+      let mut fields = HashMap::new();
+      fields.insert("field12".to_owned(), "value1 value2".to_owned());
+      fields.insert("field34".to_owned(), "value3 value4".to_owned());
+      let text = "value1 value2 value3 value4";
+      let log_message_expected = LogMessage::new_with_fields_and_text(time, &fields, text);
+      log_messages_expected.push(log_message_expected);
     } // end for
 
+    let search_query = "value1 field34:value4";
     let query = SearchQuery {
       start_time: 0,
       end_time: u64::MAX,
@@ -375,6 +466,7 @@ mod tests {
     assert_eq!(data_points_received.len(), num_data_points);
     assert_eq!(data_points_expected, data_points_received);
 
+    // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
   }
 }

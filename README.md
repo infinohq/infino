@@ -5,6 +5,7 @@
 * Install docker
 * Install pre-commit by running `brew install pre-commit`
 * Run `pre-commit install`
+* Run prec-commit before checking-in `pre-commit run --all-files`
 * Run `cargo run`
 
 ## Development

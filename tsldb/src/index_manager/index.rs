@@ -3,7 +3,7 @@ use std::path::Path;
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
-use log::{debug, info};
+use log::{debug, error, info};
 
 use crate::index_manager::metadata::Metadata;
 use crate::log::log_message::LogMessage;
@@ -65,19 +65,20 @@ impl Index {
   /// the function will refresh the existing index instead of creating a new one.
   /// If the refresh process fails, an error will be thrown to indicate the issue.
   pub fn new_with_threshold_params(
-    index_dir_path: &str,
+    index_dir: &str,
     num_log_messages_threshold: u32,
     num_data_points_threshold: u32,
   ) -> Result<Self, TsldbError> {
     info!("Creating index - dir {}, max log messages per segment (approx): {}, max data points per segment {}",
-          index_dir_path, num_log_messages_threshold, num_data_points_threshold);
+          index_dir, num_log_messages_threshold, num_data_points_threshold);
 
-    if !Path::new(index_dir_path).is_dir() {
+    let index_dir_path = Path::new(index_dir);
+    if !index_dir_path.is_dir() {
       // Directory does not exist. Create it.
       std::fs::create_dir_all(index_dir_path).unwrap();
-    } else if Path::new(&io::get_joined_path(index_dir_path, METADATA_FILE_NAME)).is_file() {
+    } else if Path::new(&io::get_joined_path(index_dir, METADATA_FILE_NAME)).is_file() {
       // index_dir_path has metadata file, refresh the index instead of creating new one
-      match Self::refresh(index_dir_path) {
+      match Self::refresh(index_dir) {
         Ok(index) => {
           // Update metadata with max log message and data points
           index
@@ -94,9 +95,19 @@ impl Index {
         }
       }
     } else {
-      return Err(TsldbError::CannotFindIndexMetadataInDirectory(
-        String::from(index_dir_path),
-      ));
+      // Check if a directory is empty. We need to skip "." and "..".
+      // https://stackoverflow.com/questions/56744383/how-would-i-check-if-a-directory-is-empty-in-rust
+      let is_empty = index_dir_path.read_dir().unwrap().next().is_none();
+
+      if !is_empty {
+        error!(
+          "The directory {} is not empty. Cannot create index in this directory.",
+          index_dir
+        );
+        return Err(TsldbError::CannotFindIndexMetadataInDirectory(
+          String::from(index_dir),
+        ));
+      }
     }
 
     // Create an initial segment.
@@ -115,7 +126,7 @@ impl Index {
     let index = Index {
       metadata,
       all_segments_map,
-      index_dir_path: index_dir_path.to_owned(),
+      index_dir_path: index_dir.to_owned(),
       index_dir_lock,
     };
 
@@ -381,6 +392,7 @@ impl Index {
 
 #[cfg(test)]
 mod tests {
+  use std::fs::File;
   use std::path::Path;
   use std::time::Duration;
 
@@ -1081,10 +1093,17 @@ mod tests {
 
   #[test]
   fn test_directory_without_metadata() {
+    // Create a new index in an empty directory - this should work.
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1);
+    assert!(index.is_ok());
 
-    // Create a new index where directory already exist but metadata is not available
+    // Create a new index in an non-empty directory that does not have metadata - this should give an error.
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let file_path = index_dir.path().join("my_file.txt");
+    let _ = File::create(&file_path).unwrap();
     let index = Index::new_with_threshold_params(&index_dir_path, 1, 1);
     assert!(index.is_err());
   }

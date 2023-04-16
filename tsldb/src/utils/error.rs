@@ -15,6 +15,9 @@ pub enum TsldbError {
   #[error("Cannot find index metadata in directory {0}.")]
   CannotFindIndexMetadataInDirectory(String),
 
+  #[error("The directory {0} is not an index directory.")]
+  NotAnIndexDirectory(String),
+
   #[error("Time series block is empty - cannot be compressed.")]
   EmptyTimeSeriesBlock(),
 

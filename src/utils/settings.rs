@@ -9,6 +9,7 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 pub struct ServerSettings {
   commit_interval_in_seconds: u32,
   port: u16,
+  timestamp_key: String,
 }
 
 impl ServerSettings {
@@ -20,6 +21,11 @@ impl ServerSettings {
   /// Get the port.
   pub fn get_port(&self) -> u16 {
     self.port
+  }
+
+  /// Get the key for timestamp in json.
+  pub fn get_timestamp_key(&self) -> &str {
+    &self.timestamp_key
   }
 }
 
@@ -91,10 +97,13 @@ mod tests {
     let config_dir_path = "config";
     let settings = Settings::new(&config_dir_path).unwrap();
 
+    // Check server settings.
     let server_settings = settings.get_server_settings();
     assert_eq!(server_settings.get_commit_interval_in_seconds(), 30);
     assert_eq!(server_settings.get_port(), 3000);
+    assert_eq!(server_settings.get_timestamp_key(), "date");
 
+    // Check rabbitmq settings.
     let rabbitmq_settings = settings.get_rabbitmq_settings();
     assert_eq!(rabbitmq_settings.get_container_name(), "infino-queue");
   }

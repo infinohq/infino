@@ -350,7 +350,11 @@ impl Segment {
       let log_message = retval.value();
       let time = log_message.get_time();
       if time >= range_start_time && time <= range_end_time {
-        log_messages.push(LogMessage::new(time, log_message.get_text()));
+        log_messages.push(LogMessage::new_with_fields_and_text(
+          time,
+          log_message.get_fields(),
+          log_message.get_text(),
+        ));
       }
     }
 
