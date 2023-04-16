@@ -127,8 +127,19 @@ async fn main() {
     .unwrap();
 }
 
-async fn append_log(State(state): State<Arc<AppState>>, Json(obj): Json<serde_json::Value>) {
-  info!("In append_log {}", obj);
+async fn append_log(State(state): State<Arc<AppState>>, Json(log_json): Json<serde_json::Value>) {
+  debug!("In append_log {}", log_json);
+
+  let mut log_json_objects = Vec::new();
+  if log_json.is_object() {
+    log_json_objects.push(log_json);
+  } else if log_json.is_array() {
+    log_json_objects = log_json.as_array().unwrap().to_vec();
+  }
+
+  for obj in log_json_objects {
+    info!("{:?}", obj);
+  }
   //let log_message_string = serde_json::to_string(&log_message).unwrap();
   //state.queue.publish(&log_message_string).await.unwrap();
   //state
