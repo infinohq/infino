@@ -50,10 +50,10 @@ impl Tantivy {
           let mut doc = Document::default();
           doc.add_text(message_field, message);
 
-          index_writer.add_document(doc);
+          index_writer.add_document(doc).unwrap();
         }
       }
-      index_writer.commit();
+      index_writer.commit().unwrap();
     }
     let elapsed = now.elapsed();
     println!("Tantivy time required for insertion: {:.2?}", elapsed);

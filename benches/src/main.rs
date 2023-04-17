@@ -9,8 +9,6 @@ use uuid::Uuid;
 mod engine;
 mod utils;
 
-const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Path to the input data to index from. Points to a log file - where each line is indexed

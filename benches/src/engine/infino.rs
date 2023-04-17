@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
 use chrono::Utc;
@@ -40,9 +41,11 @@ impl InfinoEngine {
           break;
         }
         if let Ok(message) = line {
-          self
-            .tsldb
-            .append_log_message(Utc::now().timestamp_millis() as u64, message.as_str());
+          self.tsldb.append_log_message(
+            Utc::now().timestamp_millis() as u64,
+            &HashMap::new(),
+            message.as_str(),
+          );
         }
       }
 
