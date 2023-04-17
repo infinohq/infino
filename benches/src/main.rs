@@ -3,8 +3,7 @@ use crate::engine::infino::InfinoEngine;
 use crate::engine::tantivy::Tantivy;
 use crate::utils::io::get_directory_size;
 
-use std::fs::{self, create_dir};
-use tempdir::TempDir;
+use std::fs::create_dir;
 use uuid::Uuid;
 
 mod engine;
