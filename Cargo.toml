@@ -13,7 +13,6 @@ edition = "2021"
 axum = { version = "0.6.11" }
 chrono = "0.4.24"
 config = "0.13.1"
-crossbeam = "0.8.2"     # Only used by examples/sample*.rs
 env_logger = "0.10"
 hyper = { version = "0.14", features = ["full"] }
 lapin = "2.1.1"
