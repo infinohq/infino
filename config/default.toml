@@ -10,3 +10,5 @@ timestamp_key = "date"
 
 [rabbitmq]
 container_name = "infino-queue"
+stream_port = 5552
+listen_port = 5672

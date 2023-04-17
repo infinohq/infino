@@ -51,13 +51,6 @@ repos:
         args: ["--", "-D", "warnings"]
         types: [rust]
         pass_filenames: false
-      - id: cargo-test-infino-ignored
-        name: cargo test infino ignored
-        description: Run Ignored cargo test
-        entry: cargo test -- --ignored
-        language: system
-        types: [rust]
-        pass_filenames: false
 # Commenting out until we figure out how to pass env vars in 'entry'.
 #      - id: cargo-test-tsldb-loom
 #        name: cargo test infino loom

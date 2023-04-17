@@ -33,12 +33,24 @@ impl ServerSettings {
 /// Settings for rabbitmq queue.
 pub struct RabbitMQSettings {
   container_name: String,
+  listen_port: u16,
+  stream_port: u16,
 }
 
 impl RabbitMQSettings {
   /// Get comtainer name for rabbitmq docker container.
   pub fn get_container_name(&self) -> &str {
     &self.container_name
+  }
+
+  /// Get listen port for the queue.
+  pub fn get_listen_port(&self) -> u16 {
+    self.listen_port
+  }
+
+  /// Get stream port for the queue.
+  pub fn get_stream_port(&self) -> u16 {
+    self.stream_port
   }
 }
 
@@ -106,5 +118,7 @@ mod tests {
     // Check rabbitmq settings.
     let rabbitmq_settings = settings.get_rabbitmq_settings();
     assert_eq!(rabbitmq_settings.get_container_name(), "infino-queue");
+    assert_eq!(rabbitmq_settings.get_listen_port(), 5672);
+    assert_eq!(rabbitmq_settings.get_stream_port(), 5552);
   }
 }

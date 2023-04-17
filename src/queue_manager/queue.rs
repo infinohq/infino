@@ -15,21 +15,30 @@ pub struct RabbitMQ {
   container_name: String,
   image_name: String,
   image_tag: String,
+  listen_port: u16,
+  stream_port: u16,
   channel: Channel,
   environment: Environment,
 }
 
 impl RabbitMQ {
   /// Create a new queue instance.
-  pub async fn new(container_name: &str, image_name: &str, image_tag: &str) -> Self {
+  pub async fn new(
+    container_name: &str,
+    image_name: &str,
+    image_tag: &str,
+    listen_port: u16,
+    stream_port: u16,
+  ) -> Self {
+    let connection_string = &format!("amqp://guest:guest@localhost:{}", listen_port);
     let channel =
-      Self::create_rmq_connection("amqp://guest:guest@localhost:5672", "connection_name").await;
+      Self::create_rmq_connection(connection_string, "infino_rabbitmq_connection").await;
     Self::create_stream(&channel).await;
     let environment = Environment::builder()
       .host("localhost")
       .username("guest")
       .password("guest")
-      .port(5552)
+      .port(stream_port)
       .build()
       .await
       .unwrap();
@@ -38,6 +47,8 @@ impl RabbitMQ {
       container_name: container_name.to_owned(),
       image_name: image_name.to_owned(),
       image_tag: image_tag.to_owned(),
+      listen_port,
+      stream_port,
       channel,
       environment,
     }
@@ -59,6 +70,18 @@ impl RabbitMQ {
   /// Get image tag.
   pub fn get_image_tag(&self) -> &str {
     &self.image_tag
+  }
+
+  #[allow(dead_code)]
+  /// Get image tag.
+  pub fn get_listen_port(&self) -> u16 {
+    self.listen_port
+  }
+
+  #[allow(dead_code)]
+  /// Get image tag.
+  pub fn get_stream_port(&self) -> u16 {
+    self.stream_port
   }
 
   /// Helper function to declare stream arguments.
@@ -213,6 +236,8 @@ impl RabbitMQ {
     container_name: &str,
     image_name: &str,
     image_tag: &str,
+    listen_port: u16,
+    stream_port: u16,
   ) -> Result<(), InfinoError> {
     let result = docker::start_docker_container(
       container_name,
@@ -220,9 +245,9 @@ impl RabbitMQ {
       image_tag,
       &[
         "-p",
-        "5672:5672",
+        &format!("{}:5672", listen_port),
         "-p",
-        "5552:5552",
+        &format!("{}:5552", stream_port),
         "--user",
         "rabbitmq",
         "-e",
@@ -263,26 +288,33 @@ impl RabbitMQ {
 mod tests {
   use super::*;
 
-  use serial_test::serial;
-
-  #[ignore = "avoid port conflict in case the machine running tests also has infino running in production"]
-  #[serial]
   #[tokio::test]
   async fn test_queue() {
-    let container_name = "infino-test";
+    let container_name = "infino-test-queue-rs";
     let image_name = "rabbitmq";
     let image_tag = "3";
+
+    // Note that we use different ports than default config so that there is no port conflict with running Infino server and tests.
+    let listen_port = 2222;
+    let stream_port = 2223;
 
     // Stop any container from a prior test - useful in case of test failures if the container is
     // left around without terminating it.
     let _ = RabbitMQ::stop_queue_container(container_name);
 
-    let start_result = RabbitMQ::start_queue_container(container_name, image_name, image_tag).await;
+    let start_result = RabbitMQ::start_queue_container(
+      container_name,
+      image_name,
+      image_tag,
+      listen_port,
+      stream_port,
+    )
+    .await;
     assert!(start_result.is_ok());
     // The container is not immediately ready to accept connections - hence sleep for some time.
     tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
 
-    let rmq = RabbitMQ::new(container_name, "rabbitmq", "3").await;
+    let rmq = RabbitMQ::new(container_name, "rabbitmq", "3", listen_port, stream_port).await;
     assert_eq!(rmq.get_container_name(), container_name);
     assert_eq!(rmq.get_image_name(), image_name);
     assert_eq!(rmq.get_image_tag(), image_tag);

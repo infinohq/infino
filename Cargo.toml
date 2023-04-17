@@ -38,7 +38,6 @@ features = [
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
-serial_test = "2.0.0"
 tempdir = "*"
 
 [profile.release]

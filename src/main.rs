@@ -19,7 +19,14 @@ use tsldb::Tsldb;
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::settings::Settings;
 
-async fn create_queue(container_name: &str, image_name: &str, image_tag: &str) -> RabbitMQ {
+/// Create RabbitMQ queue for inserting and retrieving messages.
+async fn create_queue(
+  container_name: &str,
+  image_name: &str,
+  image_tag: &str,
+  listen_port: u16,
+  stream_port: u16,
+) -> RabbitMQ {
   // TODO: make usage of existing queue possible rather than starting every time.
   let _ = RabbitMQ::stop_queue_container(container_name);
 
@@ -27,14 +34,30 @@ async fn create_queue(container_name: &str, image_name: &str, image_tag: &str) -
     "Starting rabbitmq container {} with image {}:{}",
     container_name, image_name, image_tag
   );
-  let start_result = RabbitMQ::start_queue_container(container_name, image_name, image_tag).await;
+  let start_result = RabbitMQ::start_queue_container(
+    container_name,
+    image_name,
+    image_tag,
+    listen_port,
+    stream_port,
+  )
+  .await;
   info!("Start result: {:?}", start_result);
   assert!(start_result.is_ok());
   // The container is not immediately ready to accept connections - hence sleep for some time.
   sleep(Duration::from_millis(5000)).await;
 
-  RabbitMQ::new(container_name, image_name, image_tag).await
+  RabbitMQ::new(
+    container_name,
+    image_name,
+    image_tag,
+    listen_port,
+    stream_port,
+  )
+  .await
 }
+
+/// Represents application state.
 struct AppState {
   queue: RabbitMQ,
   tsldb: Tsldb,
@@ -42,6 +65,7 @@ struct AppState {
 }
 
 #[derive(Deserialize, Serialize)]
+/// Represents search query.
 struct SearchQuery {
   text: String,
   start_time: u64,
@@ -49,6 +73,7 @@ struct SearchQuery {
 }
 
 #[derive(Deserialize, Serialize)]
+/// Represents an entry in the time series db.
 struct TimeSeriesEntry {
   metric_name: String,
   labels: HashMap<String, String>,
@@ -56,6 +81,7 @@ struct TimeSeriesEntry {
 }
 
 #[derive(Deserialize, Serialize)]
+/// Represents a query to time series db.
 struct TimeSeriesQuery {
   label_name: String,
   label_value: String,
@@ -63,6 +89,7 @@ struct TimeSeriesQuery {
   end_time: u64,
 }
 
+/// Periodically commits tsldb (typically called in a thread, so that tsldb can be asyncronously committed).
 async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
   loop {
     let now = chrono::Utc::now().to_rfc2822();
@@ -72,6 +99,7 @@ async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
   }
 }
 
+/// Axum application for Infino server.
 async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Router, u16) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
@@ -83,8 +111,18 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Route
   };
 
   // Create RabbitMQ to store incoming requests.
-  let container_name = &settings.get_rabbitmq_settings().get_container_name();
-  let queue = create_queue(container_name, image_name, image_tag).await;
+  let rabbitmq_settings = settings.get_rabbitmq_settings();
+  let container_name = rabbitmq_settings.get_container_name();
+  let listen_port = rabbitmq_settings.get_listen_port();
+  let stream_port = rabbitmq_settings.get_stream_port();
+  let queue = create_queue(
+    container_name,
+    image_name,
+    image_tag,
+    listen_port,
+    stream_port,
+  )
+  .await;
 
   let shared_state = Arc::new(AppState {
     queue,
@@ -116,6 +154,7 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Route
 }
 
 #[tokio::main]
+/// Program entry point.
 async fn main() {
   // Initialize logger from env. If no log level specified, default to info.
   env_logger::init_from_env(
@@ -139,6 +178,7 @@ async fn main() {
     .unwrap();
 }
 
+/// Append log data to tsldb.
 async fn append_log(
   State(state): State<Arc<AppState>>,
   Json(log_json): Json<serde_json::Value>,
@@ -210,6 +250,7 @@ async fn append_log(
   Ok(())
 }
 
+/// Append time series data to tsldb.
 async fn append_ts(
   State(state): State<Arc<AppState>>,
   Json(time_series_entry): Json<TimeSeriesEntry>,
@@ -225,6 +266,7 @@ async fn append_ts(
   );
 }
 
+/// Search logs in tsldb.
 async fn search_log(
   State(state): State<Arc<AppState>>,
   Json(search_query): Json<SearchQuery>,
@@ -267,7 +309,6 @@ mod tests {
   };
   use chrono::Utc;
   use serde_json::json;
-  use serial_test::serial;
   use tempdir::TempDir;
   use tower::Service;
   use tsldb::utils::io::get_joined_path;
@@ -290,6 +331,13 @@ mod tests {
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
+
+      // Note that we use different rabbitmq ports from the Infino server as well as other tests, so that there is no port conflict.
+      let rabbitmq_listen_port = 2224;
+      let rabbitmq_stream_port = 2225;
+      let rabbimq_listen_port_line = format!("listen_port = \"{}\"\n", rabbitmq_listen_port);
+      let rabbimq_stream_port_line = format!("stream_port = \"{}\"\n", rabbitmq_stream_port);
+
       let mut file = File::create(&config_file_path).unwrap();
       file.write_all(b"[tsldb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
@@ -304,12 +352,12 @@ mod tests {
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"[rabbitmq]\n").unwrap();
+      file.write_all(rabbimq_listen_port_line.as_bytes()).unwrap();
+      file.write_all(rabbimq_stream_port_line.as_bytes()).unwrap();
       file.write_all(container_name_line.as_bytes()).unwrap();
     }
   }
 
-  #[ignore = "avoid port conflict in case the machine running tests also has infino running in production"]
-  #[serial]
   #[tokio::test]
   async fn test_basic() {
     init();
@@ -318,7 +366,7 @@ mod tests {
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let container_name = "infino-test";
+    let container_name = "infino-test-main-rs";
     create_test_config(config_dir_path, index_dir_path, container_name);
     println!("Config dir path {}", config_dir_path);
 
