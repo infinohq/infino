@@ -9,6 +9,8 @@ use axum::{extract::State, routing::get, routing::post, Json, Router};
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 // TODO: figure out a way to not have LogMessage and DataPoint way deep in tsldb / or change the API to time/value.
@@ -18,44 +20,7 @@ use tsldb::Tsldb;
 
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::settings::Settings;
-
-/// Create RabbitMQ queue for inserting and retrieving messages.
-async fn create_queue(
-  container_name: &str,
-  image_name: &str,
-  image_tag: &str,
-  listen_port: u16,
-  stream_port: u16,
-) -> RabbitMQ {
-  // TODO: make usage of existing queue possible rather than starting every time.
-  let _ = RabbitMQ::stop_queue_container(container_name);
-
-  info!(
-    "Starting rabbitmq container {} with image {}:{}",
-    container_name, image_name, image_tag
-  );
-  let start_result = RabbitMQ::start_queue_container(
-    container_name,
-    image_name,
-    image_tag,
-    listen_port,
-    stream_port,
-  )
-  .await;
-  info!("Start result: {:?}", start_result);
-  assert!(start_result.is_ok());
-  // The container is not immediately ready to accept connections - hence sleep for some time.
-  sleep(Duration::from_millis(5000)).await;
-
-  RabbitMQ::new(
-    container_name,
-    image_name,
-    image_tag,
-    listen_port,
-    stream_port,
-  )
-  .await
-}
+use crate::utils::shutdown::shutdown_signal;
 
 /// Represents application state.
 struct AppState {
@@ -90,17 +55,29 @@ struct TimeSeriesQuery {
 }
 
 /// Periodically commits tsldb (typically called in a thread, so that tsldb can be asyncronously committed).
-async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
+async fn commit_in_loop(
+  state: Arc<AppState>,
+  commit_interval_in_seconds: u32,
+  shutdown_flag: Arc<Mutex<bool>>,
+) {
   loop {
-    let now = chrono::Utc::now().to_rfc2822();
-    println!("Committing at {}", now);
     state.tsldb.commit(true);
+
+    if *shutdown_flag.lock().await {
+      info!("Received shutdown in commit thread. Exiting...");
+      break;
+    }
+
     sleep(Duration::from_secs(commit_interval_in_seconds as u64)).await;
   }
 }
 
 /// Axum application for Infino server.
-async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Router, u16) {
+async fn app(
+  config_dir_path: &str,
+  image_name: &str,
+  image_tag: &str,
+) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -115,7 +92,7 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Route
   let container_name = rabbitmq_settings.get_container_name();
   let listen_port = rabbitmq_settings.get_listen_port();
   let stream_port = rabbitmq_settings.get_stream_port();
-  let queue = create_queue(
+  let queue = RabbitMQ::new(
     container_name,
     image_name,
     image_tag,
@@ -132,25 +109,31 @@ async fn app(config_dir_path: &str, image_name: &str, image_tag: &str) -> (Route
 
   let server_settings = shared_state.settings.get_server_settings();
   let commit_interval_in_seconds = server_settings.get_commit_interval_in_seconds();
-  let port = server_settings.get_port();
 
   // Start a thread to periodically commit tsldb.
-  println!("Spawning new thread to periodically commit");
-  tokio::spawn(commit_in_loop(
+  info!("Spawning new thread to periodically commit");
+  let commit_thread_shutdown_flag = Arc::new(Mutex::new(false));
+  let commit_thread_handle = tokio::spawn(commit_in_loop(
     shared_state.clone(),
     commit_interval_in_seconds,
+    commit_thread_shutdown_flag.clone(),
   ));
 
   // Build our application with a route
-  let router = Router::new()
+  let router: Router = Router::new()
     .route("/append_log", post(append_log))
     .route("/append_ts", post(append_ts))
     .route("/search_log", get(search_log))
     .route("/search_ts", get(search_ts))
     .route("/get_index_dir", get(get_index_dir))
-    .with_state(shared_state);
+    .with_state(shared_state.clone());
 
-  (router, port)
+  (
+    router,
+    commit_thread_handle,
+    commit_thread_shutdown_flag,
+    shared_state,
+  )
 }
 
 #[tokio::main]
@@ -166,16 +149,35 @@ async fn main() {
   let image_tag = "3";
 
   // Create app.
-  let (app, port) = app(config_dir_path, image_name, image_tag).await;
+  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) =
+    app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
+  let port = shared_state.settings.get_server_settings().get_port();
   let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
   info!("Infino server listening on {}", addr);
   axum::Server::bind(&addr)
     .serve(app.into_make_service())
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .unwrap();
+
+  info!("Closing RabbitMQ connection...");
+  shared_state.queue.close_connection().await;
+
+  info!("Stopping RabbitMQ container...");
+  let rabbitmq_container_name = shared_state.queue.get_container_name();
+  RabbitMQ::stop_queue_container(rabbitmq_container_name)
+    .expect("Could not stop rabbitmq container");
+
+  info!("Shutting down commit thread and waiting for it to finish...");
+  *commit_thread_shutdown_flag.lock().await = true;
+  commit_thread_handle
+    .await
+    .expect("Error while completing the commit thread");
+
+  info!("Completed Infino server shuwdown");
 }
 
 /// Append log data to tsldb.
@@ -375,7 +377,7 @@ mod tests {
     let _ = RabbitMQ::stop_queue_container(container_name);
 
     // Create the app.
-    let (mut app, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // **Part 1**: Test insertion and search of log messages
     let num_log_messages = 100;
