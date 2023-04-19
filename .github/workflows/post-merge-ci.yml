@@ -30,4 +30,4 @@ jobs:
         run: |
           cargo test -p tsldb
           RUSTFLAGS="--cfg loom" cargo test --test loom --release
-          cargo test --package infino --bin infino -- tests --nocapture 
+          cargo test --package infino --bin infino -- tests --nocapture
