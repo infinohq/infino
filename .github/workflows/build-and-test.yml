@@ -8,10 +8,12 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@v3
-      - name: Setup Rust
-        uses: actions/setup-rust@v1
+      - name: Install minimal stable
+        uses: actions-rs/toolchain@v1
         with:
-          rust-version: '1.53.0'
+          profile: minimal
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build Infino
         run:  cargo build --verbose
       - name: Run TSLDB Loom Tests
