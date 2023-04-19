@@ -265,7 +265,7 @@ mod tests {
 
   use serial_test::serial;
 
-  #[ignore = "avoid port conflict in case the machine running tests also has infino running in production"]
+  #[ignore = "avoid port conflict in case the machine running tests also has infino running in production."]
   #[serial]
   #[tokio::test]
   async fn test_queue() {
