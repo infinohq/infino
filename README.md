@@ -3,11 +3,11 @@
 </h1>
 
 <p align="center">
-  :part_alternation_mark::wood: &#151; :mag::bar_chart: &#151; :balance_scale::moneybag:
+  &nbsp;&nbsp;:part_alternation_mark::wood: &nbsp;&#151;&nbsp; :mag::bar_chart: &nbsp;&#151;&nbsp; :balance_scale::moneybag:
 </p>
 
 <p align="center">
-Ingest Metrics and Logs &#151; Query and Insights &#151; Scale and Save $$
+Ingest Metrics and Logs &#151; Query and Insights &#151; Scale and Save \$\$
 </p>
 
 <hr/>
