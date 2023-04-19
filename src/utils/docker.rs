@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use log::info;
+
 /// Start a docker container with the given name and image.
 pub fn start_docker_container(
   name: &str,
@@ -17,7 +19,7 @@ pub fn start_docker_container(
     .args(extra_args)
     .arg(format!("{}:{}", image_name, image_tag));
 
-  println!("Running command: {:?}", command);
+  info!("Running command: {:?}", command);
 
   // Run the Docker command
   let output = command.output()?;

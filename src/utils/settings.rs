@@ -8,6 +8,8 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 /// Settings for infino server.
 pub struct ServerSettings {
   commit_interval_in_seconds: u32,
+  port: u16,
+  timestamp_key: String,
 }
 
 impl ServerSettings {
@@ -15,18 +17,40 @@ impl ServerSettings {
   pub fn get_commit_interval_in_seconds(&self) -> u32 {
     self.commit_interval_in_seconds
   }
+
+  /// Get the port.
+  pub fn get_port(&self) -> u16 {
+    self.port
+  }
+
+  /// Get the key for timestamp in json.
+  pub fn get_timestamp_key(&self) -> &str {
+    &self.timestamp_key
+  }
 }
 
 #[derive(Debug, Deserialize)]
 /// Settings for rabbitmq queue.
 pub struct RabbitMQSettings {
   container_name: String,
+  listen_port: u16,
+  stream_port: u16,
 }
 
 impl RabbitMQSettings {
   /// Get comtainer name for rabbitmq docker container.
   pub fn get_container_name(&self) -> &str {
     &self.container_name
+  }
+
+  /// Get listen port for the queue.
+  pub fn get_listen_port(&self) -> u16 {
+    self.listen_port
+  }
+
+  /// Get stream port for the queue.
+  pub fn get_stream_port(&self) -> u16 {
+    self.stream_port
   }
 }
 
@@ -85,10 +109,16 @@ mod tests {
     let config_dir_path = "config";
     let settings = Settings::new(&config_dir_path).unwrap();
 
+    // Check server settings.
     let server_settings = settings.get_server_settings();
     assert_eq!(server_settings.get_commit_interval_in_seconds(), 30);
+    assert_eq!(server_settings.get_port(), 3000);
+    assert_eq!(server_settings.get_timestamp_key(), "date");
 
+    // Check rabbitmq settings.
     let rabbitmq_settings = settings.get_rabbitmq_settings();
     assert_eq!(rabbitmq_settings.get_container_name(), "infino-queue");
+    assert_eq!(rabbitmq_settings.get_listen_port(), 5672);
+    assert_eq!(rabbitmq_settings.get_stream_port(), 5552);
   }
 }

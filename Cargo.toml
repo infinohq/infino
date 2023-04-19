@@ -2,6 +2,7 @@
 members = [
     "tsldb",
 ]
+exclude = ["benches"]
 
 [package]
 name = "infino"
@@ -12,9 +13,10 @@ edition = "2021"
 axum = { version = "0.6.11" }
 chrono = "0.4.24"
 config = "0.13.1"
-crossbeam = "0.8.2"     # Only used by examples/sample*.rs
+env_logger = "0.10"
 hyper = { version = "0.14", features = ["full"] }
 lapin = "2.1.1"
+log = "0.4"
 mime = "0.3"
 rabbitmq-stream-client = { git = "https://github.com/rabbitmq/rabbitmq-stream-rust-client", rev = "203d1a11fb29665e9385741df89b325a1deb3bff" }
 serde = { version = "1.0", features = ["derive"] }
@@ -36,7 +38,6 @@ features = [
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
-serial_test = "2.0.0"
 tempdir = "*"
 
 [profile.release]

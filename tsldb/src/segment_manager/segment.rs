@@ -121,17 +121,21 @@ impl Segment {
   }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
-  pub fn append_log_message(&self, time: u64, message: &str) -> Result<(), TsldbError> {
-    let log_message = LogMessage::new(time, message);
+  pub fn append_log_message(
+    &self,
+    time: u64,
+    fields: &HashMap<String, String>,
+    text: &str,
+  ) -> Result<(), TsldbError> {
+    let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
+    let terms = log_message.get_terms();
 
     let log_message_id = self.metadata.fetch_increment_log_message_count();
     // Update the forward map.
     self.forward_map.insert(log_message_id, log_message); // insert in forward map
 
     // Update the inverted map.
-    let message_lower = message.to_lowercase();
-    let words: Vec<&str> = Vec::from_iter(message_lower.split_whitespace());
-    for word in words {
+    for term in terms {
       // We actually mutate this variable in the match block below, so suppress the warning.
       #[allow(unused_mut)]
       let mut term_id: u32;
@@ -141,7 +145,7 @@ impl Segment {
       {
         let entry = self
           .terms
-          .entry(word.to_owned())
+          .entry(term.to_owned())
           .or_insert(self.metadata.fetch_increment_term_count());
         term_id = *entry;
       }
@@ -341,13 +345,16 @@ impl Segment {
       acc.into_iter().filter(|&x| list.contains(&x)).collect()
     });
 
-    //let log_message_ids: &Vec<u32> = postings_lists.get(0).unwrap();
     for log_message_id in log_message_ids {
       let retval = self.forward_map.get(&log_message_id).unwrap();
       let log_message = retval.value();
       let time = log_message.get_time();
       if time >= range_start_time && time <= range_end_time {
-        log_messages.push(LogMessage::new(time, log_message.get_message()));
+        log_messages.push(LogMessage::new_with_fields_and_text(
+          time,
+          log_message.get_fields(),
+          log_message.get_text(),
+        ));
       }
     }
 
@@ -437,20 +444,24 @@ mod tests {
     let segment = Segment::new();
 
     let start = Utc::now().timestamp_millis() as u64;
+    let mut fields = HashMap::new();
+    fields.insert("key1".to_owned(), "val1".to_owned());
     segment
       .append_log_message(
         Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
         "this is my 1st log message",
       )
       .unwrap();
     segment
       .append_log_message(
         Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
         "this is my 2nd log message",
       )
       .unwrap();
     segment
-      .append_log_message(Utc::now().timestamp_millis() as u64, "blah")
+      .append_log_message(Utc::now().timestamp_millis() as u64, &fields, "blah")
       .unwrap();
     let end = Utc::now().timestamp_millis() as u64;
 
@@ -458,23 +469,28 @@ mod tests {
     assert!(segment.terms.contains_key("blah"));
     assert!(segment.terms.contains_key("log"));
     assert!(segment.terms.contains_key("1st"));
+    assert!(segment.terms.contains_key("key1:val1"));
 
     // Test search.
     let mut results = segment.search("this", 0, u64::MAX);
     assert!(results.len() == 2);
 
     assert!(
-      results.get(0).unwrap().get_message() == "this is my 1st log message"
-        || results.get(0).unwrap().get_message() == "this is my 2nd log message"
+      results.get(0).unwrap().get_text() == "this is my 1st log message"
+        || results.get(0).unwrap().get_text() == "this is my 2nd log message"
     );
     assert!(
-      results.get(1).unwrap().get_message() == "this is my 1st log message"
-        || results.get(1).unwrap().get_message() == "this is my 2nd log message"
+      results.get(1).unwrap().get_text() == "this is my 1st log message"
+        || results.get(1).unwrap().get_text() == "this is my 2nd log message"
     );
 
     results = segment.search("blah", start, end);
     assert!(results.len() == 1);
-    assert_eq!(results.get(0).unwrap().get_message(), "blah");
+    assert_eq!(results.get(0).unwrap().get_text(), "blah");
+
+    results = segment.search("key1:val1", start, end);
+    assert!(results.len() == 1);
+    assert_eq!(results.get(0).unwrap().get_text(), "blah");
 
     // Test search for a term that does not exist in the segment.
     results = segment.search("__doesnotexist__", start, end);
@@ -496,6 +512,9 @@ mod tests {
     results = segment.search("1st log message", start, end);
     assert_eq!(results.len(), 1);
 
+    results = segment.search("blah key1:val1", start, end);
+    assert_eq!(results.len(), 1);
+
     // Test with ranges that do not exist in the index.
     results = segment.search("log message", start - 1000, start - 100);
     assert_eq!(results.len(), 0);
@@ -513,6 +532,7 @@ mod tests {
     original_segment
       .append_log_message(
         Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
         "this is my 1st log message",
       )
       .unwrap();
@@ -592,7 +612,7 @@ mod tests {
     let mut results = from_disk_segment.search("this", 0, u64::MAX);
     assert_eq!(results.len(), 1);
     assert_eq!(
-      results.get(0).unwrap().get_message(),
+      results.get(0).unwrap().get_text(),
       "this is my 1st log message"
     );
 
@@ -609,7 +629,7 @@ mod tests {
     let time = Utc::now().timestamp_millis() as u64;
 
     segment
-      .append_log_message(time, "some log message")
+      .append_log_message(time, &HashMap::new(), "some log message")
       .unwrap();
 
     assert_eq!(segment.metadata.get_start_time(), time);
@@ -645,7 +665,11 @@ mod tests {
     let start_time = Utc::now().timestamp_millis() as u64;
     for _ in 0..num_messages {
       segment
-        .append_log_message(Utc::now().timestamp_millis() as u64, "some log message")
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          "some log message",
+        )
         .unwrap();
     }
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -701,8 +725,12 @@ mod tests {
     let (start, end) = (1000, 2000);
     let segment = Segment::new();
 
-    segment.append_log_message(start, "message_1").unwrap();
-    segment.append_log_message(end, "message_2").unwrap();
+    segment
+      .append_log_message(start, &HashMap::new(), "message_1")
+      .unwrap();
+    segment
+      .append_log_message(end, &HashMap::new(), "message_2")
+      .unwrap();
     assert_eq!(segment.metadata.get_start_time(), start);
     assert_eq!(segment.metadata.get_end_time(), end);
 

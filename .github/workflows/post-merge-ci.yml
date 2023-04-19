@@ -1,0 +1,33 @@
+name: Post Merge CI
+on:
+  push:
+    branches:
+      - main
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: pre-commit/action@v3.0.0
+        with:
+          pre-commit-hooks: fix-byte-order-marker,check-case-conflict,check-merge-conflict,check-symlinks,check-yaml,end-of-file-fixer,mixed-line-ending,trailing-whitespace
+  ci:
+    needs: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Rust
+        uses: actions/setup-rust@v1.0.5
+        with:
+          rust-version: 1.53
+      - name: Cargo Check
+        run: cargo check
+      - name: Rustfmt
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --workspace -- -D warnings
+      - name: Run Tests
+        run: |
+          cargo test -p tsldb
+          RUSTFLAGS="--cfg loom" cargo test --test loom --release
+          cargo test --package infino --bin infino -- tests --nocapture

@@ -4,6 +4,7 @@ pub(crate) mod segment_manager;
 pub mod ts;
 pub mod utils;
 
+use ::log::debug;
 use std::collections::HashMap;
 
 use crate::index_manager::index::Index;
@@ -48,8 +49,12 @@ impl Tsldb {
   }
 
   /// Append a log message.
-  pub fn append_log_message(&self, time: u64, message: &str) {
-    self.index.append_log_message(time, message);
+  pub fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, text: &str) {
+    debug!(
+      "Appending log message in tsldb: time {}, fields {:?}, text {}",
+      time, fields, text
+    );
+    self.index.append_log_message(time, fields, text);
   }
 
   /// Append a data point.
