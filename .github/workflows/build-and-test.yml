@@ -1,0 +1,22 @@
+name: Build and Test
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@v2
+      - name: Setup Rust
+        uses: actions/setup-rust@v1
+        with:
+          rust-version: '1.53.0'
+      - name: Build Infino
+        run:  cargo build --verbose
+      - name: Run TSLDB Loom Tests
+        run:  RUSTFLAGS="--cfg loom" cargo test --test loom --release
+      - name: Run TSLDB tests
+        run:  cargo test -p tsldb
+      - name: Run Infino tests
+        run:  cargo test --package infino --bin infino -- tests --nocapture
