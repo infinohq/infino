@@ -32,14 +32,14 @@
 
 <hr style="border:2px solid gray">
 
-## What is Infino?
+## :question: What is Infino?
 
 Infino is an observability platform that stores both metrics and application logs together. The key differences in Infino and other tools are:
 
 * it stores metrics and logs together - so you won't need to use two separate systems to store these,
 * it is built for focused observability use-case and written in Rust - you will find it faster and more cost efficient than other tools. See [benchmark](benches/README.md).
 
-## :exclamation::question: Why Infino?
+## :thinking: Why Infino?
 
 Infino was born out of the frustation of needing two open source systems (such as Prometheus + ELK) for storing metrics and application logs, even though
 the purpose of these two is the same - i.e., improve obervability and reliability of systems.
@@ -69,7 +69,7 @@ observability infrastructure along the way!
 * Install [Rust toolchain](https://www.rust-lang.org/tools/install).
 * TODO: add details regarding make targets.
 
-## Caveat
+## :see_no_evil: Caveat
 
 We are currently very much an Alpha product. Please file an issue if you face any problems. Please [Contact Us](#telephone_receiver-contact-us) if you
 want to discuss your use-case over virtual :coffee:.
