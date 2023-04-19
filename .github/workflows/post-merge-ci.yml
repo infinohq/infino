@@ -7,7 +7,7 @@ jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: pre-commit/action@v3.0.0
         with:
           pre-commit-hooks: fix-byte-order-marker,check-case-conflict,check-merge-conflict,check-symlinks,check-yaml,end-of-file-fixer,mixed-line-ending,trailing-whitespace
