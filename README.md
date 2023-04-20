@@ -62,6 +62,7 @@ observability infrastructure along the way!
   * Inbuilt queue for disaster recovery - no data loss in case of failures.
   * Clients in other languages - Java, JavaScipt, Python,
   * UI for querying Infino.
+  * Support for traces and Spans
 
 ## :beginner: Getting started
 
@@ -78,17 +79,21 @@ want to discuss your use-case over virtual :coffee:.
 
 ### Setup
 
+* Install [Docker](https://docs.docker.com/engine/install/).
 * [Install](https://www.rust-lang.org/tools/install) the Rust toolchain.
 * Clone this repo.
 * Setup your preferred IDE with formatting rules in `rustfmt.toml`. We use default rustfmt formatting, except for using 2 spaces for alignment instead of 4.
 If you are using VSCode, the `Rust Analyzer` plugin with pickup the `rustfmt.toml` from the repo and format any code changes you make.
+* Start Infino service using `make run` command
 
 ### Run tests
 
 The core database behind Infino is Time Series and Log DB (Tsldb), which is cargo workspace crate in this repo in `tsldb` folder. We run
 tests for both Infino server and Tsldb below:
 
-*TODO*: add make instructions to run tsldb test as well as Infino server tests using makefile.
+```
+$ make test
+```
 
 ### Code Coverage
 
