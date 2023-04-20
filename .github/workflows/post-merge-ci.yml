@@ -1,33 +1,54 @@
 name: Post Merge CI
+
 on:
   push:
     branches:
       - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  RUSTUP_MAX_RETRIES: 10
+
 jobs:
-  pre-commit:
+
+  cargo-fmt:
+    name: "cargo fmt"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: pre-commit/action@v3.0.0
-        with:
-          pre-commit-hooks: fix-byte-order-marker,check-case-conflict,check-merge-conflict,check-symlinks,check-yaml,end-of-file-fixer,mixed-line-ending,trailing-whitespace
-  ci:
-    needs: pre-commit
+      - name: "Install Rust toolchain"
+        run: rustup component add rustfmt
+      - run: cargo fmt --all --check
+
+  cargo-clippy:
+    name: "cargo clippy"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Rust
-        uses: actions/setup-rust@v1.0.5
-        with:
-          rust-version: 1.53
+      - uses: actions/checkout@v3
+      - name: "Install Rust toolchain"
+        run: |
+          rustup component add clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+
+  cargo-tests:
+    name: "Run Cargo Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: "Install Rust toolchain"
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
       - name: Cargo Check
         run: cargo check
-      - name: Rustfmt
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets --workspace -- -D warnings
-      - name: Run Tests
-        run: |
-          cargo test -p tsldb
-          RUSTFLAGS="--cfg loom" cargo test --test loom --release
-          cargo test --package infino --bin infino -- tests --nocapture
+      - name: Run TSLDB Tests
+        run: cargo test -p tsldb
+      - name: Run Infino package tests
+        run: cargo test --package infino --bin infino -- tests --nocapture

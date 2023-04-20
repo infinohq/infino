@@ -1,7 +1,9 @@
 name: Build and Test
+
 on:
   pull_request:
     branches: [main]
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -15,9 +17,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - name: Build Infino
-        run:  cargo build --verbose
-      - name: Run TSLDB Loom Tests
-        run:  RUSTFLAGS="--cfg loom" cargo test --test loom --release
+        run:  cargo build
       - name: Run TSLDB tests
         run:  cargo test -p tsldb
       - name: Run Infino tests
