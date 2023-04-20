@@ -29,24 +29,22 @@ $ cargo run -r
 
 ### Index size
 
-Elastic Search - 3100000 bytes
-
-Tantivy - 3207319 bytes
-
-Infino - 1832848 bytes
+| dataset    | Elasticsearch | Tantivy       | Infino        |
+| ---------- | ------------- | ------------- | ------------- |
+| Apache Log | 3100000 bytes | 3207319 bytes | 1832848 bytes |
 
 ### Insertion speed
 
-Elastic Search - WIP with bulk query
-
-Tantivy - 1.98s
-
-Infino - 313.64ms
+| dataset    | Elasticsearch | Tantivy | Infino   |
+| ---------- | ------------- | ------- | -------- |
+| Apache Log | WIP           | 1.98s   | 313.64ms |
 
 ### Search latency
 
+Average across 5 runs for Apache log dataset
+
 | # of words in query | Elasticsearch | Tantivy  | Infino   |
-|---------------------|---------------|----------|----------|
+| ------------------- | ------------- | -------- | -------- |
 | 1                   | 54ms          | 277.17µs | 613.13µs |
 | 2                   | WIP           | 10.87ms  | 3.85ms   |
 | 3                   | WIP           | 4.79ms   | 648.21µs |
