@@ -49,6 +49,6 @@ jobs:
       - name: Cargo Check
         run: cargo check
       - name: Run TSLDB Tests
-        run: cargo test -p tsldb
+        run: cargo test -p tsldb --lib
       - name: Run Infino package tests
         run: cargo test --package infino --bin infino -- tests --nocapture
