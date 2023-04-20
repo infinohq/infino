@@ -2,7 +2,7 @@ use lapin::{
   self,
   options::{BasicPublishOptions, BasicQosOptions, ExchangeDeclareOptions, QueueDeclareOptions},
   types::{AMQPValue, FieldTable, ShortString},
-  BasicProperties, Channel, Connection, ConnectionProperties, ExchangeKind,
+  BasicProperties, Channel, Connection, ConnectionProperties, Error, ExchangeKind,
 };
 use log::info;
 use rabbitmq_stream_client::{types::OffsetSpecification, Environment};
@@ -10,6 +10,9 @@ use tokio::time::{sleep, Duration, Instant};
 use tokio_stream::StreamExt;
 
 use crate::utils::{docker, error::InfinoError};
+
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::Retry;
 
 /// Represents rammitmq for storing append requests, before they are added to the index.
 pub struct RabbitMQ {
@@ -144,9 +147,15 @@ impl RabbitMQ {
       .with_executor(tokio_executor_trait::Tokio::current())
       .with_reactor(tokio_reactor_trait::Tokio);
     loop {
-      let connection = Connection::connect(connection_string, options.clone())
-        .await
-        .unwrap();
+      let retry_strategy = ExponentialBackoff::from_millis(100)
+        .map(jitter) // add jitter to delays
+        .take(5); // limit to 5 retries
+
+      let connection = Retry::spawn(retry_strategy, || {
+        Self::connect_rmq(connection_string, &options)
+      })
+      .await
+      .unwrap();
       if let Ok(channel) = connection.create_channel().await {
         return (channel, connection);
       }
@@ -155,6 +164,19 @@ impl RabbitMQ {
         "Failed to connect to RabbitMQ"
       );
       tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+  }
+
+  async fn connect_rmq(
+    connection_string: &str,
+    options: &ConnectionProperties,
+  ) -> Result<Connection, Error> {
+    match Connection::connect(connection_string, options.clone()).await {
+      Ok(connection) => Ok(connection),
+      Err(err) => {
+        println!("Error while trying connection with RabbitMq {}", err);
+        Err(err)
+      }
     }
   }
 
@@ -332,22 +354,6 @@ mod tests {
     // Note that we use different ports than default config so that there is no port conflict with running Infino server and tests.
     let listen_port = 2222;
     let stream_port = 2223;
-
-    // Stop any container from a prior test - useful in case of test failures if the container is
-    // left around without terminating it.
-    let _ = RabbitMQ::stop_queue_container(container_name);
-
-    let start_result = RabbitMQ::start_queue_container(
-      container_name,
-      image_name,
-      image_tag,
-      listen_port,
-      stream_port,
-    )
-    .await;
-    assert!(start_result.is_ok());
-    // The container is not immediately ready to accept connections - hence sleep for some time.
-    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
 
     let rmq = RabbitMQ::new(container_name, "rabbitmq", "3", listen_port, stream_port).await;
     assert_eq!(rmq.get_container_name(), container_name);

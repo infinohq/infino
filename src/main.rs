@@ -372,10 +372,6 @@ mod tests {
     create_test_config(config_dir_path, index_dir_path, container_name);
     println!("Config dir path {}", config_dir_path);
 
-    // Stop any container from a prior test - useful in case of test failures if the container is
-    // left around without terminating it.
-    let _ = RabbitMQ::stop_queue_container(container_name);
-
     // Create the app.
     let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
