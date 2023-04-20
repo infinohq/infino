@@ -4,8 +4,9 @@ use lapin::{
   types::{AMQPValue, FieldTable, ShortString},
   BasicProperties, Channel, Connection, ConnectionProperties, ExchangeKind,
 };
+use log::info;
 use rabbitmq_stream_client::{types::OffsetSpecification, Environment};
-use tokio::time::Instant;
+use tokio::time::{sleep, Duration, Instant};
 use tokio_stream::StreamExt;
 
 use crate::utils::{docker, error::InfinoError};
@@ -19,6 +20,7 @@ pub struct RabbitMQ {
   stream_port: u16,
   channel: Channel,
   environment: Environment,
+  connection: Connection,
 }
 
 impl RabbitMQ {
@@ -30,8 +32,28 @@ impl RabbitMQ {
     listen_port: u16,
     stream_port: u16,
   ) -> Self {
+    // TODO: make usage of existing queue possible rather than starting every time.
+    let _ = RabbitMQ::stop_queue_container(container_name);
+
+    info!(
+      "Starting rabbitmq container {} with image {}:{}",
+      container_name, image_name, image_tag
+    );
+    let start_result = RabbitMQ::start_queue_container(
+      container_name,
+      image_name,
+      image_tag,
+      listen_port,
+      stream_port,
+    )
+    .await;
+    info!("Start result: {:?}", start_result);
+    assert!(start_result.is_ok());
+    // The container is not immediately ready to accept connections - hence sleep for some time.
+    sleep(Duration::from_millis(5000)).await;
+
     let connection_string = &format!("amqp://guest:guest@localhost:{}", listen_port);
-    let channel =
+    let (channel, connection) =
       Self::create_rmq_connection(connection_string, "infino_rabbitmq_connection").await;
     Self::create_stream(&channel).await;
     let environment = Environment::builder()
@@ -51,6 +73,7 @@ impl RabbitMQ {
       stream_port,
       channel,
       environment,
+      connection,
     }
   }
 
@@ -111,7 +134,10 @@ impl RabbitMQ {
   }
 
   /// Helper function to create rabbitmq connection.
-  async fn create_rmq_connection(connection_string: &str, connection_name: &str) -> Channel {
+  async fn create_rmq_connection(
+    connection_string: &str,
+    connection_name: &str,
+  ) -> (Channel, Connection) {
     let start_time = Instant::now();
     let options = ConnectionProperties::default()
       .with_connection_name(connection_name.into())
@@ -122,7 +148,7 @@ impl RabbitMQ {
         .await
         .unwrap();
       if let Ok(channel) = connection.create_channel().await {
-        return channel;
+        return (channel, connection);
       }
       assert!(
         start_time.elapsed() < std::time::Duration::from_secs(2 * 60),
@@ -281,6 +307,15 @@ impl RabbitMQ {
     }
 
     Ok(())
+  }
+
+  pub async fn close_connection(&self) {
+    // Close RabbitMQ connection.
+    self
+      .connection
+      .close(0, "Received shutdown signal")
+      .await
+      .unwrap();
   }
 }
 
