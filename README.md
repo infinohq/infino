@@ -70,7 +70,7 @@ observability infrastructure along the way!
 * Install [Rust toolchain](https://www.rust-lang.org/tools/install).
 * TODO: add details regarding make targets.
 
-## :see_no_evil: Caveat
+### :see_no_evil: Caveat
 
 We are currently very much an Alpha product. Please file an issue if you face any problems. Please [Contact Us](#telephone_receiver-contact-us) if you
 want to discuss your use-case over virtual :coffee:.

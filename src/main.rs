@@ -156,7 +156,10 @@ async fn main() {
   let port = shared_state.settings.get_server_settings().get_port();
   let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-  info!("Infino server listening on {}", addr);
+  info!(
+    "Infino server listening on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
+    addr
+  );
   axum::Server::bind(&addr)
     .serve(app.into_make_service())
     .with_graceful_shutdown(shutdown_signal())
