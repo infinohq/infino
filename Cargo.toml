@@ -38,8 +38,9 @@ features = [
 ]
 
 [dev-dependencies]
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "*", features = ["util"] }
 tempdir = "*"
+urlencoding = "*"
 
 [profile.release]
 opt-level = 3

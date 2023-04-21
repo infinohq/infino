@@ -18,8 +18,8 @@ tsz = "0.1.4"
 zstd = "0.12"
 
 [dev-dependencies]
-env_logger = "0.10"
-rand = "0.8.5"
+env_logger = "*"
+rand = "*"
 tempfile = "*"
 tempdir = "*"
 test-case = "*"

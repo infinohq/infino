@@ -208,7 +208,7 @@ impl Index {
 
   /// Helper function to commit a segment with given segment_number to disk.
   fn commit_segment(&self, segment_number: u32, sync_after_write: bool) {
-    debug!("Commiting segment with segment_number: {}", segment_number);
+    debug!("Committing segment with segment_number: {}", segment_number);
 
     // Get the segment corresponding to the segment_number.
     let segment_ref = self.all_segments_map.get(&segment_number).unwrap();
@@ -239,7 +239,7 @@ impl Index {
   /// disk before returning (typically sync_after_write should be set to true in tests that refresh the index
   /// immediately after committing).
   pub fn commit(&self, sync_after_write: bool) {
-    info!("Commiting index at {}", chrono::Utc::now());
+    info!("Committing index at {}", chrono::Utc::now());
 
     // Lock to make sure only one thread calls commit at a time.
     let mut lock = self.index_dir_lock.lock().unwrap();
@@ -343,6 +343,8 @@ impl Index {
       let segment = Segment::refresh(&segment_dir_path);
       all_segments_map.insert(id, segment);
     }
+
+    info!("Read index with metadata {:?}", metadata);
 
     let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
     Ok(Index {

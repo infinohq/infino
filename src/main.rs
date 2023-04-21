@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::extract::Query;
 use axum::{extract::State, routing::get, routing::post, Json, Router};
+use chrono::Utc;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -13,8 +15,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
-// TODO: figure out a way to not have LogMessage and DataPoint way deep in tsldb / or change the API to time/value.
-use tsldb::log::log_message::LogMessage;
 use tsldb::ts::data_point::DataPoint;
 use tsldb::Tsldb;
 
@@ -34,7 +34,7 @@ struct AppState {
 struct SearchQuery {
   text: String,
   start_time: u64,
-  end_time: u64,
+  end_time: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -51,7 +51,7 @@ struct TimeSeriesQuery {
   label_name: String,
   label_value: String,
   start_time: u64,
-  end_time: u64,
+  end_time: Option<u64>,
 }
 
 /// Periodically commits tsldb (typically called in a thread, so that tsldb can be asyncronously committed).
@@ -276,32 +276,39 @@ async fn append_ts(
 /// Search logs in tsldb.
 async fn search_log(
   State(state): State<Arc<AppState>>,
-  Json(search_query): Json<SearchQuery>,
-) -> Json<Vec<LogMessage>> {
+  Query(search_query): Query<SearchQuery>,
+) -> String {
   debug!("Searching log: {:?}", search_query);
 
   let results = state.tsldb.search(
     &search_query.text,
     search_query.start_time,
-    search_query.end_time,
+    search_query
+      .end_time
+      .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
-  Json(results)
+
+  serde_json::to_string(&results).expect("Could not convert search results to json")
 }
 
 /// Search time series.
 async fn search_ts(
   State(state): State<Arc<AppState>>,
-  Json(time_series_query): Json<TimeSeriesQuery>,
-) -> Json<Vec<DataPoint>> {
+  Query(time_series_query): Query<TimeSeriesQuery>,
+) -> String {
   debug!("Searching time series: {:?}", time_series_query);
 
   let results = state.tsldb.get_time_series(
     &time_series_query.label_name,
     &time_series_query.label_value,
     time_series_query.start_time,
-    time_series_query.end_time,
+    // The default for range end is the current time.
+    time_series_query
+      .end_time
+      .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
-  Json(results)
+
+  serde_json::to_string(&results).expect("Could not convert search results to json")
 }
 
 /// Get index directory used by tsldb.
@@ -322,6 +329,9 @@ mod tests {
   use serde_json::json;
   use tempdir::TempDir;
   use tower::Service;
+  use urlencoding::encode;
+
+  use tsldb::log::log_message::LogMessage;
   use tsldb::utils::io::get_joined_path;
 
   use super::*;
@@ -367,6 +377,155 @@ mod tests {
       file.write_all(rabbimq_stream_port_line.as_bytes()).unwrap();
       file.write_all(container_name_line.as_bytes()).unwrap();
     }
+  }
+
+  async fn check_search_logs(
+    app: &mut Router,
+    config_dir_path: &str,
+    search_text: &str,
+    query: SearchQuery,
+    log_messages_expected: Vec<LogMessage>,
+  ) {
+    let query_string;
+    match query.end_time {
+      Some(end_time) => {
+        query_string = format!(
+          "start_time={}&end_time={}&text={}",
+          query.start_time,
+          end_time,
+          encode(&query.text)
+        )
+      }
+      None => {
+        query_string = format!(
+          "start_time={}&text={}",
+          query.start_time,
+          encode(&query.text)
+        )
+      }
+    }
+
+    let uri = format!("/search_log?{}", query_string);
+    info!("Checking for uri: {}", uri);
+
+    // Now call search to get the documents.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::GET)
+          .uri(uri)
+          .header(http::header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    println!("Response is {:?}", response);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let mut log_messages_received: Vec<LogMessage> = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(log_messages_expected.len(), log_messages_received.len());
+    assert_eq!(log_messages_expected, log_messages_received);
+
+    // Sleep for 2 seconds and refresh from the index directory.
+    sleep(Duration::from_millis(2000)).await;
+
+    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
+    let end_time = query
+      .end_time
+      .unwrap_or(Utc::now().timestamp_millis() as u64);
+    log_messages_received = refreshed_tsldb.search(search_text, query.start_time, end_time);
+
+    println!("Expected: {}", log_messages_expected.len());
+    assert_eq!(log_messages_expected.len(), log_messages_received.len());
+    assert_eq!(log_messages_expected, log_messages_received);
+  }
+
+  fn check_data_point_vectors(expected: &Vec<DataPoint>, received: &Vec<DataPoint>) {
+    assert_eq!(expected.len(), received.len());
+
+    // The time series is sorted by time - and in tests we may insert multiple values at the same time instant.
+    // To avoid test failure in such scenarios, we compare the times and values separately. We also need to sort
+    // received values as they may not be in sorted order (only time is the sort key in time series).
+    let expected_times: Vec<u64> = expected.iter().map(|item| item.get_time()).collect();
+    let expected_values: Vec<f64> = expected.iter().map(|item| item.get_value()).collect();
+    let received_times: Vec<u64> = received.iter().map(|item| item.get_time()).collect();
+    let mut received_values: Vec<f64> = received.iter().map(|item| item.get_value()).collect();
+    received_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    assert_eq!(expected_times, received_times);
+    assert_eq!(expected_values, received_values);
+  }
+
+  async fn check_time_series(
+    app: &mut Router,
+    config_dir_path: &str,
+    query: TimeSeriesQuery,
+    data_points_expected: Vec<DataPoint>,
+  ) {
+    let query_string;
+    match query.end_time {
+      Some(end_time) => {
+        query_string = format!(
+          "label_name={}&label_value={}&start_time={}&end_time={}",
+          encode(&query.label_name),
+          encode(&query.label_value),
+          query.start_time,
+          end_time,
+        )
+      }
+      None => {
+        query_string = format!(
+          "label_name={}&label_value={}&start_time={}",
+          encode(&query.label_name),
+          encode(&query.label_value),
+          query.start_time,
+        )
+      }
+    }
+
+    let uri = format!("/search_ts?{}", query_string);
+    info!("Checking for uri: {}", uri);
+
+    // Now call search to get the documents.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::GET)
+          .uri(uri)
+          .header(http::header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    println!("Response is {:?}", response);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let mut data_points_received: Vec<DataPoint> = serde_json::from_slice(&body).unwrap();
+
+    check_data_point_vectors(&data_points_expected, &data_points_received);
+
+    // Sleep for 2 seconds and refresh from the index directory.
+    sleep(Duration::from_millis(2000)).await;
+
+    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
+    let end_time = query
+      .end_time
+      .unwrap_or(Utc::now().timestamp_millis() as u64);
+    data_points_received = refreshed_tsldb.get_time_series(
+      &query.label_name,
+      &query.label_value,
+      query.start_time,
+      end_time,
+    );
+
+    check_data_point_vectors(&data_points_expected, &data_points_received);
   }
 
   #[tokio::test]
@@ -418,40 +577,35 @@ mod tests {
     } // end for
 
     let search_query = "value1 field34:value4";
+
     let query = SearchQuery {
       start_time: 0,
-      end_time: u64::MAX,
+      end_time: None,
       text: search_query.to_owned(),
     };
-    // Now call search to get the documents.
-    let response = app
-      .call(
-        Request::builder()
-          .method(http::Method::GET)
-          .uri("/search_log")
-          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-          .body(Body::from(serde_json::to_string(&query).unwrap()))
-          .unwrap(),
-      )
-      .await
-      .unwrap();
-    println!("Response is {:?}", response);
-    assert_eq!(response.status(), StatusCode::OK);
+    check_search_logs(
+      &mut app,
+      config_dir_path,
+      search_query,
+      query,
+      log_messages_expected,
+    )
+    .await;
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-    let mut log_messages_received: Vec<LogMessage> = serde_json::from_slice(&body).unwrap();
-
-    assert_eq!(log_messages_received.len(), num_log_messages);
-    assert_eq!(log_messages_expected, log_messages_received);
-
-    // Sleep for 2 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(2000)).await;
-
-    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
-    log_messages_received = refreshed_tsldb.search(search_query, 0, u64::MAX);
-
-    assert_eq!(log_messages_received.len(), num_log_messages);
-    assert_eq!(log_messages_expected, log_messages_received);
+    // End time in this query is too old - this should yield 0 results.
+    let query_too_old = SearchQuery {
+      start_time: 0,
+      end_time: Some(10000),
+      text: search_query.to_owned(),
+    };
+    check_search_logs(
+      &mut app,
+      config_dir_path,
+      search_query,
+      query_too_old,
+      Vec::new(),
+    )
+    .await;
 
     // **Part 2**: Test insertion and search of time series data points.
     let num_data_points = 100;
@@ -460,7 +614,8 @@ mod tests {
     let label_value = "some_name";
 
     for i in 0..num_data_points {
-      let data_point = DataPoint::new(i as u64, i as f64);
+      let time = Utc::now().timestamp_millis() as u64;
+      let data_point = DataPoint::new(time, i as f64);
       let time_series_entry = TimeSeriesEntry {
         metric_name: label_value.to_owned(),
         labels: HashMap::new(),
@@ -489,37 +644,19 @@ mod tests {
       label_name: label_name.to_owned(),
       label_value: label_value.to_owned(),
       start_time: 0,
-      end_time: u64::MAX,
+      end_time: None,
     };
-    // Now call search to get the data points.
-    let response = app
-      .call(
-        Request::builder()
-          .method(http::Method::GET)
-          .uri("/search_ts")
-          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-          .body(Body::from(serde_json::to_string(&query).unwrap()))
-          .unwrap(),
-      )
-      .await
-      .unwrap();
-    println!("Response is {:?}", response);
-    assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-    let mut data_points_received: Vec<DataPoint> = serde_json::from_slice(&body).unwrap();
+    check_time_series(&mut app, config_dir_path, query, data_points_expected).await;
 
-    assert_eq!(data_points_expected.len(), data_points_received.len());
-    assert_eq!(data_points_expected, data_points_received);
-
-    // Sleep for 2 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(2000)).await;
-
-    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
-    data_points_received = refreshed_tsldb.get_time_series(label_name, label_value, 0, u64::MAX);
-
-    assert_eq!(data_points_received.len(), num_data_points);
-    assert_eq!(data_points_expected, data_points_received);
+    // End time in this query is too old - this should yield 0 results.
+    let query_too_old = TimeSeriesQuery {
+      label_name: label_name.to_owned(),
+      label_value: label_value.to_owned(),
+      start_time: 0,
+      end_time: Some(10000),
+    };
+    check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await;
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
