@@ -15,6 +15,6 @@ We'll be using four shell windows: (1) for running the Infino server, (2) for ru
 
 As this command is running, you'll see the log messages being indexed by Infino in the Infino server window.
 
-*
+* [TODO: add details about using fluentbit for time series]
 
 * Shutdown the Infino server gracefully by pressing `Ctrl-C` in the Infino server window, and shutdown the fluentbit docker container by pressing `Ctrl-C` in the both the fluentbit shell windows.
