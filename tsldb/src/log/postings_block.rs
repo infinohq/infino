@@ -1,5 +1,5 @@
 use bitpacking::BitPacker;
-use log::debug;
+use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
 use crate::log::constants::{BITPACKER, BLOCK_SIZE_FOR_LOG_MESSAGES};
@@ -41,7 +41,7 @@ impl PostingsBlock {
 
   /// Append a log message id to this postings block.
   pub fn append(&self, log_message_id: u32) -> Result<(), TsldbError> {
-    debug!("Appending log message id {}", log_message_id);
+    trace!("Appending log message id {}", log_message_id);
 
     let mut log_message_ids_lock = self.log_message_ids.write().unwrap();
 

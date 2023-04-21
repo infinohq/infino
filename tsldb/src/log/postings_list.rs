@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::custom_serde::rwlock_serde;
@@ -39,7 +39,7 @@ impl PostingsList {
 
   /// Append a log message id to the postings list.
   pub fn append(&self, log_message_id: u32) {
-    debug!("Appending log message id {}", log_message_id);
+    trace!("Appending log message id {}", log_message_id);
 
     let mut postings_list_compressed_lock = self.postings_list_compressed.write().unwrap();
     let mut last_block_lock = self.last_block.write().unwrap();

@@ -29,7 +29,7 @@ struct AppState {
   settings: Settings,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 /// Represents search query.
 struct SearchQuery {
   text: String,
@@ -37,7 +37,7 @@ struct SearchQuery {
   end_time: u64,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 /// Represents an entry in the time series db.
 struct TimeSeriesEntry {
   metric_name: String,
@@ -45,7 +45,7 @@ struct TimeSeriesEntry {
   data_point: DataPoint,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 /// Represents a query to time series db.
 struct TimeSeriesQuery {
   label_name: String,
@@ -260,6 +260,8 @@ async fn append_ts(
   State(state): State<Arc<AppState>>,
   Json(time_series_entry): Json<TimeSeriesEntry>,
 ) {
+  debug!("Appending time series entry {:?}", time_series_entry);
+
   let json_string = serde_json::to_string(&time_series_entry).unwrap();
   state.queue.publish(&json_string).await.unwrap();
   let data_point = time_series_entry.data_point;
@@ -276,6 +278,8 @@ async fn search_log(
   State(state): State<Arc<AppState>>,
   Json(search_query): Json<SearchQuery>,
 ) -> Json<Vec<LogMessage>> {
+  debug!("Searching log: {:?}", search_query);
+
   let results = state.tsldb.search(
     &search_query.text,
     search_query.start_time,
@@ -289,6 +293,8 @@ async fn search_ts(
   State(state): State<Arc<AppState>>,
   Json(time_series_query): Json<TimeSeriesQuery>,
 ) -> Json<Vec<DataPoint>> {
+  debug!("Searching time series: {:?}", time_series_query);
+
   let results = state.tsldb.get_time_series(
     &time_series_query.label_name,
     &time_series_query.label_value,
