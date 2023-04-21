@@ -3,12 +3,12 @@ test:
 	cargo test --all
 
 run:
-	echo "Running unoptimised build"
-	cargo run
-
-rrun:
-	echo "Running optimised build"
+	echo "Running optimized build"
 	cargo run -r
+
+run-debug:
+	echo "Running debug (not optimized) build"
+	cargo run
 
 check:
 	cargo check
