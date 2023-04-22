@@ -20,4 +20,4 @@ jobs:
       - name: Build Infino
         run:  cargo build
       - name: Run Infino tests
-        run:  cargo test --package infino --bin infino -- tests --nocapture
+        run:  cargo test --package infino --bin infino -- tests

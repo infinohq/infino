@@ -56,4 +56,4 @@ jobs:
       - name: Cargo Check
         run: cargo check
       - name: Run Infino package tests
-        run: cargo test --package infino --bin infino -- tests --nocapture
+        run: cargo test --package infino --bin infino -- tests
