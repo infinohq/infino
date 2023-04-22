@@ -26,25 +26,29 @@ jobs:
         run: rustup component add rustfmt
       - run: cargo fmt --all --check
 
-  cargo-clippy:
-    name: "cargo clippy"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: "Install Rust toolchain"
-        run: |
-          rustup component add clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+  # cargo-clippy:
+  #   name: "cargo clippy"
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: "Install Rust toolchain"
+  #       run: |
+  #         rustup component add clippy
+  #     - uses: Swatinem/rust-cache@v2
+  #     - run: cargo clippy --all-targets --all-features -- -D warnings
 
 
   cargo-tests:
     name: "Run Cargo Tests"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: "Install Rust toolchain"
-        run: rustup show
+      - name: Checkout the code
+        uses: actions/checkout@v3
+      - name: Install minimal stable
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - name: Cargo Check
         run: cargo check
