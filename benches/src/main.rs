@@ -3,11 +3,39 @@ use crate::engine::infino::InfinoEngine;
 use crate::engine::tantivy::Tantivy;
 use crate::utils::io::get_directory_size;
 
-use std::fs::create_dir;
+use std::fs::{self, create_dir};
 use uuid::Uuid;
 
 mod engine;
 mod utils;
+
+static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
+  "Directory",
+  "Digest: done",
+  "not exist: /var/www/html/file",
+  "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
+  "[client 222.166.160.244] Directory index forbidden",
+  "Jun 09 06:07:05 2005] [notice] LDAP:",
+  "script not found or unable to stat",
+];
+static TANTIVY_SEARCH_QUERIES: &'static [&'static str] = &[
+  r#"message:"Directory""#,
+  r#"message:"Digest: done""#,
+  r#"message:"not exist: /var/www/html/file""#,
+  r#"message:"[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties""#,
+  r#"message:"[client 222.166.160.244] Directory index forbidden""#,
+  r#"message:"Jun 09 06:07:05 2005] [notice] LDAP:""#,
+  r#"message:"script not found or unable to stat""#,
+];
+static ELASTICSEARCH_SEARCH_QUERIES: &'static [&'static str] = &[
+  "Directory",
+  "Digest: done",
+  "not exist: /var/www/html/file",
+  "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
+  "[client 222.166.160.244] Directory index forbidden",
+  "Jun 09 06:07:05 2005] [notice] LDAP:",
+  "script not found or unable to stat",
+];
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,12 +58,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("Infino index size = {} bytes", infino_index_size);
 
   // Perform search on infino index
-  let term_to_search = String::from("Directory");
-  let num_docs = infino.search(&term_to_search, 0, u64::MAX);
-  println!(
-    "Number of documents with term {} are {}",
-    term_to_search, num_docs
-  );
+  infino.search_multiple_queries(INFINO_SEARCH_QUERIES);
+
+  let _ = fs::remove_dir_all(format! {"{}/index", &curr_dir.to_str().unwrap()});
 
   // INFINO END
 
@@ -56,12 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   );
 
   // Perform search on Tantivy index
-  let term_to_search = String::from(r#"message:"Directory""#);
-  let num_docs = tantivy_with_stored.search(&term_to_search);
-  println!(
-    "Number of documents with term {} are {}",
-    term_to_search, num_docs
-  );
+  tantivy_with_stored.search_multiple_queries(TANTIVY_SEARCH_QUERIES);
 
   // TANTIVY END
 
@@ -80,12 +100,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   );
 
   // Perform search on elasticsearch index
-  let term_to_search = String::from("Directory");
-  let num_docs = es.search(&term_to_search).await;
-  println!(
-    "Number of documents with term {} are {}",
-    term_to_search, num_docs
-  );
+  es.search_multiple_queries(ELASTICSEARCH_SEARCH_QUERIES)
+    .await;
 
   // ELASTICSEARCH END
 

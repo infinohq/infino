@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use elasticsearch::cert::CertificateValidation;
+use elasticsearch::http::request::JsonBody;
 use elasticsearch::SearchParts;
 use elasticsearch::{
   cat::CatIndicesParts,
@@ -8,7 +10,7 @@ use elasticsearch::{
   http::transport::{SingleNodeConnectionPool, TransportBuilder},
   http::Method,
   indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts},
-  Elasticsearch, Error, IndexParts,
+  Elasticsearch, Error,
 };
 use serde_json::{json, Value};
 use url::Url;
@@ -78,6 +80,7 @@ impl ElasticsearchEngine {
   pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) {
     let mut num_docs = 0;
     if let Ok(lines) = io::read_lines(input_data_path) {
+      let mut body: Vec<JsonBody<_>> = Vec::with_capacity(100_000);
       for line in lines {
         num_docs += 1;
 
@@ -91,18 +94,22 @@ impl ElasticsearchEngine {
           break;
         }
         if let Ok(message) = line {
-          let body = json!({ "message": message });
-
-          let insert = self
-            .client
-            .index(IndexParts::Index(INDEX_NAME))
-            .body(body)
-            .send()
-            .await
-            .unwrap();
-          println!("#{} {:?}", num_docs, insert);
+          body.push(json!({"index": {"_id": num_docs}}).into());
+          body.push(json!({ "message": message }).into());
         }
       }
+
+      let now = Instant::now();
+      let insert = self
+        .client
+        .bulk(elasticsearch::BulkParts::Index(INDEX_NAME))
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+      let elapsed = now.elapsed();
+      println!("Elasticsearch time required for insertion: {:.2?}", elapsed);
+      println!("#{} {:?}", num_docs, insert);
     }
   }
 
@@ -153,11 +160,13 @@ impl ElasticsearchEngine {
   }
 
   pub async fn search(&self, query: &str) -> usize {
+    let num_words = query.split_whitespace().count();
     let response = self
       .client
       .search(SearchParts::Index(&[INDEX_NAME]))
       .from(0)
-      .size(10)
+      // FIXME: ES not returning more than 10k results, if there are more than 10k results it panics
+      .size(10000)
       .body(json!({
           "query": {
               "match": {
@@ -171,8 +180,22 @@ impl ElasticsearchEngine {
 
     let response_body = response.json::<Value>().await.unwrap();
     let took = response_body["took"].as_i64().unwrap();
-    println!("Elasticsearch time required for search: {:.2?}", took);
     let search_hits = response_body["hits"]["total"]["value"].as_i64().unwrap();
+    println!(
+      "Elasticsearch time required for searching {} word query is : {:.2?} ms . Num of results {}",
+      num_words, took, search_hits
+    );
     return search_hits.try_into().unwrap();
+  }
+
+  pub async fn search_multiple_queries(&self, queries: &[&str]) -> usize {
+    let mut search_results = vec![];
+
+    for query in queries {
+      let result = self.search(query).await;
+      search_results.push(result);
+    }
+
+    search_results.len()
   }
 }
