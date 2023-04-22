@@ -31,22 +31,24 @@ $ cargo run -r
 
 | dataset    | Elasticsearch | Tantivy       | Infino        |
 | ---------- | ------------- | ------------- | ------------- |
-| Apache Log | 3100000 bytes | 3207319 bytes | 1832848 bytes |
+| Apache Log | 2400000 bytes | 3207319 bytes | 1832848 bytes |
 
 ### Insertion speed
 
-| dataset    | Elasticsearch | Tantivy | Infino   |
-| ---------- | ------------- | ------- | -------- |
-| Apache Log | WIP           | 1.98s   | 313.64ms |
+| dataset    | Elasticsearch        | Tantivy | Infino   |
+| ---------- | -------------------- | ------- | -------- |
+| Apache Log | 3.68s (Over network) | 1.95s   | 315.23ms |
 
 ### Search latency
 
 Average across 5 runs for Apache log dataset
 
-| # of words in query | Elasticsearch | Tantivy  | Infino   |
-| ------------------- | ------------- | -------- | -------- |
-| 1                   | 54ms          | 277.17µs | 613.13µs |
-| 2                   | WIP           | 10.87ms  | 3.85ms   |
-| 3                   | WIP           | 4.79ms   | 648.21µs |
-| 4                   | WIP           | 37.58ms  | 5.35ms   |
-| 5                   | WIP           | 54.77ms  | 177.79µs |
+| # of words in query | Elasticsearch | Tantivy   | Infino    |
+| ------------------- | ------------- | --------- | --------- |
+| 1                   | 169 ms        | 2.85ms.   | 1.48ms.   |
+| 2                   | 7 ms          | 88.29µs.  | 17.75µs.  |
+| 3                   | 145 ms        | 2.54ms.   | 144.71ms. |
+| 4                   | 155 ms        | 3.99ms.   | 37.33ms.  |
+| 5                   | 135 ms        | 156.79µs. | 234.08µs. |
+| 6                   | 127 ms        | 115.58µs. | 2.15ms.   |
+| 7                   | 160 ms        | 4.82ms.   | 115.70ms. |

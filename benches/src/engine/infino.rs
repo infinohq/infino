@@ -55,15 +55,28 @@ impl InfinoEngine {
     println!("Infino time required for insertion: {:.2?}", elapsed);
   }
 
-  pub fn search(self, query: &str, range_start_time: u64, range_end_time: u64) -> usize {
+  pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> usize {
+    let num_words = query.split_whitespace().count();
     let now = Instant::now();
     let result = self.tsldb.search(query, range_start_time, range_end_time);
     let elapsed = now.elapsed();
-    println!("Infino time required for search: {:.2?}", elapsed);
+    println!(
+      "Infino time required for searching {} word query is : {:.2?}. Num of results {}",
+      num_words,
+      elapsed,
+      result.len()
+    );
     return result.len();
   }
 
   pub fn get_index_dir_path(&self) -> &str {
     self.index_dir_path.as_str()
+  }
+
+  pub fn search_multiple_queries(&self, queries: &[&str]) -> usize {
+    queries
+      .iter()
+      .map(|query| self.search(query, 0, u64::MAX))
+      .count()
   }
 }

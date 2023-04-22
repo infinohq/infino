@@ -60,7 +60,8 @@ impl Tantivy {
   }
 
   // Searches the document against the query and returns the count of of matching document
-  pub fn search(self, query: &str) -> usize {
+  pub fn search(&self, query: &str) -> usize {
+    let num_words = query.split_whitespace().count();
     let reader = self
       .index
       .reader_builder()
@@ -77,7 +78,16 @@ impl Tantivy {
       .search(&query, &TopDocs::with_limit(100_000))
       .unwrap();
     let elapsed = now.elapsed();
-    println!("Tantivy time required for search: {:.2?}", elapsed);
+    println!(
+      "Tantivy time required for searching {} word query is : {:.2?}. Num of results {}",
+      num_words,
+      elapsed,
+      top_docs.len()
+    );
     return top_docs.len();
+  }
+
+  pub fn search_multiple_queries(&self, queries: &[&str]) -> usize {
+    queries.iter().map(|query| self.search(query)).count()
   }
 }
