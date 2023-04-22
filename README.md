@@ -75,9 +75,10 @@ When we decided to write an open-source platform that stores both of these toget
 
 * Install [Docker](https://docs.docker.com/engine/install/).
 * Install [Rust toolchain](https://www.rust-lang.org/tools/install).
-* To get a quick taste of Infino, run the [fluentbit example](examples/fluentbit/README.md) to publish logs and time series to Infino. This demontrates how to use
-fluentbit, a popular observability tool, to publish logs or metrics to Infino.
-* See the [Developing](#punch-developing) section below to understand the details.
+* To get a quick taste of Infino, run the [fluentbit example](examples/fluentbit/README.md) to publish logs and time series to Infino.
+This demontrates how to use fluentbit (a popular observability tool) to publish logs or metrics to Infino.
+* We are a project in active development, see the [Contributions](#punch-contributions) section below to understand the details as well as
+how you can contribute.
 
 ### :see_no_evil: Caveat
 
