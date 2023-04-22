@@ -19,11 +19,11 @@ for indexing. The mount in the docker command are needed so that the container h
 
 As this command is running, you'll see the CPU metrics being indexed by Infino in the Infino server window.
 
-* Try searching logs by calling `search_log` api, example below. You can change the `text` parameter to try different queries. The end time,
+* In the fourth shell window,
+  * try searching logs by calling `search_log` api, example below. You can change the `text` parameter to try different queries. The end time,
 if not specified, is assumed to be the current time.
 ```curl "http://localhost:3000/search_log?text=workerenv%20error&start_time=0"```
-
-* Try searching time series by calling `search_ts` api, example below. You can change the `label_value` parameter to try different metrics.
+  * try searching time series by calling `search_ts` api, example below. You can change the `label_value` parameter to try different metrics.
 The end time, if not specified, is assumed to be the current time.
 ```curl "http://localhost:3000/search_ts?label_name=__name__&&label_value=cpu_p&start_time=0"```
 
