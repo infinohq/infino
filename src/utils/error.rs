@@ -8,4 +8,7 @@ pub enum InfinoError {
 
   #[error("ClientError with queue")]
   QueueClientError(#[from] rabbitmq_stream_client::error::ClientError),
+
+  #[error("Invalid input {0}.")]
+  InvalidInput(String),
 }

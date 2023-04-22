@@ -11,11 +11,13 @@ use chrono::Utc;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use tsldb::Tsldb;
+use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::settings::Settings;
@@ -174,6 +176,49 @@ async fn main() {
   info!("Completed Infino server shuwdown");
 }
 
+/// Helper function to parse json input.
+fn parse_json(value: &serde_json::Value) -> Result<Vec<Map<String, Value>>, InfinoError> {
+  let mut json_objects: Vec<Map<String, Value>> = Vec::new();
+  if value.is_object() {
+    json_objects.push(value.as_object().unwrap().clone());
+  } else if value.is_array() {
+    let value_array = value.as_array().unwrap();
+    for v in value_array {
+      json_objects.push(v.as_object().unwrap().clone());
+    }
+  } else {
+    let msg = format!("Invalid entry {}", value);
+    error!("{}", msg);
+    return Err(InfinoError::InvalidInput(msg));
+  }
+
+  Ok(json_objects)
+}
+
+/// Helper function to get timestamp value from given json object.
+fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64, InfinoError> {
+  let result = value.get(timestamp_key);
+  let timestamp: u64;
+  match result {
+    Some(v) => {
+      if v.is_f64() {
+        timestamp = v.as_f64().unwrap() as u64;
+      } else if v.is_u64() {
+        timestamp = v.as_u64().unwrap();
+      } else {
+        let msg = format!("Invalid timestamp {} in json {:?}", v, value);
+        return Err(InfinoError::InvalidInput(msg));
+      }
+    }
+    None => {
+      let msg = format!("Could not find timestamp in json {:?}", value);
+      return Err(InfinoError::InvalidInput(msg));
+    }
+  }
+
+  Ok(timestamp)
+}
+
 /// Append log data to tsldb.
 async fn append_log(
   State(state): State<Arc<AppState>>,
@@ -181,21 +226,13 @@ async fn append_log(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
 
-  let mut log_json_objects = Vec::new();
-  if log_json.is_object() {
-    log_json_objects.push(log_json.as_object().unwrap());
-  } else if log_json.is_array() {
-    log_json_objects = log_json
-      .as_array()
-      .unwrap()
-      .iter()
-      .filter_map(|value| value.as_object())
-      .collect();
-  } else {
+  let result = parse_json(&log_json);
+  if result.is_err() {
     let msg = format!("Invalid log entry {}", log_json);
     error!("{}", msg);
     return Err((StatusCode::BAD_REQUEST, msg));
   }
+  let log_json_objects = result.unwrap();
 
   let server_settings = state.settings.get_server_settings();
   let timestamp_key = server_settings.get_timestamp_key();
@@ -204,28 +241,12 @@ async fn append_log(
     let obj_string = serde_json::to_string(&obj).unwrap();
     state.queue.publish(&obj_string).await.unwrap();
 
-    let result = obj.get(timestamp_key);
-    let timestamp: u64;
-    match result {
-      Some(v) => {
-        if v.is_f64() {
-          timestamp = v.as_f64().unwrap() as u64;
-        } else if v.is_u64() {
-          timestamp = v.as_u64().unwrap();
-        } else {
-          let msg = format!("Invalid timestamp {}, ignoring log message {:?}", v, obj);
-          error!("{}", msg);
-          continue;
-        }
-      }
-      None => {
-        error!(
-          "Could not find timestamp in log message {:?}. Ignoring it.",
-          obj
-        );
-        continue;
-      }
+    let result = get_timestamp(&obj, timestamp_key);
+    if result.is_err() {
+      error!("Timestamp error, ignoring entry {:?}", obj);
+      continue;
     }
+    let timestamp = result.unwrap();
 
     let mut fields: HashMap<String, String> = HashMap::new();
     let mut text = String::new();
@@ -256,22 +277,13 @@ async fn append_ts(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending time series entry: {:?}", ts_json);
 
-  // If the input ts_json is an array of objects, treat each individual object as a separate time series entry.
-  let mut ts_objects = Vec::new();
-  if ts_json.is_object() {
-    ts_objects.push(ts_json.as_object().unwrap());
-  } else if ts_json.is_array() {
-    ts_objects = ts_json
-      .as_array()
-      .unwrap()
-      .iter()
-      .filter_map(|value| value.as_object())
-      .collect();
-  } else {
-    let msg = format!("Invalid time series entry: {}", ts_json);
+  let result = parse_json(&ts_json);
+  if result.is_err() {
+    let msg = format!("Invalid time series entry {}", ts_json);
     error!("{}", msg);
     return Err((StatusCode::BAD_REQUEST, msg));
   }
+  let ts_objects = result.unwrap();
 
   let server_settings = state.settings.get_server_settings();
   let timestamp_key: &str = server_settings.get_timestamp_key();
@@ -280,33 +292,14 @@ async fn append_ts(
   for obj in ts_objects {
     let obj_string = serde_json::to_string(&obj).unwrap();
     state.queue.publish(&obj_string).await.unwrap();
-    let result = obj.get(timestamp_key);
 
     // Retrieve the timestamp for this time series entry.
-    let timestamp: u64;
-    match result {
-      Some(v) => {
-        if v.is_f64() {
-          timestamp = v.as_f64().unwrap() as u64;
-        } else if v.is_u64() {
-          timestamp = v.as_u64().unwrap();
-        } else {
-          let msg = format!(
-            "Invalid timestamp {}, ignoring time series entry {:?}",
-            v, obj
-          );
-          error!("{}", msg);
-          continue;
-        }
-      }
-      None => {
-        error!(
-          "Could not find timestamp in time series entry {:?}. Ignoring it.",
-          obj
-        );
-        continue;
-      }
+    let result = get_timestamp(&obj, timestamp_key);
+    if result.is_err() {
+      error!("Timestamp error, ignoring entry {:?}", obj);
+      continue;
     }
+    let timestamp = result.unwrap();
 
     // Find the labels for this time series entry.
     let mut labels: HashMap<String, String> = HashMap::new();
