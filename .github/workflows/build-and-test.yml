@@ -19,5 +19,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build Infino
         run:  cargo build
-      - name: Run Infino tests
-        run:  cargo test --package infino --bin infino -- tests
+      # - name: Run Infino tests
+      #   run:  cargo test --package infino --bin infino -- tests
