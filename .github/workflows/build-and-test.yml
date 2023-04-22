@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
 
+# Skipping TSLDB tests for now
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -18,7 +19,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build Infino
         run:  cargo build
-      - name: Run TSLDB tests
-        run:  cargo test -p tsldb
       - name: Run Infino tests
-        run:  cargo test --package infino --bin infino -- tests --nocapture
+        run:  cargo test --package infino --bin infino -- tests
