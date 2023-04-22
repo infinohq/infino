@@ -38,7 +38,6 @@
 
 <hr style="border:2px solid gray">
 
-
 ## :question: What is Infino?
 
 Infino is an observability platform that stores both metrics and application logs together. The key differences between Infino and other tools are:
@@ -46,13 +45,11 @@ Infino is an observability platform that stores both metrics and application log
 * It stores metrics and logs together - so you won't need to use two separate systems to store these.
 * It is built for focused observability use-case and written in Rust - you will find it faster and more cost-efficient than other tools. See [benchmark](benches/README.md).
 
-
 ## :thinking: Why Infino?
 
 Infino was born out of the frustation of needing two open source systems (such as Prometheus + ELK) for storing metrics and application logs, even though the purpose of these two is the same - i.e., improve obervability and reliability of systems.
 
 When we decided to write an open-source platform that stores both of these together, we built it from the ground up in Rust, with performance (which leads to cost reduction) as **THE** key criteria to focus on. Give us a try if you'd like to store metrics and logs together, and reduce the cost of your observability infrastructure along the way!
-
 
 ## :fire: Features
 
@@ -70,7 +67,6 @@ When we decided to write an open-source platform that stores both of these toget
   * UI for querying Infino.
   * Support for traces and Spans
 
-
 ## :beginner: Getting started
 
 * Install [Docker](https://docs.docker.com/engine/install/).
@@ -85,18 +81,15 @@ how you can contribute.
 We are currently very much an Alpha product. Please file an issue if you face any problems. Please [Contact Us](#telephone_receiver-contact-us) if you
 want to discuss your use-case over virtual :coffee:.
 
-
 ## :punch: Contributions
 
 Contributions are welcome in a bunch of areas and highly appreciated! To get started, check out the [contributing guidelines](CONTRIBUTING.md).
 
 You can also join us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email).
 
-
 ## :telephone_receiver: Contact Us
 
 [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email), or send an email to vinaykakade AT gmail DOT com.
-
 
 ## :hearts: Contributors
 
