@@ -25,28 +25,34 @@
   <a href="https://github.com/infinohq/infino/commits">
     <img src="https://img.shields.io/github/commit-activity/m/infinohq/infino" alt="GitHub commit activity" >
   </a>
-  <a href="https://infinohq.slack.com/">
+  <a href="https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email">
     <img src="https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social" alt="Join Infino Slack" />
   </a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=bug_report.md">Report Bug</a>
+  ·
+  <a href="https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=feature_request.md">Request Feature</a>
+</p>
+
 <hr style="border:2px solid gray">
+
 
 ## :question: What is Infino?
 
-Infino is an observability platform that stores both metrics and application logs together. The key differences in Infino and other tools are:
+Infino is an observability platform that stores both metrics and application logs together. The key differences between Infino and other tools are:
 
-* it stores metrics and logs together - so you won't need to use two separate systems to store these,
-* it is built for focused observability use-case and written in Rust - you will find it faster and more cost efficient than other tools. See [benchmark](benches/README.md).
+* It stores metrics and logs together - so you won't need to use two separate systems to store these.
+* It is built for focused observability use-case and written in Rust - you will find it faster and more cost-efficient than other tools. See [benchmark](benches/README.md).
+
 
 ## :thinking: Why Infino?
 
-Infino was born out of the frustation of needing two open source systems (such as Prometheus + ELK) for storing metrics and application logs, even though
-the purpose of these two is the same - i.e., improve obervability and reliability of systems.
+Infino was born out of the frustation of needing two open source systems (such as Prometheus + ELK) for storing metrics and application logs, even though the purpose of these two is the same - i.e., improve obervability and reliability of systems.
 
-When we decided to write an open-source platform that stores both of these together, we built it from the ground up in Rust, with performance (which leads
-to cost reduction) as **THE** key criteria to focus on. Give us a try if you'd like to store metrics and logs together, and reduce the cost of your
-observability infrastructure along the way!
+When we decided to write an open-source platform that stores both of these together, we built it from the ground up in Rust, with performance (which leads to cost reduction) as **THE** key criteria to focus on. Give us a try if you'd like to store metrics and logs together, and reduce the cost of your observability infrastructure along the way!
+
 
 ## :fire: Features
 
@@ -64,6 +70,7 @@ observability infrastructure along the way!
   * UI for querying Infino.
   * Support for traces and Spans
 
+
 ## :beginner: Getting started
 
 * Install [Docker](https://docs.docker.com/engine/install/).
@@ -75,62 +82,18 @@ observability infrastructure along the way!
 We are currently very much an Alpha product. Please file an issue if you face any problems. Please [Contact Us](#telephone_receiver-contact-us) if you
 want to discuss your use-case over virtual :coffee:.
 
-## :punch: Developing
 
-### Setup
+## :punch: Contributions
 
-* Install [Docker](https://docs.docker.com/engine/install/).
-* [Install](https://www.rust-lang.org/tools/install) the Rust toolchain.
-* Clone this repo.
-* Setup your preferred IDE with formatting rules in `rustfmt.toml`. We use default rustfmt formatting, except for using 2 spaces for alignment instead of 4.
-If you are using VSCode, the `Rust Analyzer` plugin with pickup the `rustfmt.toml` from the repo and format any code changes you make.
-* Start Infino service using `make run` command
+Contributions are welcome in a bunch of areas and highly appreciated! To get started, check out the [contributing guidelines](CONTRIBUTING.md).
 
-### Run tests
+You can also join us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email).
 
-The core database behind Infino is Time Series and Log DB (Tsldb), which is cargo workspace crate in this repo in `tsldb` folder. We run
-tests for both Infino server and Tsldb below:
-
-```
-$ make test
-```
-
-### Code Coverage
-
-You can find code coverage using [Tarpaulin](https://github.com/xd009642/tarpaulin).
-
-```
-$ cargo install cargo-tarpaulin
-$ cargo tarpaulin
-```
-
-### Loom test for Tsldb
-
-Tsldb is a multithreaded application. In addition to exchaustive functional tests, we use [Loom](https://docs.rs/loom/latest/loom/) to test permutations of threads and data access.
-
-```
-$ RUSTFLAGS="--cfg loom" cargo test --test loom --release
-```
-
-## :smile_cat: Contributing
-
-We are so excited you are reading this section!! We welcome contributions. Just file an issue and/or raise a PR. We care about performance and tests,
-so please run the `benches` (in the benches folder) if you are changing anything performance sensitive, and tests as appropriate.
-
-Feel free to discuss with the dev community on [Slack](https://infinohq.slack.com/archives/C052F6DUA11).
-
-### Pre-commit
-
-Before checking-in, you can run pre-commit to make sure your change passes all the tests.
-
-* Install pre-commit by running `brew install pre-commit`
-* Run `pre-commit install`
-
-After this, tests and other checks will run before you commit.
 
 ## :telephone_receiver: Contact Us
 
-[Slack](https://infinohq.slack.com/archives/C052F6DUA11), or send an email to vinaykakade AT gmail DOT com.
+[Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email), or send an email to vinaykakade AT gmail DOT com.
+
 
 ## :hearts: Contributors
 
