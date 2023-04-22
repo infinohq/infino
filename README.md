@@ -25,6 +25,9 @@
   <a href="https://github.com/infinohq/infino/commits">
     <img src="https://img.shields.io/github/commit-activity/m/infinohq/infino" alt="GitHub commit activity" >
   </a>
+  <a href="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml">
+    <img src="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml/badge.svg?branch=main" alt="Status" >
+  </a>
   <a href="https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email">
     <img src="https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social" alt="Join Infino Slack" />
   </a>
