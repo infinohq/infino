@@ -19,11 +19,11 @@ for indexing. The mount in the docker command are needed so that the container h
   ```docker run -ti --mount type=bind,source=`pwd`/examples/fluentbit/time-series-cpu.conf,target=/fluent-bit/etc/fluent-bit.conf fluent/fluent-bit```
 
 
-* In the fourth shell window,
-  * try searching logs by calling `search_log` api, example below. You can change the `text` parameter to try different queries. The end time,
+* In the fourth shell window, try searching for logs and metrics:
+  * search logs by calling `search_log` api, example below. You can change the `text` parameter to try different queries. The end time,
 if not specified, is assumed to be the current time.
   ```curl "http://localhost:3000/search_log?text=workerenv%20error&start_time=0"```
-  * try searching time series by calling `search_ts` api, example below. You can change the `label_value` parameter to try different metrics.
+  * search time series by calling `search_ts` api, example below. You can change the `label_value` parameter to try different metrics.
 The end time, if not specified, is assumed to be the current time.
   ```curl "http://localhost:3000/search_ts?label_name=__name__&&label_value=cpu_p&start_time=0"```
 
