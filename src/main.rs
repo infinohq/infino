@@ -15,7 +15,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
-use tsldb::ts::data_point::DataPoint;
 use tsldb::Tsldb;
 
 use crate::queue_manager::queue::RabbitMQ;
@@ -35,14 +34,6 @@ struct SearchQuery {
   text: String,
   start_time: u64,
   end_time: Option<u64>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-/// Represents an entry in the time series db.
-struct TimeSeriesEntry {
-  metric_name: String,
-  labels: HashMap<String, String>,
-  data_point: DataPoint,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -228,7 +219,10 @@ async fn append_log(
         }
       }
       None => {
-        error!("Could not find timestamp in log message {:?}", obj);
+        error!(
+          "Could not find timestamp in log message {:?}. Ignoring it.",
+          obj
+        );
         continue;
       }
     }
@@ -258,19 +252,103 @@ async fn append_log(
 /// Append time series data to tsldb.
 async fn append_ts(
   State(state): State<Arc<AppState>>,
-  Json(time_series_entry): Json<TimeSeriesEntry>,
-) {
-  debug!("Appending time series entry {:?}", time_series_entry);
+  Json(ts_json): Json<serde_json::Value>,
+) -> Result<(), (StatusCode, String)> {
+  debug!("Appending time series entry: {:?}", ts_json);
 
-  let json_string = serde_json::to_string(&time_series_entry).unwrap();
-  state.queue.publish(&json_string).await.unwrap();
-  let data_point = time_series_entry.data_point;
-  state.tsldb.append_data_point(
-    &time_series_entry.metric_name,
-    &time_series_entry.labels,
-    data_point.get_time(),
-    data_point.get_value(),
-  );
+  // If the input ts_json is an array of objects, treat each individual object as a separate time series entry.
+  let mut ts_objects = Vec::new();
+  if ts_json.is_object() {
+    ts_objects.push(ts_json.as_object().unwrap());
+  } else if ts_json.is_array() {
+    ts_objects = ts_json
+      .as_array()
+      .unwrap()
+      .iter()
+      .filter_map(|value| value.as_object())
+      .collect();
+  } else {
+    let msg = format!("Invalid time series entry: {}", ts_json);
+    error!("{}", msg);
+    return Err((StatusCode::BAD_REQUEST, msg));
+  }
+
+  let server_settings = state.settings.get_server_settings();
+  let timestamp_key: &str = server_settings.get_timestamp_key();
+  let labels_key: &str = server_settings.get_labels_key();
+
+  for obj in ts_objects {
+    let obj_string = serde_json::to_string(&obj).unwrap();
+    state.queue.publish(&obj_string).await.unwrap();
+    let result = obj.get(timestamp_key);
+
+    // Retrieve the timestamp for this time series entry.
+    let timestamp: u64;
+    match result {
+      Some(v) => {
+        if v.is_f64() {
+          timestamp = v.as_f64().unwrap() as u64;
+        } else if v.is_u64() {
+          timestamp = v.as_u64().unwrap();
+        } else {
+          let msg = format!(
+            "Invalid timestamp {}, ignoring time series entry {:?}",
+            v, obj
+          );
+          error!("{}", msg);
+          continue;
+        }
+      }
+      None => {
+        error!(
+          "Could not find timestamp in time series entry {:?}. Ignoring it.",
+          obj
+        );
+        continue;
+      }
+    }
+
+    // Find the labels for this time series entry.
+    let mut labels: HashMap<String, String> = HashMap::new();
+    for (key, value) in obj.iter() {
+      if key == labels_key && value.is_object() {
+        let value_object = value.as_object().unwrap();
+
+        for (key, value) in value_object.iter() {
+          if value.is_string() {
+            let value_str = value.as_str().unwrap();
+            labels.insert(key.to_owned(), value_str.to_owned());
+          }
+        }
+      }
+    }
+
+    // Find individual data points in this time series entry and insert in tsldb.
+    for (key, value) in obj.iter() {
+      if key != timestamp_key && key != labels_key {
+        let value_f64: f64;
+        if value.is_f64() {
+          value_f64 = value.as_f64().expect("Unexpected value type");
+        } else if value.is_i64() {
+          value_f64 = value.as_i64().expect("Unexpected value type") as f64;
+        } else if value.is_u64() {
+          value_f64 = value.as_u64().expect("Unexpected value type") as f64;
+        } else {
+          error!(
+            "Ignoring value {} for key {} as it is not a number",
+            value, key
+          );
+          continue;
+        }
+
+        state
+          .tsldb
+          .append_data_point(key, &labels, timestamp, value_f64);
+      }
+    }
+  }
+
+  Ok(())
 }
 
 /// Search logs in tsldb.
@@ -332,9 +410,18 @@ mod tests {
   use urlencoding::encode;
 
   use tsldb::log::log_message::LogMessage;
+  use tsldb::ts::data_point::DataPoint;
   use tsldb::utils::io::get_joined_path;
 
   use super::*;
+
+  #[derive(Debug, Deserialize, Serialize)]
+  /// Represents an entry in the time series append request.
+  struct TimeSeriesEntry {
+    time: u64,
+    metric_name_value: HashMap<String, f64>,
+    labels: HashMap<String, String>,
+  }
 
   /// Helper function initialize logger for tests.
   fn init() {
@@ -370,8 +457,9 @@ mod tests {
         .unwrap();
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
-      file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
+      file.write_all(b"timestamp_key = \"date\"\n").unwrap();
+      file.write_all(b"labels_key = \"labels\"\n").unwrap();
       file.write_all(b"[rabbitmq]\n").unwrap();
       file.write_all(rabbimq_listen_port_line.as_bytes()).unwrap();
       file.write_all(rabbimq_stream_port_line.as_bytes()).unwrap();
@@ -421,7 +509,6 @@ mod tests {
       .await
       .unwrap();
 
-    println!("Response is {:?}", response);
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
@@ -439,7 +526,6 @@ mod tests {
       .unwrap_or(Utc::now().timestamp_millis() as u64);
     log_messages_received = refreshed_tsldb.search(search_text, query.start_time, end_time);
 
-    println!("Expected: {}", log_messages_expected.len());
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);
   }
@@ -610,49 +696,45 @@ mod tests {
     // **Part 2**: Test insertion and search of time series data points.
     let num_data_points = 100;
     let mut data_points_expected = Vec::new();
-    let label_name = "__name__";
-    let label_value = "some_name";
+    let name_for_metric_name_label = "__name__";
+    let metric_name = "some_metric_name";
 
     for i in 0..num_data_points {
       let time = Utc::now().timestamp_millis() as u64;
+      let value = i as f64;
       let data_point = DataPoint::new(time, i as f64);
-      let time_series_entry = TimeSeriesEntry {
-        metric_name: label_value.to_owned(),
-        labels: HashMap::new(),
-        data_point: data_point.clone(),
-      };
 
+      let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, metric_name, value);
+      data_points_expected.push(data_point);
+
+      // Insert the time series.
       let response = app
         .call(
           Request::builder()
             .method(http::Method::POST)
             .uri("/append_ts")
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-            .body(Body::from(
-              serde_json::to_string(&time_series_entry).unwrap(),
-            ))
+            .body(Body::from(json_str))
             .unwrap(),
         )
         .await
         .unwrap();
       assert_eq!(response.status(), StatusCode::OK);
+    }
 
-      data_points_expected.push(data_point);
-    } // end for
-
+    // Check whether we get all the data points back when end_time is not specified (i.e., it will defauly to current time).
     let query = TimeSeriesQuery {
-      label_name: label_name.to_owned(),
-      label_value: label_value.to_owned(),
+      label_name: name_for_metric_name_label.to_owned(),
+      label_value: metric_name.to_owned(),
       start_time: 0,
       end_time: None,
     };
-
     check_time_series(&mut app, config_dir_path, query, data_points_expected).await;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = TimeSeriesQuery {
-      label_name: label_name.to_owned(),
-      label_value: label_value.to_owned(),
+      label_name: name_for_metric_name_label.to_owned(),
+      label_value: metric_name.to_owned(),
       start_time: 0,
       end_time: Some(10000),
     };

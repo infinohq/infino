@@ -10,6 +10,7 @@ pub struct ServerSettings {
   commit_interval_in_seconds: u32,
   port: u16,
   timestamp_key: String,
+  labels_key: String,
 }
 
 impl ServerSettings {
@@ -26,6 +27,11 @@ impl ServerSettings {
   /// Get the key for timestamp in json.
   pub fn get_timestamp_key(&self) -> &str {
     &self.timestamp_key
+  }
+
+  /// Get the labels for timestamp in json.
+  pub fn get_labels_key(&self) -> &str {
+    &self.labels_key
   }
 }
 
@@ -114,6 +120,7 @@ mod tests {
     assert_eq!(server_settings.get_commit_interval_in_seconds(), 30);
     assert_eq!(server_settings.get_port(), 3000);
     assert_eq!(server_settings.get_timestamp_key(), "date");
+    assert_eq!(server_settings.get_labels_key(), "labels");
 
     // Check rabbitmq settings.
     let rabbitmq_settings = settings.get_rabbitmq_settings();

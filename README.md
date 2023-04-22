@@ -68,7 +68,9 @@ observability infrastructure along the way!
 
 * Install [Docker](https://docs.docker.com/engine/install/).
 * Install [Rust toolchain](https://www.rust-lang.org/tools/install).
-* TODO: add details regarding make targets.
+* To get a quick taste of Infino, run the [fluentbit example](examples/fluentbit/README.md) to publish logs and time series to Infino. This demontrates how to use
+fluentbit, a popular observability tool, to publish logs or metrics to Infino.
+* See the [Developing](#punch-developing) section below to understand the details.
 
 ### :see_no_evil: Caveat
 

@@ -170,7 +170,7 @@ impl Index {
     value: f64,
   ) {
     debug!(
-      "Appending data time, metric name: {}, labels: {:?}, time: {}, value: {}",
+      "Appending data point: metric name: {}, labels: {:?}, time: {}, value: {}",
       metric_name, labels, time, value
     );
 
