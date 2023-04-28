@@ -31,6 +31,10 @@ impl TsldbSettings {
   pub fn get_num_data_points_threshold(&self) -> u32 {
     self.num_data_points_threshold
   }
+
+  pub fn get_default_config_file_name() -> &'static str {
+    DEFAULT_CONFIG_FILE_NAME
+  }
 }
 
 #[derive(Debug, Deserialize)]
