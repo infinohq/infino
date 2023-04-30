@@ -18,6 +18,17 @@ File is present in data folder named Apache.log
   - Set `xpack.security.enabled` to `false` in `config/elasticsearch.yml`.
   - Start elasticsearch:
     - `$ bin/elasticsearch`
+- Install [prometheus](https://prometheus.io/download/) based on your architecure
+
+  - Unzip and modify the prometheus.yaml file as below
+  - add scrape_config
+    ```
+    - job_name: 'rust_app'
+    static_configs:
+      - targets: ['localhost:9000']
+    ```
+  - Change scrape interval to 1s `scrape_interval: 1s`
+
 - Run benchmark
 
 ```
@@ -26,6 +37,8 @@ $ cargo run -r
 ```
 
 ## Results
+
+The below tests were executed on MacBook Pro (16-inch, 2021) having Apple M1 pro chipset and 16Gb of Ram
 
 ### Index size
 
@@ -52,3 +65,11 @@ Average across 5 runs for Apache log dataset
 | 5                   | 135 ms        | 156.79µs. | 234.08µs. |
 | 6                   | 127 ms        | 115.58µs. | 2.15ms.   |
 | 7                   | 160 ms        | 4.82ms.   | 115.70ms. |
+
+### Timeseries search latency
+
+Average over 10 queries made
+
+| Data points | Prometheus | Infino     |
+| ----------- | ---------- | ---------- |
+| CPU Usage   | 2267854 ns | 3029666 ns |

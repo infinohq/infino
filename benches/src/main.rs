@@ -3,10 +3,15 @@ use crate::engine::infino::InfinoEngine;
 use crate::engine::tantivy::Tantivy;
 use crate::utils::io::get_directory_size;
 
-use std::fs::{self, create_dir};
+use std::{
+  fs::{self, create_dir},
+  thread, time,
+};
+use timeseries::{infino::InfinoTsClient, prometheus::PrometheusClient};
 use uuid::Uuid;
 
 mod engine;
+mod timeseries;
 mod utils;
 
 static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
@@ -104,6 +109,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await;
 
   // ELASTICSEARCH END
+
+  // Time series related stats
+
+  let infino_ts_client = InfinoTsClient::new();
+  // Sleep for 5 seconds to let it collect some data
+  thread::sleep(time::Duration::from_millis(10000));
+  let mut sum_nanos = 0;
+  for _ in 1..10 {
+    sum_nanos += infino_ts_client.search().await;
+  }
+  println!("Infino timeseries search avg {} nanos", sum_nanos / 10);
+  infino_ts_client.stop();
+
+  let prometheus_client = PrometheusClient::new();
+
+  let append_task = tokio::spawn(async move {
+    prometheus_client.append_ts().await;
+  });
+
+  // Sleep for 5 seconds to let it collect some data
+  thread::sleep(time::Duration::from_millis(10000));
+  let mut sum_nanos = 0;
+  for _ in 1..10 {
+    sum_nanos += prometheus_client.search().await;
+  }
+  println!("Prometheus timeseries search avg {} nanos", sum_nanos / 10);
+  prometheus_client.stop();
+
+  append_task.abort();
+
+  // Time series ends
 
   Ok(())
 }

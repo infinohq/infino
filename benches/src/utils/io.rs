@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command};
 
 use fs_extra::dir::get_size;
 
@@ -27,4 +27,14 @@ pub fn get_directory_size(directory_path: &str) -> u64 {
 
   let folder_size = get_size(directory_path).unwrap();
   return folder_size;
+}
+
+pub fn run_cargo_in_dir(dir_path: &str, package_name: &str) -> std::io::Result<Child> {
+  Command::new("cargo")
+    .arg("run")
+    .arg("-r")
+    .arg("-p")
+    .arg(package_name)
+    .current_dir(dir_path)
+    .spawn()
 }
