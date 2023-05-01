@@ -17,7 +17,7 @@ pub struct InfinoTsClient {
 
 impl InfinoTsClient {
   pub fn new() -> InfinoTsClient {
-    let dir_path = "/Users/savannahar/Desktop/code/tsldb/infino";
+    let dir_path = "../";
     let package_name = "infino";
 
     // Start infino server on port 3000
