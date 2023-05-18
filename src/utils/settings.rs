@@ -11,6 +11,7 @@ pub struct ServerSettings {
   port: u16,
   timestamp_key: String,
   labels_key: String,
+  use_rabbitmq: bool,
 }
 
 impl ServerSettings {
@@ -32,6 +33,11 @@ impl ServerSettings {
   /// Get the labels for timestamp in json.
   pub fn get_labels_key(&self) -> &str {
     &self.labels_key
+  }
+
+  /// Get the flag to decide whether to use rabbitmq.
+  pub fn get_use_rabbitmq(&self) -> bool {
+    self.use_rabbitmq
   }
 }
 
@@ -64,7 +70,7 @@ impl RabbitMQSettings {
 /// Settings for Tsldb, read from config file.
 pub struct Settings {
   server: ServerSettings,
-  rabbitmq: RabbitMQSettings,
+  rabbitmq: Option<RabbitMQSettings>,
 }
 
 impl Settings {
@@ -96,7 +102,12 @@ impl Settings {
 
   /// Get tsldb settings.
   pub fn get_rabbitmq_settings(&self) -> &RabbitMQSettings {
-    &self.rabbitmq
+    let rabbitmq_settings = self
+      .rabbitmq
+      .as_ref()
+      .expect("Could not retrieve rabbitmq settings");
+
+    &rabbitmq_settings
   }
 
   #[cfg(test)]
@@ -113,7 +124,7 @@ mod tests {
   #[test]
   fn test_settings() {
     let config_dir_path = "config";
-    let settings = Settings::new(&config_dir_path).unwrap();
+    let settings = Settings::new(&config_dir_path).expect("Could not parse config");
 
     // Check server settings.
     let server_settings = settings.get_server_settings();

@@ -40,6 +40,7 @@ features = [
 [dev-dependencies]
 tower = { version = "*", features = ["util"] }
 tempdir = "*"
+test-case = "*"
 urlencoding = "*"
 
 [profile.release]

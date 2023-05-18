@@ -25,7 +25,8 @@ use crate::utils::shutdown::shutdown_signal;
 
 /// Represents application state.
 struct AppState {
-  queue: RabbitMQ,
+  // The queue will be created only if use_rabbitmq = yes is specified in server config.
+  queue: Option<RabbitMQ>,
   tsldb: Tsldb,
   settings: Settings,
 }
@@ -85,14 +86,21 @@ async fn app(
   let container_name = rabbitmq_settings.get_container_name();
   let listen_port = rabbitmq_settings.get_listen_port();
   let stream_port = rabbitmq_settings.get_stream_port();
-  let queue = RabbitMQ::new(
-    container_name,
-    image_name,
-    image_tag,
-    listen_port,
-    stream_port,
-  )
-  .await;
+
+  let use_rabbitmq = settings.get_server_settings().get_use_rabbitmq();
+  let mut queue = None;
+  if use_rabbitmq {
+    queue = Some(
+      RabbitMQ::new(
+        container_name,
+        image_name,
+        image_tag,
+        listen_port,
+        stream_port,
+      )
+      .await,
+    );
+  }
 
   let shared_state = Arc::new(AppState {
     queue,
@@ -159,13 +167,16 @@ async fn main() {
     .await
     .unwrap();
 
-  info!("Closing RabbitMQ connection...");
-  shared_state.queue.close_connection().await;
+  if shared_state.queue.is_some() {
+    info!("Closing RabbitMQ connection...");
+    let queue = shared_state.queue.as_ref().unwrap();
+    queue.close_connection().await;
 
-  info!("Stopping RabbitMQ container...");
-  let rabbitmq_container_name = shared_state.queue.get_container_name();
-  RabbitMQ::stop_queue_container(rabbitmq_container_name)
-    .expect("Could not stop rabbitmq container");
+    info!("Stopping RabbitMQ container...");
+    let rabbitmq_container_name = queue.get_container_name();
+    RabbitMQ::stop_queue_container(rabbitmq_container_name)
+      .expect("Could not stop rabbitmq container");
+  }
 
   info!("Shutting down commit thread and waiting for it to finish...");
   *commit_thread_shutdown_flag.lock().await = true;
@@ -226,6 +237,8 @@ async fn append_log(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
 
+  let is_queue = if state.queue.is_some() { true } else { false };
+
   let result = parse_json(&log_json);
   if result.is_err() {
     let msg = format!("Invalid log entry {}", log_json);
@@ -239,7 +252,15 @@ async fn append_log(
 
   for obj in log_json_objects {
     let obj_string = serde_json::to_string(&obj).unwrap();
-    state.queue.publish(&obj_string).await.unwrap();
+    if is_queue {
+      state
+        .queue
+        .as_ref()
+        .unwrap()
+        .publish(&obj_string)
+        .await
+        .unwrap();
+    }
 
     let result = get_timestamp(&obj, timestamp_key);
     if result.is_err() {
@@ -277,6 +298,8 @@ async fn append_ts(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending time series entry: {:?}", ts_json);
 
+  let is_queue = if state.queue.is_some() { true } else { false };
+
   let result = parse_json(&ts_json);
   if result.is_err() {
     let msg = format!("Invalid time series entry {}", ts_json);
@@ -291,7 +314,16 @@ async fn append_ts(
 
   for obj in ts_objects {
     let obj_string = serde_json::to_string(&obj).unwrap();
-    state.queue.publish(&obj_string).await.unwrap();
+
+    if is_queue {
+      state
+        .queue
+        .as_ref()
+        .unwrap()
+        .publish(&obj_string)
+        .await
+        .unwrap();
+    }
 
     // Retrieve the timestamp for this time series entry.
     let result = get_timestamp(&obj, timestamp_key);
@@ -399,6 +431,7 @@ mod tests {
   use chrono::Utc;
   use serde_json::json;
   use tempdir::TempDir;
+  use test_case::test_case;
   use tower::Service;
   use urlencoding::encode;
 
@@ -416,7 +449,7 @@ mod tests {
     labels: HashMap<String, String>,
   }
 
-  /// Helper function initialize logger for tests.
+  /// Helper function to initialize a logger for tests.
   fn init() {
     let _ = env_logger::builder()
       .is_test(true)
@@ -425,13 +458,22 @@ mod tests {
   }
 
   /// Helper function to create a test configuration.
-  fn create_test_config(config_dir_path: &str, index_dir_path: &str, container_name: &str) {
+  fn create_test_config(
+    config_dir_path: &str,
+    index_dir_path: &str,
+    container_name: &str,
+    use_rabbitmq: bool,
+  ) {
     // Create a test config in the directory config_dir_path.
     let config_file_path =
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
+      let use_rabbitmq_str = (use_rabbitmq == true)
+        .then(|| "yes".to_string())
+        .unwrap_or_else(|| "no".to_string());
+      let use_rabbitmq_line = format!("use_rabbitmq = \"{}\"\n", use_rabbitmq_str);
 
       // Note that we use different rabbitmq ports from the Infino server as well as other tests, so that there is no port conflict.
       let rabbitmq_listen_port = 2224;
@@ -440,6 +482,8 @@ mod tests {
       let rabbimq_stream_port_line = format!("stream_port = \"{}\"\n", rabbitmq_stream_port);
 
       let mut file = File::create(&config_file_path).unwrap();
+
+      // Write tsldb section.
       file.write_all(b"[tsldb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file
@@ -448,11 +492,16 @@ mod tests {
       file
         .write_all(b"num_data_points_threshold = 10000\n")
         .unwrap();
+
+      // Write server section.
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();
+      file.write_all(use_rabbitmq_line.as_bytes()).unwrap();
+
+      // Write rabbitmq section.
       file.write_all(b"[rabbitmq]\n").unwrap();
       file.write_all(rabbimq_listen_port_line.as_bytes()).unwrap();
       file.write_all(rabbimq_stream_port_line.as_bytes()).unwrap();
@@ -607,8 +656,11 @@ mod tests {
     check_data_point_vectors(&data_points_expected, &data_points_received);
   }
 
+  // Only run the tests withour rabbitmq, as that is the use-case we are targeting.
+  //  #[test_case(true ; "use rabbitmq")]
+  #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_basic() {
+  async fn test_basic(use_rabbitmq: bool) {
     init();
 
     let config_dir = TempDir::new("config_test").unwrap();
@@ -616,7 +668,13 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
-    create_test_config(config_dir_path, index_dir_path, container_name);
+
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      container_name,
+      use_rabbitmq,
+    );
     println!("Config dir path {}", config_dir_path);
 
     // Create the app.
