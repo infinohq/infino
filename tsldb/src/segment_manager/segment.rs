@@ -371,7 +371,7 @@ impl Segment {
           acc_index += 1;
         }
 
-        if accumulator[acc_index] > initial_values[initial_index] {
+        if acc_index < accumulator.len() && accumulator[acc_index] > initial_values[initial_index] {
           // If current accumulator element is in between current initial_value and next initial_value
           // then check the existing posting block for matches with accumlator
           if initial_index + 1 < initial_values.len()
