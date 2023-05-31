@@ -122,6 +122,7 @@ async fn app(
 
   // Build our application with a route
   let router: Router = Router::new()
+    .route("/ping", get(ping))
     .route("/append_log", post(append_log))
     .route("/append_ts", post(append_ts))
     .route("/search_log", get(search_log))
@@ -419,6 +420,11 @@ async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
   state.tsldb.get_index_dir()
 }
 
+/// Ping to check if the server is up.
+async fn ping(State(_state): State<Arc<AppState>>) -> String {
+  "OK".to_owned()
+}
+
 #[cfg(test)]
 mod tests {
   use std::fs::File;
@@ -679,6 +685,19 @@ mod tests {
 
     // Create the app.
     let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // Check whether the /ping works.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::GET)
+          .uri("/ping")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     // **Part 1**: Test insertion and search of log messages
     let num_log_messages = 100;
