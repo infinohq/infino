@@ -23,3 +23,15 @@ fmt:
 test: check fmt
 	echo "Running test for all the packages"
 	cargo test --all
+
+docker-build:
+	echo "Running docker build..."
+	docker build -t infinohq/infino:latest -f docker/Dockerfile .
+
+docker-run:
+	echo "Starting docker container for ${prog}..."
+	docker run -it --rm -p 3000:3000 infinohq/infino:latest
+
+docker-push:
+	echo "Pushing image for ${prog}"
+	docker push infinohq/infino:latest
