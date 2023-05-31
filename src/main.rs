@@ -156,7 +156,7 @@ async fn main() {
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
-  let addr = SocketAddr::from(([127, 0, 0, 1], port));
+  let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
   info!(
     "Infino server listening on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
