@@ -396,7 +396,8 @@ impl Segment {
 
               // Try to see if we can skip remaining elements of posting_block
               if initial_index + 1 < initial_values.len()
-                && accumulator[acc_index] >= initial_values[initial_index]
+                && acc_index < accumulator.len()
+                && accumulator[acc_index] >= initial_values[initial_index + 1]
               {
                 break;
               }
@@ -434,7 +435,8 @@ impl Segment {
 
             // Try to see if we can skip remaining elements of posting_block
             if initial_index + 1 < initial_values.len()
-              && accumulator[acc_index] >= initial_values[initial_index]
+              && acc_index < accumulator.len()
+              && accumulator[acc_index] >= initial_values[initial_index + 1]
             {
               break;
             }
