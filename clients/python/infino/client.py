@@ -1,6 +1,7 @@
 import os
 import requests
 
+
 class InfinoClient:
     def __init__(self):
         self.base_url = os.environ.get("INFINO_BASE_URL", "http://localhost:3000")
@@ -8,7 +9,11 @@ class InfinoClient:
     def _request(self, method, path, params=None, json=None):
         url = self.base_url + path
         response = requests.request(method, url, params=params, json=json)
-        return response.json()
+        return response
+
+    def ping(self):
+        path = "/ping"
+        return self._request("GET", path)
 
     def append_log(self, payload):
         path = "/append_log"
@@ -18,14 +23,23 @@ class InfinoClient:
         path = "/append_ts"
         return self._request("POST", path, json=payload)
 
-    def search_log(self, query):
+    def search_log(self, text, start_time, end_time):
         path = "/search_log"
-        params = {"query": query}
-        return self._request("GET", path, params=params)
+        params = {"text": text, "start_time": start_time, "end_time": end_time}
+        response = self._request("GET", path, params=params)
+        print(response.request.url)
+        print(response.request.body)
+        print(response.request.headers)
+        return response
 
-    def search_ts(self, query):
+    def search_ts(self, label_name, label_value, start_time, end_time):
         path = "/search_ts"
-        params = {"query": query}
+        params = {
+            "label_name": label_name,
+            "label_value": label_value,
+            "start_time": start_time,
+            "end_time": end_time,
+        }
         return self._request("GET", path, params=params)
 
     def get_index_dir(self):
