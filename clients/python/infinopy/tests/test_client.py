@@ -2,7 +2,7 @@ import os
 import unittest
 import time
 import docker
-from infino.client import InfinoClient
+from infinopy.client import InfinoClient
 
 
 class InfinoClientTestCase(unittest.TestCase):

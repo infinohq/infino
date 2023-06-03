@@ -27,9 +27,6 @@ class InfinoClient:
         path = "/search_log"
         params = {"text": text, "start_time": start_time, "end_time": end_time}
         response = self._request("GET", path, params=params)
-        print(response.request.url)
-        print(response.request.body)
-        print(response.request.headers)
         return response
 
     def search_ts(self, label_name, label_value, start_time, end_time):

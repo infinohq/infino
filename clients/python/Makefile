@@ -2,7 +2,7 @@ venv: venv/touchfile
 
 venv/touchfile:
 	test -d venv || virtualenv venv
-	. venv/bin/activate; pip install -Ur infino/requirements.txt
+	. venv/bin/activate; pip install -Ur infinopy/requirements.txt
 	touch venv/touchfile
 
 test: venv
