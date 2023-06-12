@@ -12,7 +12,7 @@ test: venv
 	. venv/bin/activate; python -m unittest
 
 clean:
-	rm -rf venv dist __pycache__ infinopy.egg-info
+	rm -rf venv build dist __pycache__ infinopy.egg-info
 	find . -name "*.pyc" -delete
 
 package: clean build
