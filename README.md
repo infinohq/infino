@@ -81,7 +81,7 @@ When we decided to write an open-source platform that stores both of these toget
 * Install [Docker](https://docs.docker.com/engine/install/).
 * Install [Rust toolchain](https://www.rust-lang.org/tools/install).
 * To get a quick taste of Infino, run the [fluentbit example](examples/fluentbit/README.md) to publish logs and time series to Infino.
-This demontrates how to use fluentbit (a popular observability tool) to publish logs or metrics to Infino.
+This demonstrates how to use fluentbit (a popular observability tool) to publish logs or metrics to Infino.
 * We are a project in active development, see the [Contributions](#punch-contributions) section below to understand the details as well as
 how you can contribute.
 
@@ -99,6 +99,17 @@ You can also join us on [Slack](https://infinohq.slack.com/join/shared_invite/zt
 ## :telephone_receiver: Contact Us
 
 [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email), or send an email to vinaykakade AT gmail DOT com.
+
+## :bulb: Examples
+
+Explore the following examples to see how Infino can be integrated into different environments:
+
+* [Integration with Fluentbit](examples/fluentbit/README.md) - Learn how to publish logs and time series to Infino using FluentBit, a popular observability tool.
+* [LLM Monitoring with langchain](examples/llm-monitoring-langchain/llm-monitoring-langchain.ipynb) - Discover how Infino's callback in Langchain can be used for monitoring the requests in real-time. Feel free to checkout [langchain documentation](https://python.langchain.com/docs/ecosystem/integrations/infino).
+* [LLM Monitoring with OpenAI](examples/llm-monitoring-openai/llm-monitoring-openai.ipynb) - See an example of monitoring OpenAI's services using Infino's powerful observability features.
+* Using Infino's Python client - Get started with the Python client for Infino and explore its functionalities. Checkout Infino's [python package](https://pyup.io/packages/pypi/infinopy/).
+
+Please navigate to the respective example folders to find instructions and code samples for each scenario.
 
 ## :hearts: Contributors
 
