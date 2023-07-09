@@ -3,6 +3,7 @@ use crate::engine::infino::InfinoEngine;
 use crate::engine::tantivy::Tantivy;
 use crate::utils::io::get_directory_size;
 
+use engine::infino_rest::InfinoApiClient;
 use std::{
   fs::{self, create_dir},
   thread, time,
@@ -140,6 +141,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   append_task.abort();
 
   // Time series ends
+
+  let infino_ts_client = InfinoApiClient::new();
+  infino_ts_client
+    .index_lines(input_data_path, max_docs)
+    .await;
+  infino_ts_client.stop();
 
   Ok(())
 }
