@@ -92,22 +92,21 @@ impl PostingsList {
     &self.last_block
   }
 
-  /// Flatten the postings list to return vector of log message ids.
-  pub fn flatten(&self) -> Vec<u32> {
+  // Flatten the posting list to return vector of Posting blocks having log messages
+  pub fn flatten_posting_lists(&self) -> Vec<Vec<u32>> {
     let postings_list_compressed = &*self.postings_list_compressed.read().unwrap();
     let last_block = &*self.last_block.read().unwrap();
-    let mut retval: Vec<u32> = Vec::new();
+    let mut retval: Vec<Vec<u32>> = Vec::new();
 
-    // Flatten the compressed postings blocks.
     for postings_block_compressed in postings_list_compressed {
       let postings_block = PostingsBlock::try_from(postings_block_compressed).unwrap();
-      let mut log_message_ids = (*postings_block.get_log_message_ids().read().unwrap()).clone();
-      retval.append(&mut log_message_ids);
+      let log_message_ids = (*postings_block.get_log_message_ids().read().unwrap()).clone();
+      retval.push(log_message_ids);
     }
 
     // Flatten the last block.
-    let mut log_message_ids = (*last_block.get_log_message_ids().read().unwrap()).clone();
-    retval.append(&mut log_message_ids);
+    let log_message_ids = (*last_block.get_log_message_ids().read().unwrap()).clone();
+    retval.push(log_message_ids);
 
     retval
   }
@@ -260,12 +259,20 @@ mod tests {
   fn test_postings_create_multiple_blocks() {
     let num_blocks: usize = 4;
     let pl = PostingsList::new();
-    let mut expected = Vec::new();
+    let mut expected_2_d: Vec<Vec<u32>> = Vec::new();
 
     // Insert num_blocks*BLOCK_SIZE_FOR_LOG_MESSAGES entries.
     for i in 0..num_blocks * BLOCK_SIZE_FOR_LOG_MESSAGES {
       pl.append(i as u32);
-      expected.push(i as u32);
+    }
+
+    // Created 2D vec for each posting list
+    for i in 0..num_blocks {
+      let mut temp_vec: Vec<u32> = Vec::new();
+      for j in i * BLOCK_SIZE_FOR_LOG_MESSAGES..(i + 1) * BLOCK_SIZE_FOR_LOG_MESSAGES {
+        temp_vec.push(j as u32);
+      }
+      expected_2_d.push(temp_vec);
     }
 
     // num_blocks blocks should be created. The first num_blocks-1 of these should be compressed.
@@ -296,7 +303,7 @@ mod tests {
       ((num_blocks - 1) * BLOCK_SIZE_FOR_LOG_MESSAGES) as u32
     );
 
-    let received = pl.flatten();
-    assert_eq!(expected, received);
+    let received_2_d = pl.flatten_posting_lists();
+    assert_eq!(expected_2_d, received_2_d);
   }
 }

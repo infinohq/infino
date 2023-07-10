@@ -10,7 +10,7 @@ use crate::utils::error::TsldbError;
 use crate::utils::sync::RwLock;
 
 /// Represents a delta-compressed PostingsBlock.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct PostingsBlockCompressed {
   /// Initial value.
   #[serde(with = "atomic_cell_serde")]

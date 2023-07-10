@@ -107,7 +107,7 @@ impl Settings {
       .as_ref()
       .expect("Could not retrieve rabbitmq settings");
 
-    &rabbitmq_settings
+    rabbitmq_settings
   }
 
   #[cfg(test)]
