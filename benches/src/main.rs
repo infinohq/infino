@@ -1,6 +1,6 @@
-use crate::engine::elasticsearch::ElasticsearchEngine;
 use crate::engine::infino::InfinoEngine;
 use crate::engine::tantivy::Tantivy;
+use crate::engine::{elasticsearch::ElasticsearchEngine, infino_rest::InfinoApiClient};
 use crate::utils::io::get_directory_size;
 
 use std::{
@@ -139,7 +139,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   append_task.abort();
 
-  // Time series ends
+  // // Time series ends
+
+  let infino_ts_client = InfinoApiClient::new();
+  thread::sleep(time::Duration::from_millis(10000));
+  infino_ts_client
+    .index_lines(input_data_path, max_docs)
+    .await;
+
+  infino_ts_client.search("message1").await;
+  infino_ts_client.search("message1 message2").await;
+  infino_ts_client.search("message1 message2 message3").await;
+  infino_ts_client
+    .search("message1 message2 message3 message4")
+    .await;
+  infino_ts_client
+    .search("message1 message2 message3 message4 message5")
+    .await;
+  infino_ts_client
+    .search("message1 message2 message3 message4 message5 message6")
+    .await;
+  infino_ts_client
+    .search("message1 message2 message3 message4 message5 message6 message7")
+    .await;
+  infino_ts_client.stop();
 
   Ok(())
 }
