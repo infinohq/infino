@@ -48,23 +48,23 @@ The below tests were executed on MacBook Pro (16-inch, 2021) having Apple M1 pro
 
 ### Insertion speed
 
-| dataset    | Elasticsearch        | Tantivy | Infino   |
-| ---------- | -------------------- | ------- | -------- |
-| Apache Log | 3.68s (Over network) | 1.95s   | 315.23ms |
+| dataset    | Elasticsearch | Tantivy | Infino   | Infino-Rest |
+| ---------- | ------------- | ------- | -------- | ----------- |
+| Apache Log | 3.68s         | 1.95s   | 315.23ms | 901.50ms    |
 
 ### Search latency
 
 Average across 5 runs for Apache log dataset
 
-| # of words in query | Elasticsearch | Tantivy   | Infino    |
-| ------------------- | ------------- | --------- | --------- |
-| 1                   | 169 ms        | 2.85ms.   | 1.48ms.   |
-| 2                   | 7 ms          | 88.29µs.  | 17.75µs.  |
-| 3                   | 145 ms        | 2.54ms.   | 144.71ms. |
-| 4                   | 155 ms        | 3.99ms.   | 37.33ms.  |
-| 5                   | 135 ms        | 156.79µs. | 234.08µs. |
-| 6                   | 127 ms        | 115.58µs. | 2.15ms.   |
-| 7                   | 160 ms        | 4.82ms.   | 115.70ms. |
+| # of words in query | Elasticsearch | Tantivy   | Infino    | Infino-Rest |
+| ------------------- | ------------- | --------- | --------- | ----------- |
+| 1                   | 169 ms        | 2.85ms.   | 1.48ms.   | 1.09ms      |
+| 2                   | 7 ms          | 88.29µs.  | 17.75µs.  | 2.73ms.     |
+| 3                   | 145 ms        | 2.54ms.   | 144.71ms. | 51.71ms     |
+| 4                   | 155 ms        | 3.99ms.   | 37.33ms.  | 49.33ms.    |
+| 5                   | 135 ms        | 156.79µs. | 234.08µs. | 1.13ms      |
+| 6                   | 127 ms        | 115.58µs. | 2.15ms.   | 632.63µs    |
+| 7                   | 160 ms        | 4.82ms.   | 115.70ms. | 111.21ms    |
 
 ### Timeseries search latency
 
