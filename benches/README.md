@@ -48,9 +48,9 @@ The below tests were executed on MacBook Pro (16-inch, 2021) having Apple M1 pro
 
 ### Insertion speed
 
-| dataset    | Elasticsearch        | Tantivy | Infino   | Infino-Rest |
-| ---------- | -------------------- | ------- | -------- | ----------- |
-| Apache Log | 3.68s (Over network) | 1.95s   | 315.23ms | 901.50ms    |
+| dataset    | Elasticsearch | Tantivy | Infino   | Infino-Rest |
+| ---------- | ------------- | ------- | -------- | ----------- |
+| Apache Log | 3.68s         | 1.95s   | 315.23ms | 901.50ms    |
 
 ### Search latency
 
