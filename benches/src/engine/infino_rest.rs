@@ -86,7 +86,7 @@ impl InfinoApiClient {
         elapsed.as_nanos()
       }
       Err(err) => {
-        println!("Error while fetching from prometheus: {}", err);
+        println!("Error while fetching from infino: {}", err);
         elapsed.as_nanos()
       }
     }
