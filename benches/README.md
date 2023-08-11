@@ -4,22 +4,23 @@ This pacakge contains comparision of Infino with [Elasticsearch](https://github.
 
 ## Datasets
 
-### Apache_2k.log
+### Apache.log
 
 Apache logs, with thanks from the Logpai project - https://github.com/logpai/loghub
 
-File is present in data folder named Apache.log
+File is present in `benches/data` folder named Apache.log
 
 ## Setup
 
 - Install Elasticsearch by running following commands
-  - `$ wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.6.0-linux-x86_64.tar.gz`
+  - `$ curl -O https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.6.0-linux-x86_64.tar.gz`
   - `$ tar xvfz elasticsearch-8.6.0-linux-x86_64.tar.gz`
-  - Set `xpack.security.enabled` to `false` in `config/elasticsearch.yml`.
+  - Set `xpack.security.enabled` to `false` in `elasticsearch-8.6.0/config/elasticsearch.yml`
+  - You may need to install JDK, set `ES_JAVA_HOME` environment variable, set `xpack.ml.enabled: false` depending on 
+    the hardware you are running on
   - Start elasticsearch:
     - `$ bin/elasticsearch`
 - Install [prometheus](https://prometheus.io/download/) based on your architecure
-
   - Unzip and modify the prometheus.yaml file as below
   - add scrape_config
     ```
@@ -28,6 +29,11 @@ File is present in data folder named Apache.log
       - targets: ['localhost:9000']
     ```
   - Change scrape interval to 1s `scrape_interval: 1s`
+- Install [Clickhouse](https://clickhouse.com/docs/en/install)
+  - Create directory `benches/ch-tmp` and move clickhouse binary there, srtart server from this directory using `./clickhouse server`
+  - Create database `test_logs` using clickhouse client using command `create database test_logs`
+- Start Infino server
+  - Run `make run` from `infino` directory
 
 - Run benchmark
 

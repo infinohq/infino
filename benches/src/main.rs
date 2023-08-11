@@ -1,6 +1,8 @@
+use crate::engine::clickhouse::ClickhouseEngine;
+use crate::engine::elasticsearch::ElasticsearchEngine;
 use crate::engine::infino::InfinoEngine;
+use crate::engine::infino_rest::InfinoApiClient;
 use crate::engine::tantivy::Tantivy;
-use crate::engine::{elasticsearch::ElasticsearchEngine, infino_rest::InfinoApiClient};
 use crate::utils::io::get_directory_size;
 
 use std::{
@@ -15,6 +17,15 @@ mod timeseries;
 mod utils;
 
 static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
+  "Directory",
+  "Digest: done",
+  "not exist: /var/www/html/file",
+  "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
+  "[client 222.166.160.244] Directory index forbidden",
+  "Jun 09 06:07:05 2005] [notice] LDAP:",
+  "script not found or unable to stat",
+];
+static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
   "not exist: /var/www/html/file",
@@ -52,6 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let max_docs = -1;
 
   // INFINO START
+  println!("\n\n***Now running Infino via tsldb library***");
+
   // Index the data using infino and find the output size.
   let curr_dir = std::env::current_dir().unwrap();
 
@@ -69,7 +82,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // INFINO END
 
+  // INFINO REST START
+  println!("\n\n***Now running Infino via API client***");
+
+  // Index the data using infino and find the output size.
+  let infino = InfinoApiClient::new();
+  infino.index_lines(input_data_path, max_docs).await;
+  let infino_index_size = get_directory_size(infino.get_index_dir_path());
+  println!("Infino via API index size = {} bytes", infino_index_size);
+
+  // Perform search on infino index
+  infino.search_multiple_queries(INFINO_SEARCH_QUERIES);
+
+  let _ = fs::remove_dir_all(format! {"{}/index", &curr_dir.to_str().unwrap()});
+
+  // INFINO REST END
+
+  // CLICKHOUSE START
+  println!("\n\n***Now running Clickhouse***");
+
+  let mut clickhouse = ClickhouseEngine::new().await;
+  clickhouse.index_lines(input_data_path, max_docs).await;
+  let clickhouse_index_size = get_directory_size(clickhouse.get_index_dir_path());
+  println!("Clickhouse index size = {} bytes", clickhouse_index_size);
+
+  // Perform search on clickhouse index
+  clickhouse.search_multiple_queries(CLICKHOUSE_SEARCH_QUERIES);
+
+  // CLICKHOUSE END
+
   // TANTIVY START
+  println!("\n\n***Now running Tantivy***");
+
   // Index the data using tantivy with STORED and find the output size
   let suffix = Uuid::new_v4();
   let tantivy_index_stored_path = format!("/tmp/tantivy-index-stored-{suffix}");
@@ -91,6 +135,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // TANTIVY END
 
   // ELASTICSEARCH START
+  println!("\n\n***Now running Elasticsearch***");
+
   // Index the data using elasticsearch and find the output size.
   let es = ElasticsearchEngine::new().await;
   es.index_lines(input_data_path, max_docs).await;
@@ -111,6 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // ELASTICSEARCH END
 
   // Time series related stats
+  println!("\n\n***Now running Infino API client and Prometheus for Time Series***");
 
   let infino_ts_client = InfinoTsClient::new();
   // Sleep for 5 seconds to let it collect some data
@@ -139,30 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   append_task.abort();
 
-  // // Time series ends
-
-  let infino_ts_client = InfinoApiClient::new();
-  thread::sleep(time::Duration::from_millis(10000));
-  infino_ts_client
-    .index_lines(input_data_path, max_docs)
-    .await;
-
-  infino_ts_client.search("message1").await;
-  infino_ts_client.search("message1 message2").await;
-  infino_ts_client.search("message1 message2 message3").await;
-  infino_ts_client
-    .search("message1 message2 message3 message4")
-    .await;
-  infino_ts_client
-    .search("message1 message2 message3 message4 message5")
-    .await;
-  infino_ts_client
-    .search("message1 message2 message3 message4 message5 message6")
-    .await;
-  infino_ts_client
-    .search("message1 message2 message3 message4 message5 message6 message7")
-    .await;
-  infino_ts_client.stop();
+  // Time series ends
 
   Ok(())
 }

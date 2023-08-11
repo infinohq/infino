@@ -21,7 +21,7 @@ impl InfinoTsClient {
     let package_name = "infino";
 
     // Start infino server on port 3000
-    let mut child = run_cargo_in_dir(dir_path, package_name).unwrap();
+    let child = run_cargo_in_dir(dir_path, package_name).unwrap();
 
     println!("Started process with PID {}", child.id());
 
@@ -83,6 +83,7 @@ impl InfinoTsClient {
     // println!("Response {:?}", response);
     match response {
       Ok(res) => {
+        #[allow(unused)]
         let text = res.text().await.unwrap();
         // println!("Result {}", text);
         elapsed.as_nanos()

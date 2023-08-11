@@ -1,10 +1,8 @@
 use prometheus::{Encoder, Gauge, Opts, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::rc::Rc;
 use std::{net::SocketAddr, time::Instant};
 use sysinfo::{ProcessorExt, System, SystemExt};
-use tokio::task::JoinHandle;
 use warp::{http::Response, Filter};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -36,7 +34,7 @@ struct QueryResult {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Data {
-  resultType: String,
+  result_type: String,
   result: Vec<Result>,
 }
 
@@ -130,6 +128,7 @@ impl PrometheusClient {
       Ok(res) => {
         let text = res.text().await.unwrap();
         // println!("Result {}", text);
+        #[allow(unused)]
         let result: QueryResult = serde_json::from_str(&text).unwrap();
         // println!("Result {:?}", result);
         elapsed.as_nanos()
