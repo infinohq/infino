@@ -180,10 +180,12 @@ impl ElasticsearchEngine {
 
     let response_body = response.json::<Value>().await.unwrap();
     let took = response_body["took"].as_i64().unwrap();
+    #[allow(unused)]
     let search_hits = response_body["hits"]["total"]["value"].as_i64().unwrap();
+
     println!(
-      "Elasticsearch time required for searching {} word query is : {:.2?} ms . Num of results {}",
-      num_words, took, search_hits
+      "Elasticsearch time required for searching {} word query is : {:.2?} ms",
+      num_words, took
     );
     return search_hits.try_into().unwrap();
   }

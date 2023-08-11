@@ -83,18 +83,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // INFINO END
 
   // INFINO REST START
-  println!("\n\n***Now running Infino via API client***");
+  println!("\n\n***Now running Infino via REST API client***");
 
   // Index the data using infino and find the output size.
-  let infino = InfinoApiClient::new();
-  infino.index_lines(input_data_path, max_docs).await;
-  let infino_index_size = get_directory_size(infino.get_index_dir_path());
-  println!("Infino via API index size = {} bytes", infino_index_size);
+  let infino_api = InfinoApiClient::new();
+  infino_api.index_lines(input_data_path, max_docs).await;
+  let infino_api_index_size = get_directory_size(infino_api.get_index_dir_path());
+  println!(
+    "Infino via API index size = {} bytes",
+    infino_api_index_size
+  );
 
   // Perform search on infino index
-  infino.search_multiple_queries(INFINO_SEARCH_QUERIES);
-
-  let _ = fs::remove_dir_all(format! {"{}/index", &curr_dir.to_str().unwrap()});
+  infino_api
+    .search_multiple_queries(INFINO_SEARCH_QUERIES)
+    .await;
 
   // INFINO REST END
 
@@ -107,7 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("Clickhouse index size = {} bytes", clickhouse_index_size);
 
   // Perform search on clickhouse index
-  clickhouse.search_multiple_queries(CLICKHOUSE_SEARCH_QUERIES);
+  clickhouse
+    .search_multiple_queries(CLICKHOUSE_SEARCH_QUERIES)
+    .await;
 
   // CLICKHOUSE END
 
@@ -157,7 +162,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // ELASTICSEARCH END
 
   // Time series related stats
-  println!("\n\n***Now running Infino API client and Prometheus for Time Series***");
+  // INFINO API FOR TIME SERIES START
+  println!("\n\n***Now running Infino API client for time series***");
 
   let infino_ts_client = InfinoTsClient::new();
   // Sleep for 5 seconds to let it collect some data
@@ -167,7 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sum_nanos += infino_ts_client.search().await;
   }
   println!("Infino timeseries search avg {} nanos", sum_nanos / 10);
-  infino_ts_client.stop();
+  // INFINO API FOR TIME SERIES END
+
+  // PROMETHEUS START
+  println!("\n\n***Now running Prometheus for time series***");
 
   let prometheus_client = PrometheusClient::new();
 
@@ -186,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   append_task.abort();
 
-  // Time series ends
+  // PROMETHEUS END
 
   Ok(())
 }

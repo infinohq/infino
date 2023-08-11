@@ -83,7 +83,7 @@ impl ClickhouseEngine {
     // There is no inverted index in Clickhouse, so we need to use the `like` operator for free-text search.
     let words_with_like: Vec<_> = words
       .iter()
-      .map(|s| format!("text LIKE \"%{}%\"", s))
+      .map(|s| format!("text LIKE '%{}%'", s))
       .collect();
     let like_clause = words_with_like.join(" AND ");
     let clickhouse_query = format!(
@@ -93,25 +93,28 @@ impl ClickhouseEngine {
 
     let now: Instant = Instant::now();
     let cursor = self.client.query(&clickhouse_query).fetch_all::<LogRow>();
-    let rows = cursor.await.unwrap();
-    let count = rows.len();
+    #[allow(unused)]
+    let rows = cursor.await;
+
+    // TODO: figure out hot to get count of results from Clickhouse results.
+    //let count = rows.unwrap().len();
+    let count = 0;
     let elapsed = now.elapsed();
 
     println!(
-      "Clickhouse time required for searching {} word query is : {:.2?}. Num of results {}",
-      num_words, elapsed, count
+      "Clickhouse time required for searching {} word query is : {:.2?}",
+      num_words, elapsed
     );
     return count;
   }
 
   pub fn get_index_dir_path(&self) -> &str {
-    "./ch-tmp/data/test_logs/test_logs"
+    "./ch-tmp/data/test_logs/test_logs/"
   }
 
-  pub fn search_multiple_queries(&self, queries: &[&str]) -> usize {
-    queries
-      .iter()
-      .map(|query| self.search(query, 0, u64::MAX))
-      .count()
+  pub async fn search_multiple_queries(&self, queries: &[&str]) {
+    for query in queries {
+      self.search(query, 0, u64::MAX).await;
+    }
   }
 }

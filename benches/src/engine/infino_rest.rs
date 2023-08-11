@@ -64,20 +64,28 @@ impl InfinoApiClient {
   }
 
   pub async fn search(&self, text: &str, range_start_time: u64, range_end_time: u64) -> u128 {
+    let words: Vec<_> = text.split_whitespace().collect();
+    let num_words = words.len();
+
     let query_url = &format!(
       "http://localhost:3000/search_ts?text={}&start_time={}&end_time={}",
       text, range_start_time, range_end_time
     );
+
     let now = Instant::now();
     let response = reqwest::get(query_url).await;
     let elapsed = now.elapsed();
-    println!("Infino REST time required for searching {:.2?}", elapsed);
+    println!(
+      "Infino REST time required for searching {} word query is {:.2?}",
+      num_words, elapsed
+    );
 
-    println!("Response {:?}", response);
+    //println!("Response {:?}", response);
     match response {
       Ok(res) => {
+        #[allow(unused)]
         let text = res.text().await.unwrap();
-        println!("Result {}", text);
+        //println!("Result {}", text);
         elapsed.as_nanos()
       }
       Err(err) => {
@@ -87,11 +95,10 @@ impl InfinoApiClient {
     }
   }
 
-  pub fn search_multiple_queries(&self, queries: &[&str]) -> usize {
-    queries
-      .iter()
-      .map(|query| self.search(query, 0, u64::MAX))
-      .count()
+  pub async fn search_multiple_queries(&self, queries: &[&str]) {
+    for query in queries {
+      self.search(*query, 0, u64::MAX).await;
+    }
   }
 
   pub fn get_index_dir_path(&self) -> &str {
