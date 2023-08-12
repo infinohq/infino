@@ -107,6 +107,12 @@ impl ElasticsearchEngine {
         .send()
         .await
         .unwrap();
+      /*      self
+      .client
+      .index(elasticsearch::IndexParts::Index(INDEX_NAME))
+      .refresh()
+      .send()
+      .await;*/
       let elapsed = now.elapsed();
       println!("Elasticsearch time required for insertion: {:.2?}", elapsed);
       println!("#{} {:?}", num_docs, insert);

@@ -1,5 +1,5 @@
 use crate::engine::clickhouse::ClickhouseEngine;
-use crate::engine::elasticsearch::ElasticsearchEngine;
+use crate::engine::es::ElasticsearchEngine;
 use crate::engine::infino::InfinoEngine;
 use crate::engine::infino_rest::InfinoApiClient;
 use crate::engine::tantivy::Tantivy;

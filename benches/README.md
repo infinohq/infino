@@ -11,7 +11,8 @@ Apache logs, with thanks from the Logpai project - https://github.com/logpai/log
 File is present in `benches/data` folder named Apache.log
 
 ## Setup
-
+- Make sure to start from a clean slate (i.e., no other data indexed in any of the systems being compared), 
+  so that the results would be comparable.
 - Install Elasticsearch by running following commands
   - `$ curl -O https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.6.0-linux-x86_64.tar.gz`
   - `$ tar xvfz elasticsearch-8.6.0-linux-x86_64.tar.gz`
@@ -29,6 +30,7 @@ File is present in `benches/data` folder named Apache.log
       - targets: ['localhost:9000']
     ```
   - Change scrape interval to 1s `scrape_interval: 1s`
+  - Start prometheus simply by running the binary `./prometheus`
 - Install [Clickhouse](https://clickhouse.com/docs/en/install)
   - Create directory `benches/ch-tmp` and move clickhouse binary there, srtart server from this directory using `./clickhouse server`
   - Create database `test_logs` using clickhouse client using command `create database test_logs`

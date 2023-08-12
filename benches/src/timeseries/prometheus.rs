@@ -126,10 +126,10 @@ impl PrometheusClient {
     // println!("Response {:?}", response);
     match response {
       Ok(res) => {
+        #[allow(unused)]
         let text = res.text().await.unwrap();
         // println!("Result {}", text);
-        #[allow(unused)]
-        let result: QueryResult = serde_json::from_str(&text).unwrap();
+        //let result: QueryResult = serde_json::from_str(&text).unwrap();
         // println!("Result {:?}", result);
         elapsed.as_nanos()
       }
