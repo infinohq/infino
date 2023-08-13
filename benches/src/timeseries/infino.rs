@@ -1,35 +1,14 @@
 use chrono::Utc;
 use reqwest::StatusCode;
-use std::{
-  process::Child,
-  thread,
-  time::{self, Instant},
-};
+use std::time::Instant;
 use sysinfo::{ProcessorExt, System, SystemExt};
-use tokio::task::JoinHandle;
 
-use crate::utils::io::run_cargo_in_dir;
-
-pub struct InfinoTsClient {
-  process: Child,
-  cpu_usage_task: Option<JoinHandle<()>>,
-}
+pub struct InfinoTsClient {}
 
 impl InfinoTsClient {
   pub fn new() -> InfinoTsClient {
-    let dir_path = "../";
-    let package_name = "infino";
-
-    // Start infino server on port 3000
-    let mut child = run_cargo_in_dir(dir_path, package_name).unwrap();
-
-    println!("Started process with PID {}", child.id());
-
-    // Let the server start
-    thread::sleep(time::Duration::from_millis(25000));
-
     // Start a background task to update the CPU usage gauge
-    // Start a background task to update the CPU usage gauge
+    #[allow(unused)]
     let cpu_usage_task = Some(tokio::spawn(async move {
       loop {
         let system = System::new();
@@ -63,10 +42,7 @@ impl InfinoTsClient {
       }
     }));
 
-    InfinoTsClient {
-      process: child,
-      cpu_usage_task,
-    }
+    InfinoTsClient {}
   }
 
   pub async fn search(&self) -> u128 {
@@ -83,6 +59,7 @@ impl InfinoTsClient {
     // println!("Response {:?}", response);
     match response {
       Ok(res) => {
+        #[allow(unused)]
         let text = res.text().await.unwrap();
         // println!("Result {}", text);
         elapsed.as_nanos()
@@ -91,13 +68,6 @@ impl InfinoTsClient {
         println!("Error while fetching from prometheus: {}", err);
         elapsed.as_nanos()
       }
-    }
-  }
-
-  pub fn stop(mut self) {
-    self.process.kill().unwrap();
-    if let Some(cpu_usage_task) = self.cpu_usage_task.take() {
-      cpu_usage_task.abort();
     }
   }
 }

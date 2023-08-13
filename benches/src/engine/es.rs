@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use chrono::Utc;
 use elasticsearch::cert::CertificateValidation;
 use elasticsearch::http::request::JsonBody;
 use elasticsearch::SearchParts;
@@ -10,7 +11,8 @@ use elasticsearch::{
   http::transport::{SingleNodeConnectionPool, TransportBuilder},
   http::Method,
   indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts},
-  Elasticsearch, Error,
+  params::Refresh,
+  BulkParts, Elasticsearch, Error, IndexParts,
 };
 use serde_json::{json, Value};
 use url::Url;
@@ -79,8 +81,12 @@ impl ElasticsearchEngine {
 
   pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) {
     let mut num_docs = 0;
+    let num_docs_per_batch = 100;
+    let mut num_docs_in_this_batch = 0;
+    let mut logs_batch = Vec::new();
+    let now = Instant::now();
+
     if let Ok(lines) = io::read_lines(input_data_path) {
-      let mut body: Vec<JsonBody<_>> = Vec::with_capacity(100_000);
       for line in lines {
         num_docs += 1;
 
@@ -94,23 +100,53 @@ impl ElasticsearchEngine {
           break;
         }
         if let Ok(message) = line {
-          body.push(json!({"index": {"_id": num_docs}}).into());
-          body.push(json!({ "message": message }).into());
+          let mut log = HashMap::new();
+          log.insert("id", json!(num_docs));
+          log.insert("date", json!(Utc::now().timestamp_millis() as u64));
+          log.insert("message", json!(message));
+          logs_batch.push(log);
+          num_docs_in_this_batch += 1;
+
+          if num_docs_in_this_batch == num_docs_per_batch {
+            let mut body: Vec<JsonBody<_>> = Vec::with_capacity(num_docs_per_batch);
+            for log in &logs_batch {
+              body.push(json!({"index": {"_id": log.get("id").unwrap()}}).into());
+              body.push(
+                json!({
+                    "date": log.get("date").unwrap(),
+                    "message": log.get("message").unwrap(),
+                })
+                .into(),
+              );
+            }
+            #[allow(unused)]
+            let insert = self
+              .client
+              .bulk(BulkParts::Index(INDEX_NAME))
+              .body(body)
+              .send()
+              .await
+              .unwrap();
+            //println!("#{} {:?}", num_docs, insert);
+            num_docs_in_this_batch = 0;
+            logs_batch.clear();
+          } //end if num_docs_in_this_batch == num_docs_per_batch
         }
       }
-
-      let now = Instant::now();
-      let insert = self
-        .client
-        .bulk(elasticsearch::BulkParts::Index(INDEX_NAME))
-        .body(body)
-        .send()
-        .await
-        .unwrap();
-      let elapsed = now.elapsed();
-      println!("Elasticsearch time required for insertion: {:.2?}", elapsed);
-      println!("#{} {:?}", num_docs, insert);
     }
+
+    #[allow(unused)]
+    let refresh_response = self
+      .client
+      .index(IndexParts::Index(INDEX_NAME))
+      .refresh(Refresh::True)
+      .send()
+      .await
+      .unwrap();
+    //println!("Refresh response: {:?}", refresh_response);
+
+    let elapsed = now.elapsed();
+    println!("Elasticsearch time required for insertion: {:.2?}", elapsed);
   }
 
   pub async fn forcemerge(&self) {
@@ -180,10 +216,12 @@ impl ElasticsearchEngine {
 
     let response_body = response.json::<Value>().await.unwrap();
     let took = response_body["took"].as_i64().unwrap();
+    #[allow(unused)]
     let search_hits = response_body["hits"]["total"]["value"].as_i64().unwrap();
+
     println!(
-      "Elasticsearch time required for searching {} word query is : {:.2?} ms . Num of results {}",
-      num_words, took, search_hits
+      "Elasticsearch time required for searching {} word query is : {:.2?} ms",
+      num_words, took
     );
     return search_hits.try_into().unwrap();
   }

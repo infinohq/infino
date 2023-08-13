@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 chrono = "*"
+clickhouse = "*"
 elasticsearch = "8.5.0-alpha.1"
 fs_extra = "1.2.0"
 serde = { version = "~1", features = ["derive"]}
@@ -26,3 +27,6 @@ path = "../tsldb"
 [dependencies.async-std]
 version = "1.9.0"
 features = ["attributes"]
+
+[dev-dependencies]
+clickhouse = { version = "*", features = ["test-util"] }

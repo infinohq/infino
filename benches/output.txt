@@ -1,0 +1,92 @@
+   Compiling benches v0.1.0 (/Users/vinaykakade/ws/infinohq/infino/benches)
+    Finished release [optimized] target(s) in 5.57s
+     Running `target/release/benches`
+
+
+***Now running Infino via tsldb library***
+Infino time required for insertion: 267.23ms
+Checking size of directory: index
+Infino index size = 1848698 bytes
+Infino time required for searching 1 word query is : 1.03ms. Num of results 6837
+Infino time required for searching 2 word query is : 12.25µs. Num of results 45
+Infino time required for searching 3 word query is : 106.32ms. Num of results 46
+Infino time required for searching 4 word query is : 29.97ms. Num of results 5708
+Infino time required for searching 5 word query is : 185.83µs. Num of results 1
+Infino time required for searching 6 word query is : 1.57ms. Num of results 2
+Infino time required for searching 7 word query is : 86.46ms. Num of results 4478
+
+
+***Now running Infino via REST API client***
+Infino REST time required for insertion: 661.69ms
+We haven't yet added flush API to infino client, so can't get accurate index size via API
+Infino REST time required for searching 1 word query is 942.42µs
+Infino REST time required for searching 2 word query is 710.88µs
+Infino REST time required for searching 3 word query is 418.25µs
+Infino REST time required for searching 4 word query is 399.17µs
+Infino REST time required for searching 5 word query is 531.75µs
+Infino REST time required for searching 6 word query is 599.13µs
+Infino REST time required for searching 7 word query is 577.21µs
+
+
+***Now running Clickhouse***
+Clickhouse time required for insertion: 728.58ms
+Checking size of directory: ./ch-tmp/data/test_logs/test_logs/
+Clickhouse index size = 27042683 bytes
+Clickhouse time required for searching 1 word query is : 6.60ms
+Clickhouse time required for searching 2 word query is : 7.23ms
+Clickhouse time required for searching 3 word query is : 10.63ms
+Clickhouse time required for searching 4 word query is : 8.05ms
+Clickhouse time required for searching 5 word query is : 7.39ms
+Clickhouse time required for searching 6 word query is : 8.02ms
+Clickhouse time required for searching 7 word query is : 9.28ms
+
+
+***Now running Tantivy***
+Tantivy time required for insertion: 422.71ms
+Checking size of directory: /tmp/tantivy-index-stored-62394ea6-2596-45ca-bb5b-f74d3acbafc1
+Tantivy index size with STORED flag = 3146858 bytes
+Tantivy time required for searching 1 word query is : 1.45ms. Num of results 6838
+Tantivy time required for searching 2 word query is : 61.25µs. Num of results 45
+Tantivy time required for searching 3 word query is : 2.32ms. Num of results 46
+Tantivy time required for searching 4 word query is : 3.30ms. Num of results 5708
+Tantivy time required for searching 5 word query is : 155.88µs. Num of results 1
+Tantivy time required for searching 6 word query is : 111.29µs. Num of results 2
+Tantivy time required for searching 7 word query is : 4.34ms. Num of results 7779
+
+
+***Now running Elasticsearch***
+Elasticsearch time required for insertion: 7.18s
+Elasticsearch index size in the following statement: [{"health":"green","status":"open","index":"perftest","uuid":"Zv52wFMaRqyVNnVhiVPx5Q","pri":"1","rep":"0","docs.count":"56400","docs.deleted":"0","store.size":"2.3mb","pri.store.size":"2.3mb"}]
+Elasticsearch time required for searching 1 word query is : 50 ms
+Elasticsearch time required for searching 2 word query is : 4 ms
+Elasticsearch time required for searching 3 word query is : 49 ms
+Elasticsearch time required for searching 4 word query is : 38 ms
+Elasticsearch time required for searching 5 word query is : 34 ms
+Elasticsearch time required for searching 6 word query is : 37 ms
+Elasticsearch time required for searching 7 word query is : 31 ms
+
+
+***Now running Infino API client for time series***
+Infino Time series time required for searching 2.99ms
+Infino Time series time required for searching 3.13ms
+Infino Time series time required for searching 967.71µs
+Infino Time series time required for searching 689.75µs
+Infino Time series time required for searching 618.33µs
+Infino Time series time required for searching 943.25µs
+Infino Time series time required for searching 1.31ms
+Infino Time series time required for searching 698.42µs
+Infino Time series time required for searching 584.67µs
+Infino timeseries search avg 1192958 nanos
+
+
+***Now running Prometheus for time series***
+PrometheusClient time required for searching 8.56ms
+PrometheusClient time required for searching 1.82ms
+PrometheusClient time required for searching 1.02ms
+PrometheusClient time required for searching 937.17µs
+PrometheusClient time required for searching 893.04µs
+PrometheusClient time required for searching 913.46µs
+PrometheusClient time required for searching 2.17ms
+PrometheusClient time required for searching 878.13µs
+PrometheusClient time required for searching 1.12ms
+Prometheus timeseries search avg 1832266 nanos

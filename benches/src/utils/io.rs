@@ -17,18 +17,13 @@ where
 
 // The function takes directory path and return the fize of the directory
 pub fn get_directory_size(directory_path: &str) -> u64 {
-  let output = Command::new("ls")
-    .arg("-R")
-    .arg("-sh")
-    .arg(directory_path)
-    .output()
-    .expect("failed to execute ls command");
-  println!("Output of ls on tantivy index directory {:?}", output);
+  println!("Checking size of directory: {}", directory_path);
 
   let folder_size = get_size(directory_path).unwrap();
   return folder_size;
 }
 
+#[allow(unused)]
 pub fn run_cargo_in_dir(dir_path: &str, package_name: &str) -> std::io::Result<Child> {
   Command::new("cargo")
     .arg("run")
