@@ -101,7 +101,8 @@ impl InfinoApiClient {
     }
   }
 
+  #[allow(unused)]
   pub fn get_index_dir_path(&self) -> &str {
-    "../index/"
+    "../index"
   }
 }

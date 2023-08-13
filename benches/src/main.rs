@@ -88,11 +88,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Index the data using infino and find the output size.
   let infino_api = InfinoApiClient::new();
   infino_api.index_lines(input_data_path, max_docs).await;
-  let infino_api_index_size = get_directory_size(infino_api.get_index_dir_path());
   println!(
-    "Infino via API index size = {} bytes",
-    infino_api_index_size
+    "We haven't yet added flush API to infino client, so can't get accurate index size via API",
   );
+
+  // TODO: Add flush API to infino client, so that we can get accurate index size via API.
+  //let infino_api_index_size = get_directory_size(infino_api.get_index_dir_path());
+  //println!(
+  //  "Infino via API index size = {} bytes",
+  //  infino_api_index_size
+  //);
 
   // Perform search on infino index
   infino_api
