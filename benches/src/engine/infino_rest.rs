@@ -17,13 +17,13 @@ impl InfinoApiClient {
 
   pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) {
     let mut num_docs = 0;
-    let now = Instant::now();
 
     // This is kept same as ClickHouse to so that equivalent API requests are made across
     // Clickhouse and infino_rest.
     let num_docs_per_batch = 100;
     let mut num_docs_in_this_batch = 0;
     let mut logs_batch = Vec::new();
+    let now = Instant::now();
 
     if let Ok(lines) = io::read_lines(input_data_path) {
       let client = reqwest::Client::new();
