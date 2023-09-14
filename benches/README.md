@@ -1,4 +1,4 @@
-# Benchmark - Elasticsearch and Tantivy Comparison with Infino
+# Benchmark - Elasticsearch, Clickhouse and Tantivy Comparison with Infino
 
 This pacakge contains comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs) and [Tantivy](https://github.com/quickwit-oss/tantivy). The raw output of comparison can be found [here](output.txt).
 
