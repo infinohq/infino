@@ -50,9 +50,9 @@ The below tests were executed on MacBook Pro (16-inch, 2023) having Apple M2 Max
 
 ### Index size
 
-| dataset    | Elasticsearch   | Tantivy         | Clickhouse       | Infino          | Infino-Rest     |
-| ---------- | --------------- | --------------- | -----------------| --------------- | --------------- |
-| Apache Log | 2,411,725 bytes | 3,146,858 bytes | 27,042,683 bytes | 1,848,698 bytes | Same as Infino  |
+| dataset                      | Elasticsearch   | Tantivy         | Clickhouse       | Infino          | Infino-Rest     |
+| ---------------------------- | --------------- | --------------- | -----------------| --------------- | --------------- |
+| Apache Log (5,135,877 bytes) | 2,411,725 bytes | 3,146,858 bytes | 27,042,683 bytes | 1,848,698 bytes | Same as Infino  |
 
 ### Insertion speed
 
