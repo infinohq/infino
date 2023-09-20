@@ -238,7 +238,7 @@ async fn append_log(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
 
-  let is_queue = if state.queue.is_some() { true } else { false };
+  let is_queue = state.queue.is_some();
 
   let result = parse_json(&log_json);
   if result.is_err() {
@@ -299,7 +299,7 @@ async fn append_ts(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending time series entry: {:?}", ts_json);
 
-  let is_queue = if state.queue.is_some() { true } else { false };
+  let is_queue = state.queue.is_some();
 
   let result = parse_json(&ts_json);
   if result.is_err() {
