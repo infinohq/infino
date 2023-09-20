@@ -332,8 +332,6 @@ impl Segment {
       return vec![];
     }
 
-    let mut log_messages = Vec::new();
-
     let mut iter = postings_lists.iter();
 
     // Start with the first postings list as the initial result
@@ -345,6 +343,19 @@ impl Segment {
       acc.into_iter().filter(|&x| list.contains(&x)).collect()
     });
 
+    let log_messages =
+      self.get_log_messages_from_ids(&log_message_ids, range_start_time, range_end_time);
+    return log_messages;
+  }
+
+  /// Return the log messages within the given time range corresponding to the given log message ids.
+  fn get_log_messages_from_ids(
+    &self,
+    log_message_ids: &Vec<u32>,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Vec<LogMessage> {
+    let mut log_messages = Vec::new();
     for log_message_id in log_message_ids {
       let retval = self.forward_map.get(&log_message_id).unwrap();
       let log_message = retval.value();
@@ -358,7 +369,7 @@ impl Segment {
       }
     }
 
-    log_messages
+    return log_messages;
   }
 
   /// Returns true if this segment overlaps with the given range.
