@@ -343,8 +343,13 @@ impl Segment {
       acc.into_iter().filter(|&x| list.contains(&x)).collect()
     });
 
-    let log_messages =
+    // The above intersection may leave around duplicates - see https://github.com/infinohq/infino/issues/58
+    // Remove the consecutive duplicates
+    log_message_ids.dedup();
+
+    let mut log_messages =
       self.get_log_messages_from_ids(&log_message_ids, range_start_time, range_end_time);
+    log_messages.sort();
     return log_messages;
   }
 
@@ -762,5 +767,36 @@ mod tests {
     // Non-overlapping ranges.
     assert!(!segment.is_overlap(start - 100, start - 1));
     assert!(!segment.is_overlap(end + 1, end + 100));
+  }
+
+  #[test]
+  fn test_duplicates() {
+    let segment = Segment::new();
+
+    segment
+      .append_log_message(1000, &HashMap::new(), "hello world")
+      .unwrap();
+    segment
+      .append_log_message(1001, &HashMap::new(), "some message")
+      .unwrap();
+    segment
+      .append_log_message(1002, &HashMap::new(), "hello world hello world")
+      .unwrap();
+
+    // Test terms map.
+    assert_eq!(segment.terms.len(), 4);
+    assert!(segment.terms.contains_key("hello"));
+    assert!(segment.terms.contains_key("world"));
+    assert!(segment.terms.contains_key("some"));
+    assert!(segment.terms.contains_key("message"));
+
+    // Test search.
+    let results = segment.search("hello", 0, u64::MAX);
+    assert_eq!(results.len(), 2);
+    assert_eq!(
+      results.get(0).unwrap().get_text(),
+      "hello world hello world"
+    );
+    assert_eq!(results.get(1).unwrap().get_text(), "hello world");
   }
 }

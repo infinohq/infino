@@ -197,10 +197,10 @@ mod tests {
 
     let end = Utc::now().timestamp_millis() as u64;
 
-    // Search for log messages.
+    // Search for log messages. The order of results should be reverse chronological order.
     let results = tsldb.search("message", start, end);
-    assert_eq!(results.get(0).unwrap().get_text(), "log message 1");
-    assert_eq!(results.get(1).unwrap().get_text(), "log message 2");
+    assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
+    assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
 
     // Search for data points.
     let results = tsldb.get_time_series(&"__name__", &"some_metric", start, end);

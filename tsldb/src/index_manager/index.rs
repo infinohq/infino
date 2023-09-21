@@ -203,6 +203,7 @@ impl Index {
       let mut results = segment.search(query, range_start_time, range_end_time);
       retval.append(&mut results);
     }
+    retval.sort();
     retval
   }
 

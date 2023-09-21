@@ -82,7 +82,8 @@ impl Default for LogMessage {
 
 impl Ord for LogMessage {
   fn cmp(&self, other: &Self) -> Ordering {
-    self.time.cmp(&other.time)
+    // Sort in reverse chronological order by time.
+    other.time.cmp(&self.time)
   }
 }
 
