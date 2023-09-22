@@ -89,6 +89,8 @@ impl Tsldb {
   }
 
   /// Commit the index.
+  /// If the flag sync_after_commit is set to true, the directory is sync-ed immediately instead of relying on the OS to do so,
+  /// hence this flag is usually set to true only in tests.
   pub fn commit(&self, sync_after_commit: bool) {
     self.index.commit(sync_after_commit);
   }

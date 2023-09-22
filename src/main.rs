@@ -122,12 +122,16 @@ async fn app(
 
   // Build our application with a route
   let router: Router = Router::new()
+    // GET methods
+    .route("/get_index_dir", get(get_index_dir))
     .route("/ping", get(ping))
-    .route("/append_log", post(append_log))
-    .route("/append_ts", post(append_ts))
     .route("/search_log", get(search_log))
     .route("/search_ts", get(search_ts))
-    .route("/get_index_dir", get(get_index_dir))
+    //---
+    // POST methods
+    .route("/append_log", post(append_log))
+    .route("/append_ts", post(append_ts))
+    .route("/flush", post(flush))
     .with_state(shared_state.clone());
 
   (
@@ -413,6 +417,14 @@ async fn search_ts(
   );
 
   serde_json::to_string(&results).expect("Could not convert search results to json")
+}
+
+/// Flush the index to disk.
+async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
+  // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
+  state.tsldb.commit(true);
+
+  Ok(())
 }
 
 /// Get index directory used by tsldb.
@@ -732,6 +744,9 @@ mod tests {
       log_messages_expected.push(log_message_expected);
     } // end for
 
+    // Sort the expected log messages in reverse chronological order.
+    log_messages_expected.sort();
+
     let search_query = "value1 field34:value4";
 
     let query = SearchQuery {
@@ -809,6 +824,19 @@ mod tests {
       end_time: Some(10000),
     };
     check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await;
+
+    // Check whether the /flush works.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri("/flush")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
