@@ -101,6 +101,11 @@ impl InfinoApiClient {
     }
   }
 
+  pub async fn flush(&self) {
+    let query_url = &format!("http://localhost:3000/flush");
+    reqwest::post(query_url).await;
+  }
+
   #[allow(unused)]
   pub fn get_index_dir_path(&self) -> &str {
     "../index"
