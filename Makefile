@@ -24,6 +24,12 @@ test: check fmt
 	echo "Running test for all the packages"
 	cargo test --all
 
+build:
+	cargo build $(release)
+
+clean:
+	cargo clean
+
 docker-build:
 	echo "Running docker build..."
 	docker build -t infinohq/infino:latest -f docker/Dockerfile .
