@@ -1,3 +1,5 @@
+use core::num;
+
 use bitpacking::BitPacker;
 use crossbeam::atomic::AtomicCell;
 use log::{debug, error};
@@ -10,7 +12,7 @@ use crate::utils::error::TsldbError;
 use crate::utils::sync::RwLock;
 
 /// Represents a delta-compressed PostingsBlock.
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PostingsBlockCompressed {
   /// Initial value.
   #[serde(with = "atomic_cell_serde")]
@@ -32,6 +34,14 @@ impl PostingsBlockCompressed {
       initial: AtomicCell::new(0),
       num_bits: AtomicCell::new(0),
       log_message_ids_compressed: RwLock::new(Vec::new()),
+    }
+  }
+
+  pub fn new_with_params(initial: u32, num_bits: u8, log_message_ids_compressed: &Vec<u8>) -> Self {
+    PostingsBlockCompressed {
+      initial: AtomicCell::new(initial),
+      num_bits: AtomicCell::new(num_bits),
+      log_message_ids_compressed: RwLock::new(log_message_ids_compressed.clone()),
     }
   }
 
@@ -113,6 +123,20 @@ impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
     );
 
     Ok(postings_block_compressed)
+  }
+}
+
+impl Clone for PostingsBlockCompressed {
+  fn clone(&self) -> PostingsBlockCompressed {
+    PostingsBlockCompressed::new_with_params(
+      self.get_initial(),
+      self.get_num_bits(),
+      &self
+        .get_log_message_ids_compressed()
+        .read()
+        .unwrap()
+        .clone(),
+    )
   }
 }
 
