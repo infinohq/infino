@@ -27,7 +27,8 @@ impl Tantivy {
     Tantivy { schema, index }
   }
 
-  pub async fn index_lines(&mut self, input_data_path: &str, max_docs: i32) {
+  /// Indexes input data and returns the time required for insertion as microseconds.
+  pub async fn index_lines(&mut self, input_data_path: &str, max_docs: i32) -> u128 {
     let mut num_docs = 0;
     let mut index_writer = self.index.writer(50_000_000).unwrap();
     let now = Instant::now();
@@ -55,12 +56,16 @@ impl Tantivy {
       }
       index_writer.commit().unwrap();
     }
-    let elapsed = now.elapsed();
-    println!("Tantivy time required for insertion: {:.2?}", elapsed);
+    let elapsed = now.elapsed().as_micros();
+    println!(
+      "Tantivy time required for insertion: {} microseconds",
+      elapsed
+    );
+    return elapsed;
   }
 
-  // Searches the document against the query and returns the count of of matching document
-  pub fn search(&self, query: &str) -> usize {
+  /// Searches the given term and returns the time required in microseconds
+  pub fn search(&self, query: &str) -> u128 {
     let num_words = query.split_whitespace().count();
     let reader = self
       .index
@@ -77,17 +82,22 @@ impl Tantivy {
     let top_docs = searcher
       .search(&query, &TopDocs::with_limit(100_000))
       .unwrap();
-    let elapsed = now.elapsed();
+    let elapsed = now.elapsed().as_micros();
     println!(
-      "Tantivy time required for searching {} word query is : {:.2?}. Num of results {}",
+      "Tantivy time required for searching {} word query is : {} microseconds. Num of results {}",
       num_words,
       elapsed,
       top_docs.len()
     );
-    return top_docs.len();
+    return elapsed;
   }
 
-  pub fn search_multiple_queries(&self, queries: &[&str]) -> usize {
-    queries.iter().map(|query| self.search(query)).count()
+  /// Runs multiple queries and returns the sum of time needed to run them in microseconds.
+  pub fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
+    queries
+      .iter()
+      .map(|query| self.search(query))
+      .map(|time| time)
+      .sum()
   }
 }

@@ -24,7 +24,8 @@ impl InfinoEngine {
     }
   }
 
-  pub async fn index_lines(&mut self, input_data_path: &str, max_docs: i32) {
+  /// Indexes input data and returns the time required for insertion as microseconds.
+  pub async fn index_lines(&mut self, input_data_path: &str, max_docs: i32) -> u128 {
     let mut num_docs = 0;
     let now = Instant::now();
     if let Ok(lines) = io::read_lines(input_data_path) {
@@ -51,32 +52,39 @@ impl InfinoEngine {
 
       self.tsldb.commit(false);
     }
-    let elapsed = now.elapsed();
-    println!("Infino time required for insertion: {:.2?}", elapsed);
+    let elapsed = now.elapsed().as_micros();
+    println!(
+      "Infino time required for insertion: {} microseconds",
+      elapsed
+    );
+    return elapsed;
   }
 
-  pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> usize {
+  /// Searches the given term and returns the time required in microseconds
+  pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let num_words = query.split_whitespace().count();
     let now = Instant::now();
     let result = self.tsldb.search(query, range_start_time, range_end_time);
-    let elapsed = now.elapsed();
+    let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino time required for searching {} word query is : {:.2?}. Num of results {}",
+      "Infino time required for searching {} word query is : {} microseconds. Num of results {}",
       num_words,
       elapsed,
       result.len()
     );
-    return result.len();
+    return elapsed;
   }
 
   pub fn get_index_dir_path(&self) -> &str {
     self.index_dir_path.as_str()
   }
 
-  pub fn search_multiple_queries(&self, queries: &[&str]) -> usize {
+  /// Runs multiple queries and returns the sum of time needed to run them in microseconds.
+  pub fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
     queries
       .iter()
       .map(|query| self.search(query, 0, u64::MAX))
-      .count()
+      .map(|time| time)
+      .sum()
   }
 }

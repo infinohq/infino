@@ -15,7 +15,8 @@ impl InfinoApiClient {
     InfinoApiClient {}
   }
 
-  pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) {
+  /// Indexes input data and returns the time required for insertion as microseconds.
+  pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) -> u128 {
     let mut num_docs = 0;
 
     // This is kept same as ClickHouse to so that equivalent API requests are made across
@@ -57,12 +58,17 @@ impl InfinoApiClient {
           }
         }
       }
-
-      let elapsed = now.elapsed();
-      println!("Infino REST time required for insertion: {:.2?}", elapsed);
     }
+
+    let elapsed = now.elapsed().as_micros();
+    println!(
+      "Infino REST time required for insertion: {} microseconds",
+      elapsed
+    );
+    return elapsed;
   }
 
+  /// Searches the given term and returns the time required in microseconds
   pub async fn search(&self, text: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let words: Vec<_> = text.split_whitespace().collect();
     let num_words = words.len();
@@ -74,9 +80,9 @@ impl InfinoApiClient {
 
     let now = Instant::now();
     let response = reqwest::get(query_url).await;
-    let elapsed = now.elapsed();
+    let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino REST time required for searching {} word query is {:.2?}",
+      "Infino REST time required for searching {} word query is {} microseconds",
       num_words, elapsed
     );
 
@@ -86,24 +92,32 @@ impl InfinoApiClient {
         #[allow(unused)]
         let text = res.text().await.unwrap();
         //println!("Result {}", text);
-        elapsed.as_nanos()
       }
       Err(err) => {
         println!("Error while fetching from infino: {}", err);
-        elapsed.as_nanos()
       }
     }
+    elapsed
   }
 
-  pub async fn search_multiple_queries(&self, queries: &[&str]) {
+  /// Runs multiple queries and returns the sum of time needed to run them in microseconds.
+  pub async fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
+    let mut time = 0;
     for query in queries {
-      self.search(*query, 0, u64::MAX).await;
+      time += self.search(query, 0, u64::MAX).await;
     }
+    return time;
   }
 
+  #[allow(unused)]
   pub async fn flush(&self) {
-    let query_url = &format!("http://localhost:3000/flush");
-    reqwest::post(query_url).await;
+    let client = reqwest::Client::new();
+
+    let _ = client
+      .post(&format!("http://localhost:3000/flush"))
+      .body("")
+      .send()
+      .await;
   }
 
   #[allow(unused)]

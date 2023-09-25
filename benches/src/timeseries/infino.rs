@@ -62,11 +62,11 @@ impl InfinoTsClient {
         #[allow(unused)]
         let text = res.text().await.unwrap();
         // println!("Result {}", text);
-        elapsed.as_nanos()
+        elapsed.as_micros()
       }
       Err(err) => {
         println!("Error while fetching from prometheus: {}", err);
-        elapsed.as_nanos()
+        elapsed.as_micros()
       }
     }
   }

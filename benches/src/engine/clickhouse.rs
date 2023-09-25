@@ -36,7 +36,8 @@ impl ClickhouseEngine {
     ClickhouseEngine { client }
   }
 
-  pub async fn index_lines(&mut self, input_data_path: &str, max_docs: i32) {
+  /// Indexes input data and returns the time required for insertion as microseconds.
+  pub async fn index_lines(&mut self, input_data_path: &str, max_docs: i32) -> u128 {
     let mut num_docs = 0;
     let now = Instant::now();
     let mut inserter = self
@@ -72,11 +73,17 @@ impl ClickhouseEngine {
     }
     inserter.end().await.unwrap();
 
-    let elapsed = now.elapsed();
-    println!("Clickhouse time required for insertion: {:.2?}", elapsed);
+    let elapsed = now.elapsed().as_micros();
+    println!(
+      "Clickhouse time required for insertion: {} microseconds",
+      elapsed
+    );
+
+    return elapsed;
   }
 
-  pub async fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> usize {
+  /// Searches the given term and returns the time required in microseconds
+  pub async fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let words: Vec<_> = query.split_whitespace().collect();
     let num_words = words.len();
 
@@ -98,23 +105,25 @@ impl ClickhouseEngine {
 
     // TODO: figure out hot to get count of results from Clickhouse results.
     //let count = rows.unwrap().len();
-    let count = 0;
-    let elapsed = now.elapsed();
+    let elapsed = now.elapsed().as_micros();
 
     println!(
-      "Clickhouse time required for searching {} word query is : {:.2?}",
+      "Clickhouse time required for searching {} word query is : {} microseconds",
       num_words, elapsed
     );
-    return count;
+    return elapsed;
   }
 
   pub fn get_index_dir_path(&self) -> &str {
     "./ch-tmp/data/test_logs/test_logs/"
   }
 
-  pub async fn search_multiple_queries(&self, queries: &[&str]) {
+  /// Runs multiple queries and returns the sum of time needed to run them in microseconds.
+  pub async fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
+    let mut time = 0;
     for query in queries {
-      self.search(query, 0, u64::MAX).await;
+      time += self.search(query, 0, u64::MAX).await;
     }
+    return time;
   }
 }

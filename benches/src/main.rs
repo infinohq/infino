@@ -58,6 +58,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Path to the input data to index from. Points to a log file - where each line is indexed
   // as a separate document in the elasticsearch index and the infino index.
   let input_data_path = "data/Apache.log";
+  let cell_input_data_size = std::fs::metadata(input_data_path)
+    .map(|metadata| metadata.len())
+    .expect("Could not get the input data size");
 
   // Maximum number of documents to index. Set this to -1 to index all the documents.
   let max_docs = -1;
@@ -71,12 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let config_path = format!("{}/{}", &curr_dir.to_str().unwrap(), "config");
 
   let mut infino = InfinoEngine::new(&config_path);
-  infino.index_lines(input_data_path, max_docs).await;
-  let infino_index_size = get_directory_size(infino.get_index_dir_path());
-  println!("Infino index size = {} bytes", infino_index_size);
+  let cell_infino_index_time = infino.index_lines(input_data_path, max_docs).await;
+  let cell_infino_index_size = get_directory_size(infino.get_index_dir_path());
+  println!("Infino index size = {} bytes", cell_infino_index_size);
 
   // Perform search on infino index
-  infino.search_multiple_queries(INFINO_SEARCH_QUERIES);
+  let cell_infino_search_time = infino.search_multiple_queries(INFINO_SEARCH_QUERIES);
 
   let _ = fs::remove_dir_all(format! {"{}/index", &curr_dir.to_str().unwrap()});
 
@@ -86,21 +89,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("\n\n***Now running Infino via REST API client***");
 
   // Index the data using infino and find the output size.
-  let infino_api = InfinoApiClient::new();
-  infino_api.index_lines(input_data_path, max_docs).await;
+  let infino_rest = InfinoApiClient::new();
+  let cell_infino_rest_index_time = infino_rest.index_lines(input_data_path, max_docs).await;
 
-  // Flush the index to disk
-  infino_api.flush();
-  thread::sleep(std::time::Duration::from_millis(1000));
+  // TODO: The flush does not flush to disk reliably - anf it make take more time before the index is updated on disk.
+  // Figure out how to flush reliably and the code below can be uncommented.
+  // ---
+  // Flush the index to disk - sleep for a second to let the OS complete flushing.
+  //let _ = infino_rest.flush();
+  //thread::sleep(std::time::Duration::from_millis(1000));
 
-  let infino_api_index_size = get_directory_size(infino_api.get_index_dir_path());
-  println!(
-    "Infino via API index size = {} bytes",
-    infino_api_index_size
-  );
+  //let cell_infino_rest_index_size = get_directory_size(infino_rest.get_index_dir_path());
+  //println!(
+  //  "Infino via API index size = {} bytes",
+  //  cell_infino_rest_index_size
+  //);
 
   // Perform search on infino index
-  infino_api
+  let cell_infino_rest_search_time = infino_rest
     .search_multiple_queries(INFINO_SEARCH_QUERIES)
     .await;
 
@@ -110,12 +116,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("\n\n***Now running Clickhouse***");
 
   let mut clickhouse = ClickhouseEngine::new().await;
-  clickhouse.index_lines(input_data_path, max_docs).await;
-  let clickhouse_index_size = get_directory_size(clickhouse.get_index_dir_path());
-  println!("Clickhouse index size = {} bytes", clickhouse_index_size);
+  let cell_clickhouse_index_time = clickhouse.index_lines(input_data_path, max_docs).await;
+  let cell_clickhouse_index_size = get_directory_size(clickhouse.get_index_dir_path());
+  println!(
+    "Clickhouse index size = {} bytes",
+    cell_clickhouse_index_size
+  );
 
   // Perform search on clickhouse index
-  clickhouse
+  let cell_clickhouse_search_time = clickhouse
     .search_multiple_queries(CLICKHOUSE_SEARCH_QUERIES)
     .await;
 
@@ -130,17 +139,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   create_dir(&tantivy_index_stored_path).unwrap();
 
   let mut tantivy_with_stored = Tantivy::new(&tantivy_index_stored_path, true);
-  tantivy_with_stored
+  let cell_tantivy_index_time = tantivy_with_stored
     .index_lines(input_data_path, max_docs)
     .await;
-  let tantivy_index_stored_size = get_directory_size(&tantivy_index_stored_path);
+  let cell_tantivy_index_size = get_directory_size(&tantivy_index_stored_path);
   println!(
     "Tantivy index size with STORED flag = {} bytes",
-    tantivy_index_stored_size
+    cell_tantivy_index_size
   );
 
   // Perform search on Tantivy index
-  tantivy_with_stored.search_multiple_queries(TANTIVY_SEARCH_QUERIES);
+  let cell_tantivy_search_time =
+    tantivy_with_stored.search_multiple_queries(TANTIVY_SEARCH_QUERIES);
 
   // TANTIVY END
 
@@ -149,19 +159,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // Index the data using elasticsearch and find the output size.
   let es = ElasticsearchEngine::new().await;
-  es.index_lines(input_data_path, max_docs).await;
+  let cell_es_index_time = es.index_lines(input_data_path, max_docs).await;
 
   // Force merge the index so that the index size is optimized.
   es.forcemerge().await;
 
-  let output = es.get_index_size().await;
-  println!(
-    "Elasticsearch index size in the following statement: {}",
-    output
-  );
+  let cell_es_index_size = es.get_index_size().await;
 
   // Perform search on elasticsearch index
-  es.search_multiple_queries(ELASTICSEARCH_SEARCH_QUERIES)
+  let cell_es_search_time = es
+    .search_multiple_queries(ELASTICSEARCH_SEARCH_QUERIES)
     .await;
 
   // ELASTICSEARCH END
@@ -173,11 +180,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let infino_ts_client = InfinoTsClient::new();
   // Sleep for 5 seconds to let it collect some data
   thread::sleep(time::Duration::from_millis(10000));
-  let mut sum_nanos = 0;
+  let mut cell_infino_ts_search_time = 0;
   for _ in 1..10 {
-    sum_nanos += infino_ts_client.search().await;
+    cell_infino_ts_search_time += infino_ts_client.search().await;
   }
-  println!("Infino timeseries search avg {} nanos", sum_nanos / 10);
+  cell_infino_ts_search_time = cell_infino_ts_search_time / 10;
+  println!(
+    "Infino timeseries search avg {} nanoseconds",
+    cell_infino_ts_search_time
+  );
   // INFINO API FOR TIME SERIES END
 
   // PROMETHEUS START
@@ -191,16 +202,87 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // Sleep for 5 seconds to let it collect some data
   thread::sleep(time::Duration::from_millis(10000));
-  let mut sum_nanos = 0;
+  let mut cell_prometheus_search_time = 0;
   for _ in 1..10 {
-    sum_nanos += prometheus_client.search().await;
+    cell_prometheus_search_time += prometheus_client.search().await;
   }
-  println!("Prometheus timeseries search avg {} nanos", sum_nanos / 10);
+  cell_prometheus_search_time = cell_prometheus_search_time / 10;
+  println!(
+    "Prometheus timeseries search avg {} nanoseconds",
+    cell_prometheus_search_time
+  );
   prometheus_client.stop();
 
   append_task.abort();
 
   // PROMETHEUS END
+
+  // Print the output in markdown
+  println!("\n\n## Results: ");
+  println!(
+    "\nRun date: {}",
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+  );
+  println!("\nOperating System: {}", std::env::consts::OS);
+  println!("\nMachine description: <Please fill in>");
+  println!("\nDataset: {}", input_data_path);
+  println!("\nDataset size: {}bytes", cell_input_data_size);
+  println!();
+
+  let elasticsearch_index_size;
+  if cell_es_index_size == 0 {
+    elasticsearch_index_size = "<figure out from cat response>".to_owned();
+  } else {
+    elasticsearch_index_size = cell_es_index_size.to_string();
+  }
+
+  println!("\n\n### Index size\n");
+  println!("| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |");
+  println!("| ----- | ----- | ----- | ----- | ---- | ---- |");
+  println!(
+    "| {} | {} bytes | {} bytes | {} bytes | {} bytes | Same as infino |",
+    input_data_path,
+    elasticsearch_index_size,
+    cell_tantivy_index_size,
+    cell_clickhouse_index_size,
+    cell_infino_index_size,
+  );
+
+  println!("\n\n### Indexing latency\n");
+  println!("| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |");
+  println!("| ----- | ----- | ----- | ----- | ---- | ---- |");
+  println!(
+    "| {} | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  |",
+    input_data_path,
+    cell_es_index_time,
+    cell_tantivy_index_time,
+    cell_clickhouse_index_time,
+    cell_infino_index_time,
+    cell_infino_rest_index_time
+  );
+
+  println!("\n\n### Search latency\n");
+  println!("Average across different query types. See the detailed output for granular info.\n");
+  println!("| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |");
+  println!("| ----- | ----- | ----- | ----- | ---- | ---- |");
+  println!(
+    "| {} | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  |",
+    input_data_path,
+    cell_es_search_time / ELASTICSEARCH_SEARCH_QUERIES.len() as u128,
+    cell_tantivy_search_time / TANTIVY_SEARCH_QUERIES.len() as u128,
+    cell_clickhouse_search_time / CLICKHOUSE_SEARCH_QUERIES.len() as u128,
+    cell_infino_search_time / INFINO_SEARCH_QUERIES.len() as u128,
+    cell_infino_rest_search_time / INFINO_SEARCH_QUERIES.len() as u128
+  );
+
+  println!("\n\n### Timeseries search latency");
+  println!("\nAverage over 10 queries on time series.\n");
+  println!("| Data points | Prometheus | Infino |");
+  println!("| ----------- | ---------- | ---------- |");
+  println!(
+    "| Search Latency | {} microseconds | {} microseconds |\n",
+    cell_prometheus_search_time, cell_infino_ts_search_time
+  );
 
   Ok(())
 }

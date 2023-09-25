@@ -1,6 +1,8 @@
 # Benchmark - Elasticsearch, Clickhouse and Tantivy Comparison with Infino
 
-This pacakge contains comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs) and [Tantivy](https://github.com/quickwit-oss/tantivy). The raw output of comparison can be found [here](output.txt).
+This pacakge contains comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) and [Tantivy](https://github.com/quickwit-oss/tantivy). The raw output of comparison can be found [here](output.txt).
+
+Want to jump directly to the results? Scroll below towards the end of this page.
 
 ## Datasets
 
@@ -22,7 +24,7 @@ File is present in `benches/data` folder named Apache.log
   - Start elasticsearch:
     - `$ bin/elasticsearch`
 - Install [prometheus](https://prometheus.io/download/) based on your architecure
-  - Unzip and modify the prometheus.yaml file as below
+  - Unzip and modify the prometheus.yml file as below
   - add scrape_config
     ```
     - job_name: 'rust_app'
@@ -32,9 +34,11 @@ File is present in `benches/data` folder named Apache.log
   - Change scrape interval to 1s `scrape_interval: 1s`
   - Start prometheus simply by running the binary `./prometheus`
 - Install [Clickhouse](https://clickhouse.com/docs/en/install)
-  - Create directory `benches/ch-tmp` and move clickhouse binary there, srtart server from this directory using `./clickhouse server`
+  - Create directory `benches/ch-tmp` and move clickhouse binary there, start server from this directory using `./clickhouse server`
+  - Drop database `test_logs` using clickhouse client, in case it exists already
   - Create database `test_logs` using clickhouse client using command `create database test_logs`
 - Start Infino server
+  - Make sure the `index` directory is empty - so that we are starting from a clean slate
   - Run `make run` from `infino` directory
 
 - Run benchmark
