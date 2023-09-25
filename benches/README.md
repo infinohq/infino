@@ -48,38 +48,46 @@ $ cd benches
 $ cargo run -r
 ```
 
-## Results
+## Results:
 
-The below tests were executed on MacBook Pro (16-inch, 2023) having Apple M2 Max chipset and 32Gb of Ram
+Run date: 2023-09-25
+
+Operating System: macos
+
+Machine description: Macbook Pro 16inch, 32GB RAM, M2 Max
+
+Dataset: data/Apache.log
+
+Dataset size: 5135877bytes
+
 
 ### Index size
 
-| dataset                      | Elasticsearch   | Tantivy         | Clickhouse       | Infino          | Infino-Rest     |
-| ---------------------------- | --------------- | --------------- | -----------------| --------------- | --------------- |
-| Apache Log (5,135,877 bytes) | 2,411,725 bytes | 3,146,858 bytes | 27,042,683 bytes | 1,848,698 bytes | Same as Infino  |
+| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- | ---- |
+| data/Apache.log | 2411725 bytes | 3117717 bytes | 26908782 bytes | 1865640 bytes | Same as infino |
 
-### Insertion speed
 
-| dataset    | Elasticsearch | Tantivy    | Clickhouse | Infino   | Infino-Rest |
-| ---------- | ------------- | ---------- | ---------- | -------- | ----------- |
-| Apache Log | 7,180 ms      | 422.71 ms  | 728.58 ms  | 267.23ms | 661.69ms    |
+### Indexing latency
+
+| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- | ---- |
+| data/Apache.log | 7154332 microseconds  | 456012 microseconds  | 652031 microseconds  | 276466 microseconds  | 660976 microseconds  |
+
 
 ### Search latency
 
-| # of words in query | Elasticsearch | Tantivy   | Clickhouse | Infino    | Infino-Rest |
-| ------------------- | ------------- | --------- | ---------- | --------- | ----------- |
-| 1                   | 50ms          | 1.45ms    | 6.60ms     | 1.03ms    | 942.42µs    |
-| 2                   | 4ms           | 61.25µs   | 7.23ms     | 12.25µs   | 710.88µs    |
-| 3                   | 49ms          | 2.32ms    | 10.63ms    | 106.32ms  | 418.25µs    |
-| 4                   | 38ms          | 3.30ms    | 8.05ms     | 29.97ms   | 399.17µs    |
-| 5                   | 34ms          | 155.88µs  | 7.39ms     | 185.83µs  | 531.75µs    |
-| 6                   | 37ms          | 111.29µs  | 8.02ms     | 1.57ms    | 599.13µs    |
-| 7                   | 31ms          | 4.34mms   | 9.28ms     | 86.46ms.  | 577.21µs    |
+Average across different query types. See the detailed output for granular info.
+
+| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- | ---- |
+| data/Apache.log | 37571 microseconds  | 1328 microseconds  | 7630 microseconds  | 33613 microseconds  | 476 microseconds  |
+
 
 ### Timeseries search latency
 
-Average over 10 queries made
+Average over 10 queries on time series.
 
-| Data points | Prometheus | Infino     |
+| Data points | Prometheus | Infino |
 | ----------- | ---------- | ---------- |
-| CPU Usage   |    2035µs  |   1193µs   |
+| Search Latency | 1472 microseconds | 605 microseconds |
