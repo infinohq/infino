@@ -131,11 +131,11 @@ impl PrometheusClient {
         // println!("Result {}", text);
         //let result: QueryResult = serde_json::from_str(&text).unwrap();
         // println!("Result {:?}", result);
-        elapsed.as_nanos()
+        elapsed.as_micros()
       }
       Err(err) => {
         println!("Error while fetching from prometheus: {}", err);
-        elapsed.as_nanos()
+        elapsed.as_micros()
       }
     }
   }

@@ -6,20 +6,22 @@ edition = "2021"
 [dependencies]
 chrono = "*"
 clickhouse = "*"
-elasticsearch = "8.7.0-alpha.1"
+elasticsearch = "8.5.0-alpha.1"
 fs_extra = "1.2.0"
 serde = { version = "~1", features = ["derive"]}
 serde_json = "~1"
 tokio = { version = "*", features = ["full"] }
 url = "2.3.1"
 uuid = "1.2.2"
-tantivy = "0.21.0"
+reqwest = "0.11.17"
+tantivy = "0.19.2"
 tempfile = "*"
 tempdir = "*"
 prometheus = "0.13.3"
 warp = "*"
-sysinfo = "0.29.10"
-reqwest = "0.11.17"
+
+# Sysinfo API has changed beyond this version. Do not upgrade without the corresponding changes in the code.
+sysinfo = "0.17.3"
 
 [dependencies.tsldb]
 path = "../tsldb"
