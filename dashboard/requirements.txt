@@ -20,6 +20,8 @@ charset-normalizer==3.2.0
     # via requests
 click==8.1.7
     # via streamlit
+exceptiongroup==1.1.3
+    # via pytest
 gitdb==4.0.10
     # via gitpython
 gitpython==3.1.37
@@ -28,6 +30,8 @@ idna==3.4
     # via requests
 importlib-metadata==6.8.0
     # via streamlit
+iniconfig==2.0.0
+    # via pytest
 jinja2==3.1.2
     # via
     #   altair
@@ -52,6 +56,7 @@ numpy==1.26.0
 packaging==23.1
     # via
     #   altair
+    #   pytest
     #   streamlit
 pandas==2.1.1
     # via
@@ -59,6 +64,8 @@ pandas==2.1.1
     #   streamlit
 pillow==10.0.1
     # via streamlit
+pluggy==1.3.0
+    # via pytest
 protobuf==4.24.3
     # via streamlit
 pyarrow==13.0.0
@@ -67,6 +74,8 @@ pydeck==0.8.0
     # via streamlit
 pygments==2.16.1
     # via rich
+pytest==7.4.2
+    # via -r requirements.in
 python-dateutil==2.8.2
     # via
     #   pandas
@@ -95,6 +104,8 @@ tenacity==8.2.3
     # via streamlit
 toml==0.10.2
     # via streamlit
+tomli==2.0.1
+    # via pytest
 toolz==0.12.0
     # via altair
 tornado==6.3.3

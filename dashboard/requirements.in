@@ -1,1 +1,6 @@
+pyyaml
 streamlit
+watchdog
+
+# test dependencies
+pytest
