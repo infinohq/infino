@@ -10,5 +10,5 @@ test:
 check:
 	black src tests
 
-run_app:
-	. venv/bin/activate; python src/app.py
+run_driver:
+	. venv/bin/activate; python src/driver.py

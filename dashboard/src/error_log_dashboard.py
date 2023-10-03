@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 
+from util.yaml import read_config
+
 # Sample data
 data = {
     "Date": pd.date_range(start="2023-01-01", end="2023-01-31", freq="D"),
