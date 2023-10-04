@@ -10,7 +10,7 @@ from util.toml_util import get_server_url
 
 
 def prepare_df(infino_server_url):
-    client = InfinoClient()
+    client = InfinoClient(infino_server_url)
 
     # Sample data
     data = {

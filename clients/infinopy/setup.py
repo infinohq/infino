@@ -2,9 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name="infinopy",
-    version="0.0.1",
+    version="0.0.2",
     author="Vinay K",
-    author_email="vinaykakade@gmail.com.com",
+    author_email="vinaykakade@gmail.com",
     description="A Python package for Infino",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
