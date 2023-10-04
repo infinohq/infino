@@ -1,0 +1,9 @@
+docker
+infinopy
+plotly
+pyyaml
+streamlit
+watchdog
+
+# test dependencies
+pytest

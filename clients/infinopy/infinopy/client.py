@@ -3,8 +3,11 @@ import requests
 
 
 class InfinoClient:
-    def __init__(self):
-        self.base_url = os.environ.get("INFINO_BASE_URL", "http://localhost:3000")
+    def __init__(self, base_url=None):
+        if base_url:
+            self.base_url = base_url
+        else:
+            self.base_url = os.environ.get("INFINO_BASE_URL", "http://localhost:3000")
 
     def _request(self, method, path, params=None, json=None):
         url = self.base_url + path
@@ -42,3 +45,6 @@ class InfinoClient:
     def get_index_dir(self):
         path = "/get_index_dir"
         return self._request("GET", path)
+
+    def get_base_url(self):
+        return self.base_url
