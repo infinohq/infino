@@ -10,5 +10,5 @@ test:
 check:
 	black src tests
 
-run_driver:
+run-driver:
 	. venv/bin/activate; python src/driver.py

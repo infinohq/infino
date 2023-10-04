@@ -1,10 +1,13 @@
 from datetime import datetime
 import os
+import subprocess
 import time
 import re
 import docker
 
 from infinopy import InfinoClient
+
+DASHBOARD_FILE_NAME = "src" + os.sep + "example_log_dashboard.py"
 
 
 def start_infino():
@@ -97,6 +100,10 @@ if __name__ == "__main__":
     publish_logs(client)
 
     # Display dashboard
+    print("Displaying dashboard...")
+    # Create streamlit command and run it
+    command = ["streamlit", "run", DASHBOARD_FILE_NAME]
+    subprocess.run(command, check=True)
 
     # Shutdown Infino server
     input(
