@@ -52,7 +52,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
         # Test the search_log method.
-        # Query for text that is presenr in both the payloads.
+        # Query for text that is present in both the payloads.
         response = self.client.search_log(
             text="my message", start_time=current_time - 10, end_time=current_time + 10
         )
@@ -60,13 +60,19 @@ class InfinoClientTestCase(unittest.TestCase):
         results = response.json()
         self.assertEqual(len(results), 2)
 
-        # Query for text that is presenr in only one payload.
+        # Query for text that is present in only one payload.
         response = self.client.search_log(
             text="two", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 1)
+
+        # Test that default values for start and end time work.
+        response = self.client.search_log(text="my message")
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 2)
 
     def test_ts(self):
         current_time = int(time.time())
@@ -86,6 +92,15 @@ class InfinoClientTestCase(unittest.TestCase):
             label_value="some_metric_name",
             start_time=current_time - 10,
             end_time=current_time + 10,
+        )
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 2)
+
+        # Test that default values for start and end time work.
+        response = self.client.search_ts(
+            label_name="__name__",
+            label_value="some_metric_name",
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
