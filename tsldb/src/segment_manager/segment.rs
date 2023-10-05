@@ -314,7 +314,7 @@ impl Segment {
 
     // New code
     // postings lsit will contain list of PostingBlocksCompressed
-    let mut postings_lists: Vec<PostingsBlockCompressed> = Vec::new();
+    let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
 
     for term in terms {
       let result = self.terms.get(term);
@@ -333,14 +333,23 @@ impl Segment {
         }
       };
       let inital_values = postings_list.get_initial_values().read().unwrap().clone();
-      let flatenned_postings_list_2_d = postings_list.flatten_posting_lists().clone();
 
       // posting_lists.push(flatenned_postings_list_2_d);
       initial_values_list.push(inital_values);
 
       // New code
       // Extract List of PostingBlockCompressed from posting list
-      let posting_block_compressed = *postings_list.get_postings_list_compressed().read().unwrap();
+      // posting_block_compressed is Vec<PostingsBlockCompressed> which is extracted by cloning get_postings_list_compressed from postings_lists
+      let mut posting_block_compressed: Vec<PostingsBlockCompressed> = Vec::new();
+      for posting_block in postings_list
+        .get_postings_list_compressed()
+        .read()
+        .unwrap()
+        .iter()
+      {
+        posting_block_compressed.push(posting_block.clone());
+      }
+
       postings_lists.push(posting_block_compressed);
     }
 
@@ -349,18 +358,15 @@ impl Segment {
       return vec![];
     }
 
-    let mut log_messages = Vec::new();
+    let mut accumulator = Vec::new();
 
-    // Create accumulator as 1st posting list. This will be compared against subsequent posting lists
-    let mut accumulator = match postings_lists.first() {
-      Some(first_posting_list) => PostingsBlock::try_from(first_posting_list)
-        .unwrap()
-        .get_log_message_ids()
-        .read()
-        .unwrap()
-        .clone(),
-      None => return Vec::new(), // No posting lists, return empty result set
-    };
+    // Create accumulator from 1st posting list from postings_lists. Which is flatten the 1st Vec<PostingsBlockCompressed> to Vec<u32>
+    // postings_lists.first() will give Vec<PostingsBlockCompressed> which needs to be iterated on to get Vec<u32>
+    let first_posting_blocks = postings_lists.first().unwrap();
+    for posting_block in first_posting_blocks {
+      let posting_block = PostingsBlock::try_from(posting_block).unwrap();
+      accumulator.append(&mut posting_block.get_log_message_ids().read().unwrap().clone());
+    }
 
     for i in 1..postings_lists.len() {
       let posting_list = &postings_lists[i];
@@ -387,7 +393,12 @@ impl Segment {
           if initial_index + 1 < initial_values.len()
             && accumulator[acc_index] < initial_values[initial_index + 1]
           {
-            let posting_block = PostingsBlock::try_from(&posting_list).unwrap();
+            let posting_block = PostingsBlock::try_from(&posting_list[posting_index])
+              .unwrap()
+              .get_log_message_ids()
+              .read()
+              .unwrap()
+              .clone();
             // start from 1st element of posting_block as 0th element of posting_block is already checked as it was part of intial_values
             let mut posting_block_index = 1;
             while acc_index < accumulator.len() && posting_block_index < posting_block.len() {
@@ -427,7 +438,12 @@ impl Segment {
         {
           temp_result_set.push(accumulator[acc_index]);
           acc_index += 1;
-          let posting_block = PostingsBlock::try_from(&posting_list).unwrap();
+          let posting_block = PostingsBlock::try_from(&posting_list[posting_index])
+            .unwrap()
+            .get_log_message_ids()
+            .read()
+            .unwrap()
+            .clone();
           // Check the remaining elements of posting block
           let mut posting_block_index = 1;
           while acc_index < accumulator.len() && posting_block_index < posting_block.len() {
@@ -456,6 +472,7 @@ impl Segment {
         }
 
         initial_index += 1;
+        posting_index += 1;
         posting_index += 1;
       }
 
