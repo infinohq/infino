@@ -9,8 +9,18 @@ from infinopy import InfinoClient
 from util.toml_util import get_server_url
 
 
-def prepare_df(infino_server_url):
+def get_user_query():
+    user_query = st.text_input(
+        "Enter search text below and hit Enter:", "directory index forbidden"
+    )
+    return user_query
+
+
+def prepare_df(infino_server_url, user_query):
     client = InfinoClient(infino_server_url)
+
+    results = client.search_log(text=user_query)
+    print(results)
 
     # Sample data
     data = {
@@ -23,8 +33,6 @@ def prepare_df(infino_server_url):
 
 
 def display_df(df):
-    st.title("Example Log Dashboard - with Log Level and Time Window Selection")
-
     # Sidebar with slider for time window selection
     st.sidebar.subheader("Select Time Window")
     start_date = st.sidebar.date_input(
@@ -55,12 +63,17 @@ def display_df(df):
 
 
 if __name__ == "__main__":
+    st.title("Example Log Dashboard")
+
     # Read configuration file to get Infino server url
     toml_file_path = os.path.join("config", "default.toml")
     infino_server_url = get_server_url(toml_file_path)
 
+    # Get the user search query
+    user_query = get_user_query()
+
     # Query Infino to create a dataframe to be plotted
-    df = prepare_df(infino_server_url)
+    df = prepare_df(infino_server_url, user_query)
 
     # Display the dataframe
     display_df(df)

@@ -10,5 +10,8 @@ test: build
 check:
 	black src tests
 
+logs-dashboard:
+	. venv/bin/activate; streamlit run src/example_log_dashboard.py
+
 run-driver: build
 	. venv/bin/activate; python src/driver.py
