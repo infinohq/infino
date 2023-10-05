@@ -144,8 +144,7 @@ impl RabbitMQ {
     let start_time = Instant::now();
     let options = ConnectionProperties::default()
       .with_connection_name(connection_name.into())
-      .with_executor(tokio_executor_trait::Tokio::current())
-      .with_reactor(tokio_reactor_trait::Tokio);
+      .with_executor(tokio_executor_trait::Tokio::current());
     loop {
       let retry_strategy = ExponentialBackoff::from_millis(100)
         .map(jitter) // add jitter to delays

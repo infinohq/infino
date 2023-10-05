@@ -10,21 +10,21 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.6.11" }
-chrono = "0.4.24"
-config = "0.13.1"
+axum = { version = "0.6.20" }
+chrono = "0.4.31"
+config = "0.13.3"
 env_logger = "0.10"
 hyper = { version = "0.14", features = ["full"] }
-lapin = "2.1.1"
-log = "0.4"
-mime = "0.3"
+lapin = "2.3.1"
+log = "0.4.19"
+mime = "0.3.16"
 rabbitmq-stream-client = { git = "https://github.com/rabbitmq/rabbitmq-stream-rust-client", rev = "203d1a11fb29665e9385741df89b325a1deb3bff" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1"
 tsldb = { path = "tsldb" }
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1.12"
+tokio-stream = "0.1.14"
 tokio-executor-trait = "2.1.1"
 tokio-reactor-trait = "1.1.0"
 tokio-retry = "0.3"
