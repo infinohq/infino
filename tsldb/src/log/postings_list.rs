@@ -91,26 +91,6 @@ impl PostingsList {
   pub fn get_last_postings_block(&self) -> &RwLock<PostingsBlock> {
     &self.last_block
   }
-
-  // Flatten the posting list to return vector of Posting blocks having log messages
-  pub fn flatten_posting_lists(&self) -> Vec<Vec<u32>> {
-    let postings_list_compressed = &*self.postings_list_compressed.read().unwrap();
-    let last_block = &*self.last_block.read().unwrap();
-    let mut retval: Vec<Vec<u32>> = Vec::new();
-
-    // Flatten the compressed postings blocks.
-    for postings_block_compressed in postings_list_compressed {
-      let postings_block = PostingsBlock::try_from(postings_block_compressed).unwrap();
-      let log_message_ids = (*postings_block.get_log_message_ids().read().unwrap()).clone();
-      retval.push(log_message_ids);
-    }
-
-    // Flatten the last block.
-    let log_message_ids = (*last_block.get_log_message_ids().read().unwrap()).clone();
-    retval.push(log_message_ids);
-
-    retval
-  }
 }
 
 impl Default for PostingsList {
@@ -302,8 +282,5 @@ mod tests {
       initial_values.read().unwrap()[num_blocks - 1],
       ((num_blocks - 1) * BLOCK_SIZE_FOR_LOG_MESSAGES) as u32
     );
-
-    let received_2_d = pl.flatten_posting_lists();
-    assert_eq!(expected_2_d, received_2_d);
   }
 }
