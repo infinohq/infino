@@ -240,19 +240,10 @@ mod tests {
   fn test_postings_create_multiple_blocks() {
     let num_blocks: usize = 4;
     let pl = PostingsList::new();
-    let mut expected_2_d: Vec<Vec<u32>> = Vec::new();
 
     // Insert num_blocks*BLOCK_SIZE_FOR_LOG_MESSAGES entries.
     for i in 0..num_blocks * BLOCK_SIZE_FOR_LOG_MESSAGES {
       pl.append(i as u32);
-    }
-    // Created 2D vec for each posting list
-    for i in 0..num_blocks {
-      let mut temp_vec: Vec<u32> = Vec::new();
-      for j in i * BLOCK_SIZE_FOR_LOG_MESSAGES..(i + 1) * BLOCK_SIZE_FOR_LOG_MESSAGES {
-        temp_vec.push(j as u32);
-      }
-      expected_2_d.push(temp_vec);
     }
 
     // num_blocks blocks should be created. The first num_blocks-1 of these should be compressed.

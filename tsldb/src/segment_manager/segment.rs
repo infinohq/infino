@@ -307,16 +307,16 @@ impl Segment {
     let query_lowercase = query.to_lowercase();
     let terms = query_lowercase.split_whitespace();
 
-    // // posting lists will contain <list of posting_list<list of posting_block<list of log_ids>>>
-    // let mut posting_lists: Vec<Vec<Vec<u32>>> = Vec::new();
     // initial_values_list wil contain list of initial_values corresponding to every posting_list
     let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
 
-    // New code
-    // postings lsit will contain list of PostingBlocksCompressed
+    // postings list will contain list of PostingBlocksCompressed
     let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
 
-    for term in terms {
+    let mut shortest_list_index = 0;
+    let mut shortest_list_len = usize::MAX;
+
+    for (index, term) in terms.into_iter().enumerate() {
       let result = self.terms.get(term);
       let term_id: u32 = match result {
         Some(result) => *result,
@@ -337,7 +337,6 @@ impl Segment {
       // posting_lists.push(flatenned_postings_list_2_d);
       initial_values_list.push(inital_values);
 
-      // New code
       // Extract List of PostingBlockCompressed from posting list
       // posting_block_compressed is Vec<PostingsBlockCompressed> which is extracted by cloning get_postings_list_compressed from postings_lists
       let mut posting_block_compressed: Vec<PostingsBlockCompressed> = Vec::new();
@@ -350,6 +349,11 @@ impl Segment {
         posting_block_compressed.push(posting_block.clone());
       }
 
+      if posting_block_compressed.len() < shortest_list_len {
+        shortest_list_len = posting_block_compressed.len();
+        shortest_list_index = index;
+      }
+
       postings_lists.push(posting_block_compressed);
     }
 
@@ -360,15 +364,19 @@ impl Segment {
 
     let mut accumulator = Vec::new();
 
-    // Create accumulator from 1st posting list from postings_lists. Which is flatten the 1st Vec<PostingsBlockCompressed> to Vec<u32>
+    // Create accumulator from shortest posting list from postings_lists. Which is flatten the shortest Vec<PostingsBlockCompressed> to Vec<u32>
     // postings_lists.first() will give Vec<PostingsBlockCompressed> which needs to be iterated on to get Vec<u32>
-    let first_posting_blocks = postings_lists.first().unwrap();
+    let first_posting_blocks = &postings_lists[shortest_list_index];
     for posting_block in first_posting_blocks {
       let posting_block = PostingsBlock::try_from(posting_block).unwrap();
       accumulator.append(&mut posting_block.get_log_message_ids().read().unwrap().clone());
     }
 
-    for i in 1..postings_lists.len() {
+    for i in 0..postings_lists.len() {
+      // Skip shortest posting list as it is already used to create accumulator
+      if i == shortest_list_index {
+        continue;
+      }
       let posting_list = &postings_lists[i];
       let initial_values = &initial_values_list[i];
 
@@ -379,7 +387,7 @@ impl Segment {
 
       while acc_index < accumulator.len() && posting_index < posting_list.len() {
         // If current accumulator element < initial_value element it means that
-        // accumulator values is smaller than what current posting_block will have
+        // accumulator value is smaller than what current posting_block will have
         // so increment accumulator till this condition fails
         while acc_index < accumulator.len()
           && accumulator[acc_index] < initial_values[initial_index]

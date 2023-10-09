@@ -1,5 +1,3 @@
-use core::num;
-
 use bitpacking::BitPacker;
 use crossbeam::atomic::AtomicCell;
 use log::{debug, error};
