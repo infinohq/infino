@@ -4,6 +4,7 @@ use std::path::Path;
 use std::vec::Vec;
 
 use dashmap::DashMap;
+use log::info;
 
 use crate::log::log_message::LogMessage;
 use crate::log::postings_block::PostingsBlock;
@@ -347,6 +348,19 @@ impl Segment {
         .iter()
       {
         posting_block_compressed.push(posting_block.clone());
+      }
+
+      // Extract last block, convert it to posting block compressed and add it to postings_lists
+      let last_block = postings_list.get_last_postings_block().read();
+      // check if Ok or err in last_block
+      match last_block {
+        Ok(lb) => {
+          let last_block_compressed = PostingsBlockCompressed::try_from(&*lb).unwrap();
+          posting_block_compressed.push(last_block_compressed);
+        },
+        Err(e) => {
+          info!("Error reading last block {}", e);
+        }
       }
 
       if posting_block_compressed.len() < shortest_list_len {
