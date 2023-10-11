@@ -1,8 +1,9 @@
 docker
-infinopy>=0.0.4
+infinopy
 plotly
 pyyaml
 streamlit
+streamlit-keyup
 watchdog
 
 # test dependencies
