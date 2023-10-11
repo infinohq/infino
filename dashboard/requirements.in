@@ -1,5 +1,5 @@
 docker
-infinopy
+infinopy>=0.0.4
 plotly
 pyyaml
 streamlit
