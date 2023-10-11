@@ -100,14 +100,15 @@ if __name__ == "__main__":
     publish_logs(client)
 
     # Display dashboard
-    print("Displaying dashboard...")
-    # Create streamlit command and run it
-    command = ["streamlit", "run", DASHBOARD_FILE_NAME]
-    subprocess.run(command, check=True)
-
-    # Shutdown Infino server
-    input(
-        "Press enter when you are done viewing the dashboard and want to shut down Infino..."
+    print(
+        "Displaying dashboard. Press Ctrl+C when you are done viewing the dashboard and want to shutdown Infino..."
     )
+
+    try:
+        command = ["streamlit", "run", DASHBOARD_FILE_NAME]
+        subprocess.run(command, check=True)
+    except KeyboardInterrupt:
+        print("Ctrl+C received.")
+
     print("Now shutting down Infino...")
     stop_infino(container)

@@ -16,7 +16,7 @@ def get_user_query():
     return user_query
 
 
-def prepare_df(infino_server_url, user_query):
+def search_logs(infino_server_url, user_query):
     client = InfinoClient(infino_server_url)
 
     results = client.search_log(text=user_query)
@@ -29,7 +29,7 @@ def prepare_df(infino_server_url, user_query):
     }
 
     df = pd.DataFrame(data)
-    return df
+    return df, results
 
 
 def display_df(df):
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     user_query = get_user_query()
 
     # Query Infino to create a dataframe to be plotted
-    df = prepare_df(infino_server_url, user_query)
+    df, results = search_logs(infino_server_url, user_query)
 
     # Display the dataframe
     display_df(df)
