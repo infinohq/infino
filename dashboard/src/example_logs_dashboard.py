@@ -91,7 +91,7 @@ def display_results_df(df, num_rows):
 
 
 if __name__ == "__main__":
-    st.title("Example Log Dashboard")
+    st.title("Example Logs Dashboard")
 
     # Read configuration file to get Infino server url
     toml_file_path = os.path.join("config", "default.toml")
@@ -100,13 +100,14 @@ if __name__ == "__main__":
     # Get the user search query
     user_query = get_user_query()
 
-    # Query Infino to create a dataframe to be plotted
-    error_count_df, results_df = search_logs(infino_server_url, user_query)
+    if not user_query:
+        st.text("Please enter your search query")
+    else:
+        # Query Infino to create a dataframe to be plotted
+        error_count_df, results_df = search_logs(infino_server_url, user_query)
 
-    # Display the error graph
-    display_error_df(error_count_df)
+        # Display the error graph
+        display_error_df(error_count_df)
 
-    print(results_df)
-
-    # Display results - first 100 rows
-    display_results_df(results_df, 1000)
+        # Display results - first 100 rows
+        display_results_df(results_df, 1000)

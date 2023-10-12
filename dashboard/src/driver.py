@@ -7,7 +7,7 @@ import docker
 
 from infinopy import InfinoClient
 
-DASHBOARD_FILE_NAME = "src" + os.sep + "example_log_dashboard.py"
+DASHBOARD_FILE_NAME = "src" + os.sep + "example_logs_dashboard.py"
 
 
 def start_infino():
