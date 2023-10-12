@@ -26,4 +26,4 @@ Coming Soon
 
 ## How does it look?
 
-![Logs Dashboard(https://media.giphy.com/media/uLRbCWdEBQn1OPj8CV/giphy.gif)
+![Logs Dashboard](https://media.giphy.com/media/uLRbCWdEBQn1OPj8CV/giphy.gif)
