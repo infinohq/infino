@@ -3,6 +3,7 @@ infinopy
 plotly
 pyyaml
 streamlit
+streamlit-keyup
 watchdog
 
 # test dependencies

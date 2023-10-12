@@ -34,7 +34,7 @@ idna==3.4
     # via requests
 importlib-metadata==6.8.0
     # via streamlit
-infinopy==0.0.1
+infinopy==0.0.4
     # via -r requirements.in
 iniconfig==2.0.0
     # via pytest
@@ -42,6 +42,7 @@ jinja2==3.1.2
     # via
     #   altair
     #   pydeck
+    #   streamlit-keyup
 jsonschema==4.19.1
     # via altair
 jsonschema-specifications==2023.7.1
@@ -114,6 +115,10 @@ six==1.16.0
 smmap==5.0.1
     # via gitdb
 streamlit==1.27.1
+    # via
+    #   -r requirements.in
+    #   streamlit-keyup
+streamlit-keyup==0.2.0
     # via -r requirements.in
 tenacity==8.2.3
     # via

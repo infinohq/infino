@@ -4,11 +4,14 @@ venv:
 build:
 	. venv/bin/activate; pip-compile -o requirements.txt; pip install -r requirements.txt
 
-test:
+test: build
 	. venv/bin/activate; export PYTHONPATH=./src:${PYTHONPATH}; pytest -o log_cli=true tests
 
 check:
 	black src tests
 
-run-driver:
+logs-dashboard:
+	. venv/bin/activate; streamlit run src/example_log_dashboard.py
+
+run-driver: build
 	. venv/bin/activate; python src/driver.py
