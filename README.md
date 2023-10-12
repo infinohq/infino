@@ -67,7 +67,7 @@ When we decided to write an open-source platform that stores both of these toget
 * Search logs using boolean *AND* queries,
 * Query time series of metrics stored,
 * Python client for ingestion as well as queries,
-* Dashboard-as-code using streamlit,
+* [Dashboard-as-code](dashboard/README.md) using streamlit,
 * Integration with LangChain for LLM monitoring,
 * Coming Soon:
   * Support for traces,
