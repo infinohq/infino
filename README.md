@@ -67,10 +67,10 @@ When we decided to write an open-source platform that stores both of these toget
 * Search logs using boolean *AND* queries,
 * Query time series of metrics stored,
 * Python client for ingestion as well as queries,
+* Dashboard-as-code using streamlit,
 * Integration with LangChain for LLM monitoring,
 * Coming Soon:
   * Support for traces,
-  * Dashboard-as-code using streamlit,
   * Additional performance improvements while searching logs,
   * Natural language queries for traces, metrics, and logs,
   * Optionally use S3 as backend storage,
