@@ -1,6 +1,7 @@
 docker
 infinopy
 plotly
+psutil
 pyyaml
 streamlit
 streamlit-keyup

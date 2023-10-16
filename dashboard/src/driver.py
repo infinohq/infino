@@ -90,6 +90,9 @@ def publish_logs(client):
 
 
 def publish_metrics(client):
+    """
+    Publish metrics to Infino
+    """
     pass
 
 
