@@ -91,7 +91,7 @@ def publish_logs(client):
 
 
 def get_system_metrics():
-    cpu_usage = psutil.cpu_percent(interval=0.001)
+    cpu_usage = psutil.cpu_percent(interval=0.1)
     memory_usage = psutil.virtual_memory().percent
     disk_usage = psutil.disk_usage("/").percent
     return cpu_usage, memory_usage, disk_usage
@@ -104,12 +104,13 @@ def publish_metrics(client):
     data = []
 
     start_time = time.time()
-    while time.time() - start_time < 1:  # Run for 1 second
+    while time.time() - start_time < 10:  # Run for 30 seconds
         date = int(time.time() * 1000)  # Current timestamp in milliseconds
         cpu_usage, memory_usage, disk_usage = get_system_metrics()
         data.append({"date": date, "cpu_usage": cpu_usage})
         data.append({"date": date, "memory_usage": memory_usage})
         data.append({"date": date, "disk_usage": disk_usage})
+        time.sleep(0.1)
 
     client.append_ts(data)
 
