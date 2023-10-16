@@ -13,10 +13,13 @@ def get_user_query():
     """
     Display a text input and return the user submitted text
     """
+
+    # Display text input that auto-refereshes, enabling search-as-you-type
     user_query = st_keyup(
         "Enter search text:", value="directory index forbidden", debounce=500, key="0"
     )
 
+    # If search-as-you-type functionality is not needed, use a regular text input (instead of st_keyup above)
     # user_query = st.text_input(
     #    "Enter search text below and hit Enter:", "directory index forbidden"
     # )

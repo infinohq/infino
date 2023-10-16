@@ -2,6 +2,7 @@ import concurrent.futures
 
 from datetime import datetime
 import os
+import psutil
 import subprocess
 import time
 import re
@@ -89,11 +90,28 @@ def publish_logs(client):
             logs_batch = []
 
 
+def get_system_metrics():
+    cpu_usage = psutil.cpu_percent(interval=0.001)
+    memory_usage = psutil.virtual_memory().percent
+    disk_usage = psutil.disk_usage("/").percent
+    return cpu_usage, memory_usage, disk_usage
+
+
 def publish_metrics(client):
     """
     Publish metrics to Infino
     """
-    pass
+    data = []
+
+    start_time = time.time()
+    while time.time() - start_time < 1:  # Run for 1 second
+        date = int(time.time() * 1000)  # Current timestamp in milliseconds
+        cpu_usage, memory_usage, disk_usage = get_system_metrics()
+        data.append({"date": date, "cpu_usage": cpu_usage})
+        data.append({"date": date, "memory_usage": memory_usage})
+        data.append({"date": date, "disk_usage": disk_usage})
+
+    client.append_ts(data)
 
 
 def run_command(command):
