@@ -1,5 +1,8 @@
+import concurrent.futures
+
 from datetime import datetime
 import os
+import psutil
 import subprocess
 import time
 import re
@@ -7,7 +10,8 @@ import docker
 
 from infinopy import InfinoClient
 
-DASHBOARD_FILE_NAME = "src" + os.sep + "example_logs_dashboard.py"
+LOGS_DASHBOARD_FILE_NAME = "src" + os.sep + "example_logs_dashboard.py"
+METRICS_DASHBOARD_FILE_NAME = "src" + os.sep + "example_metrics_dashboard.py"
 
 
 def start_infino():
@@ -86,6 +90,35 @@ def publish_logs(client):
             logs_batch = []
 
 
+def get_system_metrics():
+    cpu_usage = psutil.cpu_percent(interval=0.1)
+    memory_usage = psutil.virtual_memory().percent
+    disk_usage = psutil.disk_usage("/").percent
+    return cpu_usage, memory_usage, disk_usage
+
+
+def publish_metrics(client):
+    """
+    Publish metrics to Infino
+    """
+    data = []
+
+    start_time = time.time()
+    while time.time() - start_time < 10:  # Run for 30 seconds
+        date = int(time.time() * 1000)  # Current timestamp in milliseconds
+        cpu_usage, memory_usage, disk_usage = get_system_metrics()
+        data.append({"date": date, "cpu_usage": cpu_usage})
+        data.append({"date": date, "memory_usage": memory_usage})
+        data.append({"date": date, "disk_usage": disk_usage})
+        time.sleep(0.1)
+
+    client.append_ts(data)
+
+
+def run_command(command):
+    subprocess.run(command, check=True)
+
+
 if __name__ == "__main__":
     # Start Infino server
     print("Starting Infino server...")
@@ -99,14 +132,25 @@ if __name__ == "__main__":
     print("Publishing logs...")
     publish_logs(client)
 
+    # Publish a few metrics
+    print("Publishing metrics...")
+    publish_metrics(client)
+
     # Display dashboard
     print(
-        "Displaying dashboard. Press Ctrl+C when you are done viewing the dashboard and want to shutdown Infino..."
+        "Displaying logs and metrics dashboards. Press Ctrl+C when you are done viewing and want to shutdown Infino..."
     )
 
     try:
-        command = ["streamlit", "run", DASHBOARD_FILE_NAME]
-        subprocess.run(command, check=True)
+        logs_command = ["streamlit", "run", LOGS_DASHBOARD_FILE_NAME]
+        metrics_command = ["streamlit", "run", METRICS_DASHBOARD_FILE_NAME]
+
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            futures = [
+                executor.submit(run_command, cmd)
+                for cmd in [logs_command, metrics_command]
+            ]
+
     except KeyboardInterrupt:
         print("Ctrl+C received.")
 
