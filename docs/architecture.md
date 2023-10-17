@@ -8,4 +8,6 @@ If you haven't explored Infino yet, please refer to:
 ## Architecture
 Infino architecture is still evolving, and a lot remains to be documented. In the meantime, here is an 10000 feet architecture diagram 
 that may be helpful:
+
+
 [![Infino Architecture](./architecture.drawio.svg)](./architecture.drawio.svg)
