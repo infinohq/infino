@@ -98,6 +98,17 @@ impl PartialEq for PostingsBlock {
   }
 }
 
+impl Clone for PostingsBlock {
+  fn clone(&self) -> Self {
+    let v = self.get_log_message_ids().read().unwrap();
+    let mut v_clone = Vec::new();
+    for i in v.iter() {
+      v_clone.push(*i);
+    }
+    Self::new_with_log_message_ids(v_clone)
+  }
+}
+
 impl Eq for PostingsBlock {}
 
 impl TryFrom<&PostingsBlockCompressed> for PostingsBlock {

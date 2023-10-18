@@ -4,7 +4,6 @@ use std::path::Path;
 use std::vec::Vec;
 
 use dashmap::DashMap;
-use log::info;
 
 use crate::log::log_message::LogMessage;
 use crate::log::postings_block::PostingsBlock;
@@ -313,6 +312,7 @@ impl Segment {
 
     // postings list will contain list of PostingBlocksCompressed
     let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
+    let mut last_block_list: Vec<PostingsBlock> = Vec::new();
 
     let mut shortest_list_index = 0;
     let mut shortest_list_len = usize::MAX;
@@ -334,8 +334,6 @@ impl Segment {
         }
       };
       let inital_values = postings_list.get_initial_values().read().unwrap().clone();
-
-      // posting_lists.push(flatenned_postings_list_2_d);
       initial_values_list.push(inital_values);
 
       // Extract List of PostingBlockCompressed from posting list
@@ -350,18 +348,14 @@ impl Segment {
         posting_block_compressed.push(posting_block.clone());
       }
 
-      // Extract last block, convert it to posting block compressed and add it to postings_lists
-      let last_block = postings_list.get_last_postings_block().read();
-      // check if Ok or err in last_block
-      match last_block {
-        Ok(lb) => {
-          let last_block_compressed = PostingsBlockCompressed::try_from(&*lb).unwrap();
-          posting_block_compressed.push(last_block_compressed);
-        },
-        Err(e) => {
-          info!("Error reading last block {}", e);
-        }
-      }
+      // Extract last posting block from posting list
+      last_block_list.push(
+        postings_list
+          .get_last_postings_block()
+          .read()
+          .unwrap()
+          .clone(),
+      );
 
       if posting_block_compressed.len() < shortest_list_len {
         shortest_list_len = posting_block_compressed.len();
@@ -371,7 +365,8 @@ impl Segment {
       postings_lists.push(posting_block_compressed);
     }
 
-    if postings_lists.is_empty() {
+    // If initial values list is empty which means there are no posting block compressed or last block
+    if initial_values_list.is_empty() {
       // No postings list
       return vec![];
     }
@@ -386,7 +381,18 @@ impl Segment {
       accumulator.append(&mut posting_block.get_log_message_ids().read().unwrap().clone());
     }
 
-    for i in 0..postings_lists.len() {
+    // If postings_list is empty, then accumulator should be loaded from last_block_list
+    if accumulator.is_empty() {
+      accumulator.append(
+        &mut last_block_list[shortest_list_index]
+          .get_log_message_ids()
+          .read()
+          .unwrap()
+          .clone(),
+      );
+    }
+
+    for i in 0..initial_values_list.len() {
       // Skip shortest posting list as it is already used to create accumulator
       if i == shortest_list_index {
         continue;
@@ -399,7 +405,7 @@ impl Segment {
       let mut posting_index = 0;
       let mut initial_index = 0;
 
-      while acc_index < accumulator.len() && posting_index < posting_list.len() {
+      while acc_index < accumulator.len() && initial_index < initial_values.len() {
         // If current accumulator element < initial_value element it means that
         // accumulator value is smaller than what current posting_block will have
         // so increment accumulator till this condition fails
@@ -415,16 +421,27 @@ impl Segment {
           if initial_index + 1 < initial_values.len()
             && accumulator[acc_index] < initial_values[initial_index + 1]
           {
-            let posting_block = PostingsBlock::try_from(&posting_list[posting_index])
-              .unwrap()
-              .get_log_message_ids()
-              .read()
-              .unwrap()
-              .clone();
+            let mut _posting_block = Vec::new();
+            // posting_index == posting_list.len() means that we are at last_block
+            if posting_index < posting_list.len() {
+              _posting_block = PostingsBlock::try_from(&posting_list[posting_index])
+                .unwrap()
+                .get_log_message_ids()
+                .read()
+                .unwrap()
+                .clone();
+            } else {
+              // posting block is last block
+              _posting_block = last_block_list[i]
+                .get_log_message_ids()
+                .read()
+                .unwrap()
+                .clone();
+            }
             // start from 1st element of posting_block as 0th element of posting_block is already checked as it was part of intial_values
             let mut posting_block_index = 1;
-            while acc_index < accumulator.len() && posting_block_index < posting_block.len() {
-              match accumulator[acc_index].cmp(&posting_block[posting_block_index]) {
+            while acc_index < accumulator.len() && posting_block_index < _posting_block.len() {
+              match accumulator[acc_index].cmp(&_posting_block[posting_block_index]) {
                 std::cmp::Ordering::Equal => {
                   temp_result_set.push(accumulator[acc_index]);
                   acc_index += 1;
@@ -460,16 +477,29 @@ impl Segment {
         {
           temp_result_set.push(accumulator[acc_index]);
           acc_index += 1;
-          let posting_block = PostingsBlock::try_from(&posting_list[posting_index])
-            .unwrap()
-            .get_log_message_ids()
-            .read()
-            .unwrap()
-            .clone();
+
+          let mut _posting_block = Vec::new();
+          // posting_index == posting_list.len() means that we are at last_block
+          if posting_index < posting_list.len() {
+            _posting_block = PostingsBlock::try_from(&posting_list[posting_index])
+              .unwrap()
+              .get_log_message_ids()
+              .read()
+              .unwrap()
+              .clone();
+          } else {
+            // posting block is last block
+            _posting_block = last_block_list[i]
+              .get_log_message_ids()
+              .read()
+              .unwrap()
+              .clone();
+          }
+
           // Check the remaining elements of posting block
           let mut posting_block_index = 1;
-          while acc_index < accumulator.len() && posting_block_index < posting_block.len() {
-            match accumulator[acc_index].cmp(&posting_block[posting_block_index]) {
+          while acc_index < accumulator.len() && posting_block_index < _posting_block.len() {
+            match accumulator[acc_index].cmp(&_posting_block[posting_block_index]) {
               std::cmp::Ordering::Equal => {
                 temp_result_set.push(accumulator[acc_index]);
                 acc_index += 1;
@@ -495,7 +525,6 @@ impl Segment {
 
         initial_index += 1;
         posting_index += 1;
-        posting_index += 1;
       }
 
       accumulator = temp_result_set;
@@ -510,7 +539,7 @@ impl Segment {
     let mut log_messages =
       self.get_log_messages_from_ids(&accumulator, range_start_time, range_end_time);
     log_messages.sort();
-    return log_messages;
+    log_messages
   }
 
   /// Return the log messages within the given time range corresponding to the given log message ids.
@@ -522,7 +551,7 @@ impl Segment {
   ) -> Vec<LogMessage> {
     let mut log_messages = Vec::new();
     for log_message_id in log_message_ids {
-      let retval = self.forward_map.get(&log_message_id).unwrap();
+      let retval = self.forward_map.get(log_message_id).unwrap();
       let log_message = retval.value();
       let time = log_message.get_time();
       if time >= range_start_time && time <= range_end_time {
@@ -534,7 +563,7 @@ impl Segment {
       }
     }
 
-    return log_messages;
+    log_messages
   }
 
   /// Returns true if this segment overlaps with the given range.

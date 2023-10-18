@@ -86,7 +86,6 @@ impl PostingsList {
     &self.initial_values
   }
 
-  // #[cfg(test)]
   /// Get the last postings block, wrapped in RwLock.
   pub fn get_last_postings_block(&self) -> &RwLock<PostingsBlock> {
     &self.last_block

@@ -35,11 +35,11 @@ impl PostingsBlockCompressed {
     }
   }
 
-  pub fn new_with_params(initial: u32, num_bits: u8, log_message_ids_compressed: &Vec<u8>) -> Self {
+  pub fn new_with_params(initial: u32, num_bits: u8, log_message_ids_compressed: &[u8]) -> Self {
     PostingsBlockCompressed {
       initial: AtomicCell::new(initial),
       num_bits: AtomicCell::new(num_bits),
-      log_message_ids_compressed: RwLock::new(log_message_ids_compressed.clone()),
+      log_message_ids_compressed: RwLock::new(log_message_ids_compressed.to_owned()),
     }
   }
 
