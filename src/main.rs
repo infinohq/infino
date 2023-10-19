@@ -35,7 +35,7 @@ struct AppState {
 /// Represents search query.
 struct SearchQuery {
   text: String,
-  start_time: u64,
+  start_time: Option<u64>,
   end_time: Option<u64>,
 }
 
@@ -44,7 +44,7 @@ struct SearchQuery {
 struct TimeSeriesQuery {
   label_name: String,
   label_value: String,
-  start_time: u64,
+  start_time: Option<u64>,
   end_time: Option<u64>,
 }
 
@@ -390,7 +390,9 @@ async fn search_log(
 
   let results = state.tsldb.search(
     &search_query.text,
-    search_query.start_time,
+    // The default for range start time is 0.
+    search_query.start_time.unwrap_or(0),
+    // The default for range end time is the current time.
     search_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
@@ -409,8 +411,9 @@ async fn search_ts(
   let results = state.tsldb.get_time_series(
     &time_series_query.label_name,
     &time_series_query.label_value,
-    time_series_query.start_time,
-    // The default for range end is the current time.
+    // The default for range start time is 0.
+    time_series_query.start_time.unwrap_or(0 as u64),
+    // The default for range end time is the current time.
     time_series_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
@@ -534,24 +537,19 @@ mod tests {
     query: SearchQuery,
     log_messages_expected: Vec<LogMessage>,
   ) {
-    let query_string;
-    match query.end_time {
-      Some(end_time) => {
-        query_string = format!(
-          "start_time={}&end_time={}&text={}",
-          query.start_time,
-          end_time,
-          encode(&query.text)
-        )
-      }
-      None => {
-        query_string = format!(
-          "start_time={}&text={}",
-          query.start_time,
-          encode(&query.text)
-        )
-      }
-    }
+    let query_start_time = query
+      .start_time
+      .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
+    let query_end_time = query
+      .end_time
+      .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value))
+      .to_owned();
+    let query_string = format!(
+      "text={}{}{}",
+      encode(&query.text),
+      query_start_time,
+      query_end_time
+    );
 
     let uri = format!("/search_log?{}", query_string);
     info!("Checking for uri: {}", uri);
@@ -581,10 +579,11 @@ mod tests {
     sleep(Duration::from_millis(2000)).await;
 
     let refreshed_tsldb = Tsldb::refresh(config_dir_path);
+    let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    log_messages_received = refreshed_tsldb.search(search_text, query.start_time, end_time);
+    log_messages_received = refreshed_tsldb.search(search_text, start_time, end_time);
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);
@@ -612,26 +611,19 @@ mod tests {
     query: TimeSeriesQuery,
     data_points_expected: Vec<DataPoint>,
   ) {
-    let query_string;
-    match query.end_time {
-      Some(end_time) => {
-        query_string = format!(
-          "label_name={}&label_value={}&start_time={}&end_time={}",
-          encode(&query.label_name),
-          encode(&query.label_value),
-          query.start_time,
-          end_time,
-        )
-      }
-      None => {
-        query_string = format!(
-          "label_name={}&label_value={}&start_time={}",
-          encode(&query.label_name),
-          encode(&query.label_value),
-          query.start_time,
-        )
-      }
-    }
+    let query_start_time = query
+      .start_time
+      .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
+    let query_end_time = query
+      .end_time
+      .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value));
+    let query_string = format!(
+      "label_name={}&label_value={}{}{}",
+      encode(&query.label_name),
+      encode(&query.label_value),
+      query_start_time,
+      query_end_time
+    );
 
     let uri = format!("/search_ts?{}", query_string);
     info!("Checking for uri: {}", uri);
@@ -661,15 +653,12 @@ mod tests {
     sleep(Duration::from_millis(2000)).await;
 
     let refreshed_tsldb = Tsldb::refresh(config_dir_path);
+    let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    data_points_received = refreshed_tsldb.get_time_series(
-      &query.label_name,
-      &query.label_value,
-      query.start_time,
-      end_time,
-    );
+    data_points_received =
+      refreshed_tsldb.get_time_series(&query.label_name, &query.label_value, start_time, end_time);
 
     check_data_point_vectors(&data_points_expected, &data_points_received);
   }
@@ -750,7 +739,7 @@ mod tests {
     let search_query = "value1 field34:value4";
 
     let query = SearchQuery {
-      start_time: 0,
+      start_time: None,
       end_time: None,
       text: search_query.to_owned(),
     };
@@ -765,7 +754,7 @@ mod tests {
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = SearchQuery {
-      start_time: 0,
+      start_time: Some(1),
       end_time: Some(10000),
       text: search_query.to_owned(),
     };
@@ -807,11 +796,12 @@ mod tests {
       assert_eq!(response.status(), StatusCode::OK);
     }
 
-    // Check whether we get all the data points back when end_time is not specified (i.e., it will defauly to current time).
+    // Check whether we get all the data points back when the start and end_times are not specified
+    // (i.e., they will default to 0 and to current time respectively).
     let query = TimeSeriesQuery {
       label_name: name_for_metric_name_label.to_owned(),
       label_value: metric_name.to_owned(),
-      start_time: 0,
+      start_time: None,
       end_time: None,
     };
     check_time_series(&mut app, config_dir_path, query, data_points_expected).await;
@@ -820,7 +810,7 @@ mod tests {
     let query_too_old = TimeSeriesQuery {
       label_name: name_for_metric_name_label.to_owned(),
       label_value: metric_name.to_owned(),
-      start_time: 0,
+      start_time: Some(1),
       end_time: Some(10000),
     };
     check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await;

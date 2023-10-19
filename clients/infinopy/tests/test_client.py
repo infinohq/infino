@@ -52,7 +52,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
         # Test the search_log method.
-        # Query for text that is presenr in both the payloads.
+        # Query for text that is present in both the payloads.
         response = self.client.search_log(
             text="my message", start_time=current_time - 10, end_time=current_time + 10
         )
@@ -60,13 +60,19 @@ class InfinoClientTestCase(unittest.TestCase):
         results = response.json()
         self.assertEqual(len(results), 2)
 
-        # Query for text that is presenr in only one payload.
+        # Query for text that is present in only one payload.
         response = self.client.search_log(
             text="two", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 1)
+
+        # Test that default values for start and end time work.
+        response = self.client.search_log(text="my message")
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 2)
 
     def test_ts(self):
         current_time = int(time.time())
@@ -91,11 +97,36 @@ class InfinoClientTestCase(unittest.TestCase):
         results = response.json()
         self.assertEqual(len(results), 2)
 
+        # Test that default values for start and end time work.
+        response = self.client.search_ts(
+            label_name="__name__",
+            label_value="some_metric_name",
+        )
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 2)
+
     def test_get_index_dir(self):
         # Test the get_index_dir method.
         response = self.client.get_index_dir()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.text, "index")
+
+    def test_base_url(self):
+        # Check default base url
+        client = InfinoClient()
+        assert client.get_base_url() == "http://localhost:3000"
+
+        # Check the base url when env var INFINO_BASE_URL is set
+        value = "http://SOME_ENV_URL"
+        os.environ["INFINO_BASE_URL"] = value
+        client = InfinoClient()
+        assert client.get_base_url() == value
+
+        # Check the base url when client is explicitly passed one
+        value = "http://SOME_OTHER_URL"
+        client = InfinoClient(value)
+        assert client.get_base_url() == value
 
 
 if __name__ == "__main__":

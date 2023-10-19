@@ -66,15 +66,17 @@ When we decided to write an open-source platform that stores both of these toget
 * Ingest using [FluentBit](https://fluentbit.io/),
 * Search logs using boolean *AND* queries,
 * Query time series of metrics stored,
+* Python client for ingestion as well as queries,
+* [Dashboard-as-code](dashboard/README.md) using streamlit,
+* Integration with LangChain for LLM monitoring,
 * Coming Soon:
-  * Store metrics and logs on S3,
-  * More integrations: Prometheus, LogStash, and Grafana,
-  * Powerful query language for metrics and logs,
-  * Performance improvements while searching logs and metrics.
-  * Inbuilt queue for disaster recovery - no data loss in case of failures.
-  * Clients in other languages - Java, JavaScipt, Python,
-  * UI for querying Infino.
-  * Support for traces and Spans
+  * Support for traces,
+  * Additional performance improvements while searching logs,
+  * Natural language queries and dashboards for traces, metrics, and logs,
+  * Optionally use S3 as backend storage,
+  * Hosted cloud offering,
+  * More integration examples: logstash, prometheus, and open telemetry,
+  * Inbuilt queue for disaster recovery - no data loss in case of hard crash.
 
 ## :beginner: Getting started
 

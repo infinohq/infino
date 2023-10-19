@@ -1,92 +1,145 @@
-   Compiling benches v0.1.0 (/Users/vinaykakade/ws/infinohq/infino/benches)
-    Finished release [optimized] target(s) in 5.57s
+(base) vinaykakade@Vinays-MacBook-Pro benches % cargo run -r
+    Finished release [optimized] target(s) in 0.30s
      Running `target/release/benches`
 
 
 ***Now running Infino via tsldb library***
-Infino time required for insertion: 267.23ms
+Infino time required for insertion: 256540 microseconds
 Checking size of directory: index
-Infino index size = 1848698 bytes
-Infino time required for searching 1 word query is : 1.03ms. Num of results 6837
-Infino time required for searching 2 word query is : 12.25µs. Num of results 45
-Infino time required for searching 3 word query is : 106.32ms. Num of results 46
-Infino time required for searching 4 word query is : 29.97ms. Num of results 5708
-Infino time required for searching 5 word query is : 185.83µs. Num of results 1
-Infino time required for searching 6 word query is : 1.57ms. Num of results 2
-Infino time required for searching 7 word query is : 86.46ms. Num of results 4478
+Infino index size = 1876588 bytes
+Infino time required for searching query Directory is : 1159 microseconds. Num of results 6837
+Infino time required for searching query Digest: done is : 14 microseconds. Num of results 45
+Infino time required for searching query exist: /var/www/html/file is : 369 microseconds. Num of results 46
+Infino time required for searching query [notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties is : 28615 microseconds. Num of results 5708
+Infino time required for searching query Directory index forbidden is : 15040 microseconds. Num of results 6745
+Infino time required for searching query Jun 09 06:07:05 2005] [notice] LDAP: is : 1571 microseconds. Num of results 2
+Infino time required for searching query unable to stat is : 17340 microseconds. Num of results 4478
 
 
 ***Now running Infino via REST API client***
-Infino REST time required for insertion: 661.69ms
-We haven't yet added flush API to infino client, so can't get accurate index size via API
-Infino REST time required for searching 1 word query is 942.42µs
-Infino REST time required for searching 2 word query is 710.88µs
-Infino REST time required for searching 3 word query is 418.25µs
-Infino REST time required for searching 4 word query is 399.17µs
-Infino REST time required for searching 5 word query is 531.75µs
-Infino REST time required for searching 6 word query is 599.13µs
-Infino REST time required for searching 7 word query is 577.21µs
+Infino REST time required for insertion: 653353 microseconds
+Infino REST time required for searching query Directory is : 5575 microseconds
+Infino REST time required for searching query Digest: done is : 670 microseconds
+Infino REST time required for searching query exist: /var/www/html/file is : 1082 microseconds
+Infino REST time required for searching query [notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties is : 32326 microseconds
+Infino REST time required for searching query Directory index forbidden is : 18400 microseconds
+Infino REST time required for searching query Jun 09 06:07:05 2005] [notice] LDAP: is : 2122 microseconds
+Infino REST time required for searching query unable to stat is : 19796 microseconds
 
 
 ***Now running Clickhouse***
-Clickhouse time required for insertion: 728.58ms
+Clickhouse time required for insertion: 713539 microseconds
 Checking size of directory: ./ch-tmp/data/test_logs/test_logs/
-Clickhouse index size = 27042683 bytes
-Clickhouse time required for searching 1 word query is : 6.60ms
-Clickhouse time required for searching 2 word query is : 7.23ms
-Clickhouse time required for searching 3 word query is : 10.63ms
-Clickhouse time required for searching 4 word query is : 8.05ms
-Clickhouse time required for searching 5 word query is : 7.39ms
-Clickhouse time required for searching 6 word query is : 8.02ms
-Clickhouse time required for searching 7 word query is : 9.28ms
+Clickhouse index size = 29477047 bytes
+Clickhouse query is select * from test_logs.test_logs where text LIKE '%Directory%' and time > 0 and time < 18446744073709551615 order by time desc
+Clickhouse time required for searching query Directory is : 8711 microseconds
+Clickhouse query is select * from test_logs.test_logs where text LIKE '%Digest:%' AND text LIKE '%done%' and time > 0 and time < 18446744073709551615 order by time desc
+Clickhouse time required for searching query Digest: done is : 6575 microseconds
+Clickhouse query is select * from test_logs.test_logs where text LIKE '%exist:%' AND text LIKE '%/var/www/html/file%' and time > 0 and time < 18446744073709551615 order by time desc
+Clickhouse time required for searching query exist: /var/www/html/file is : 6845 microseconds
+Clickhouse query is select * from test_logs.test_logs where text LIKE '%[notice]%' AND text LIKE '%workerEnv.init()%' AND text LIKE '%ok%' AND text LIKE '%/etc/httpd/conf/workers2.properties%' and time > 0 and time < 18446744073709551615 order by time desc
+Clickhouse time required for searching query [notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties is : 9016 microseconds
+Clickhouse query is select * from test_logs.test_logs where text LIKE '%Directory%' AND text LIKE '%index%' AND text LIKE '%forbidden%' and time > 0 and time < 18446744073709551615 order by time desc
+Clickhouse time required for searching query Directory index forbidden is : 7887 microseconds
+Clickhouse query is select * from test_logs.test_logs where text LIKE '%Jun%' AND text LIKE '%09%' AND text LIKE '%06:07:05%' AND text LIKE '%2005]%' AND text LIKE '%[notice]%' AND text LIKE '%LDAP:%' and time > 0 and time < 18446744073709551615 order by time desc
+Clickhouse time required for searching query Jun 09 06:07:05 2005] [notice] LDAP: is : 9005 microseconds
+Clickhouse query is select * from test_logs.test_logs where text LIKE '%unable%' AND text LIKE '%to%' AND text LIKE '%stat%' and time > 0 and time < 18446744073709551615 order by time desc
+Clickhouse time required for searching query unable to stat is : 8938 microseconds
 
 
 ***Now running Tantivy***
-Tantivy time required for insertion: 422.71ms
-Checking size of directory: /tmp/tantivy-index-stored-62394ea6-2596-45ca-bb5b-f74d3acbafc1
-Tantivy index size with STORED flag = 3146858 bytes
-Tantivy time required for searching 1 word query is : 1.45ms. Num of results 6838
-Tantivy time required for searching 2 word query is : 61.25µs. Num of results 45
-Tantivy time required for searching 3 word query is : 2.32ms. Num of results 46
-Tantivy time required for searching 4 word query is : 3.30ms. Num of results 5708
-Tantivy time required for searching 5 word query is : 155.88µs. Num of results 1
-Tantivy time required for searching 6 word query is : 111.29µs. Num of results 2
-Tantivy time required for searching 7 word query is : 4.34ms. Num of results 7779
+Tantivy time required for insertion: 459753 microseconds
+Checking size of directory: /tmp/tantivy-index-stored-3dee6710-6563-4220-a55e-630dff2a536e
+Tantivy index size with STORED flag = 3145280 bytes
+Tantivy time required for searching 1 word query is : 2523 microseconds. Num of results 6838
+Tantivy time required for searching 2 word query is : 183 microseconds. Num of results 45
+Tantivy time required for searching 2 word query is : 2604 microseconds. Num of results 46
+Tantivy time required for searching 4 word query is : 4352 microseconds. Num of results 5708
+Tantivy time required for searching 3 word query is : 2507 microseconds. Num of results 6745
+Tantivy time required for searching 6 word query is : 173 microseconds. Num of results 2
+Tantivy time required for searching 3 word query is : 3250 microseconds. Num of results 7779
 
 
 ***Now running Elasticsearch***
-Elasticsearch time required for insertion: 7.18s
-Elasticsearch index size in the following statement: [{"health":"green","status":"open","index":"perftest","uuid":"Zv52wFMaRqyVNnVhiVPx5Q","pri":"1","rep":"0","docs.count":"56400","docs.deleted":"0","store.size":"2.3mb","pri.store.size":"2.3mb"}]
-Elasticsearch time required for searching 1 word query is : 50 ms
-Elasticsearch time required for searching 2 word query is : 4 ms
-Elasticsearch time required for searching 3 word query is : 49 ms
-Elasticsearch time required for searching 4 word query is : 38 ms
-Elasticsearch time required for searching 5 word query is : 34 ms
-Elasticsearch time required for searching 6 word query is : 37 ms
-Elasticsearch time required for searching 7 word query is : 31 ms
+Elasticsearch time required for insertion: 7165613 microseconds
+Elasticsearch cat response to figure out index size: [{"health":"green","status":"open","index":"perftest","uuid":"nf6gH2u3SW2emFtU92iXKA","pri":"1","rep":"0","docs.count":"56400","docs.deleted":"0","store.size":"2.3mb","pri.store.size":"2.3mb"}]
+Could not programmatically figure out elasticsearch index size. Figure it out from the cat response printed above
+Elasticsearch time required for searching query Directory is : 51 ms
+Elasticsearch time required for searching query Digest: done is : 4 ms
+Elasticsearch time required for searching query exist: /var/www/html/file is : 46 ms
+Elasticsearch time required for searching query [notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties is : 38 ms
+Elasticsearch time required for searching query Directory index forbidden is : 23 ms
+Elasticsearch time required for searching query Jun 09 06:07:05 2005] [notice] LDAP: is : 40 ms
+Elasticsearch time required for searching query unable to stat is : 33 ms
 
 
 ***Now running Infino API client for time series***
-Infino Time series time required for searching 2.99ms
-Infino Time series time required for searching 3.13ms
-Infino Time series time required for searching 967.71µs
-Infino Time series time required for searching 689.75µs
-Infino Time series time required for searching 618.33µs
-Infino Time series time required for searching 943.25µs
-Infino Time series time required for searching 1.31ms
-Infino Time series time required for searching 698.42µs
-Infino Time series time required for searching 584.67µs
-Infino timeseries search avg 1192958 nanos
+Infino Time series time required for searching 1.22ms
+Infino Time series time required for searching 886.38µs
+Infino Time series time required for searching 828.08µs
+Infino Time series time required for searching 575.13µs
+Infino Time series time required for searching 518.04µs
+Infino Time series time required for searching 505.92µs
+Infino Time series time required for searching 494.38µs
+Infino Time series time required for searching 528.17µs
+Infino Time series time required for searching 470.17µs
+Infino timeseries search avg 602 nanoseconds
 
 
 ***Now running Prometheus for time series***
-PrometheusClient time required for searching 8.56ms
-PrometheusClient time required for searching 1.82ms
-PrometheusClient time required for searching 1.02ms
-PrometheusClient time required for searching 937.17µs
-PrometheusClient time required for searching 893.04µs
-PrometheusClient time required for searching 913.46µs
-PrometheusClient time required for searching 2.17ms
-PrometheusClient time required for searching 878.13µs
-PrometheusClient time required for searching 1.12ms
-Prometheus timeseries search avg 1832266 nanos
+PrometheusClient time required for searching 7.14ms
+PrometheusClient time required for searching 1.22ms
+PrometheusClient time required for searching 3.80ms
+PrometheusClient time required for searching 1.10ms
+PrometheusClient time required for searching 883.50µs
+PrometheusClient time required for searching 786.29µs
+PrometheusClient time required for searching 827.25µs
+PrometheusClient time required for searching 704.71µs
+PrometheusClient time required for searching 1.51ms
+Prometheus timeseries search avg 1796 nanoseconds
+
+
+## Results: 
+
+Run date: 2023-10-19
+
+Operating System: macos
+
+Machine description: <Please fill in>
+
+Dataset: data/Apache.log
+
+Dataset size: 5135877bytes
+
+
+
+### Index size
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | <figure out from cat response> bytes | 29477047 bytes | 1876588 bytes | Same as infino |
+
+
+### Indexing latency
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 7165613 microseconds  | 713539 microseconds  | 256540 microseconds  | 653353 microseconds  |
+
+
+### Search latency
+
+Average across different query types. See the detailed output for granular info.
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ---- | ---- |
+| data/Apache.log | 33571 microseconds  | 8139 microseconds  | 9158 microseconds  | 11424 microseconds  |
+
+
+### Timeseries search latency
+
+Average over 10 queries on time series.
+
+| Data points | Prometheus | Infino |
+| ----------- | ---------- | ---------- |
+| Search Latency | 1796 microseconds | 602 microseconds |

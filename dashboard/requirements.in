@@ -1,0 +1,11 @@
+docker
+infinopy
+plotly
+psutil
+pyyaml
+streamlit
+streamlit-keyup
+watchdog
+
+# test dependencies
+pytest

@@ -1,6 +1,8 @@
 # Benchmark - Elasticsearch, Clickhouse and Tantivy Comparison with Infino
 
-This pacakge contains comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs) and [Tantivy](https://github.com/quickwit-oss/tantivy). The raw output of comparison can be found [here](output.txt).
+This pacakge contains comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) and [Tantivy](https://github.com/quickwit-oss/tantivy). The raw output of comparison can be found [here](output.txt).
+
+Want to jump directly to the results? Scroll below towards the end of this page.
 
 ## Datasets
 
@@ -22,7 +24,7 @@ File is present in `benches/data` folder named Apache.log
   - Start elasticsearch:
     - `$ bin/elasticsearch`
 - Install [prometheus](https://prometheus.io/download/) based on your architecure
-  - Unzip and modify the prometheus.yaml file as below
+  - Unzip and modify the prometheus.yml file as below
   - add scrape_config
     ```
     - job_name: 'rust_app'
@@ -32,9 +34,11 @@ File is present in `benches/data` folder named Apache.log
   - Change scrape interval to 1s `scrape_interval: 1s`
   - Start prometheus simply by running the binary `./prometheus`
 - Install [Clickhouse](https://clickhouse.com/docs/en/install)
-  - Create directory `benches/ch-tmp` and move clickhouse binary there, srtart server from this directory using `./clickhouse server`
+  - Create directory `benches/ch-tmp` and move clickhouse binary there, start server from this directory using `./clickhouse server`
+  - Drop database `test_logs` using clickhouse client, in case it exists already
   - Create database `test_logs` using clickhouse client using command `create database test_logs`
 - Start Infino server
+  - Make sure the `index` directory is empty - so that we are starting from a clean slate
   - Run `make run` from `infino` directory
 
 - Run benchmark
@@ -44,38 +48,48 @@ $ cd benches
 $ cargo run -r
 ```
 
-## Results
+## Results: 
 
-The below tests were executed on MacBook Pro (16-inch, 2023) having Apple M2 Max chipset and 32Gb of Ram
+Run date: 2023-10-19
+
+Operating System: macos
+
+Machine description: Macbook Pro 16 inch, M2 Max, 64GB RAM
+
+Dataset: data/Apache.log
+
+Dataset size: 5135877 bytes
+
+
+
 
 ### Index size
 
-| dataset                      | Elasticsearch   | Tantivy         | Clickhouse       | Infino          | Infino-Rest     |
-| ---------------------------- | --------------- | --------------- | -----------------| --------------- | --------------- |
-| Apache Log (5,135,877 bytes) | 2,411,725 bytes | 3,146,858 bytes | 27,042,683 bytes | 1,848,698 bytes | Same as Infino  |
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 2411725 bytes | 29477047 bytes | 1876588 bytes | Same as infino |
 
-### Insertion speed
 
-| dataset    | Elasticsearch | Tantivy    | Clickhouse | Infino   | Infino-Rest |
-| ---------- | ------------- | ---------- | ---------- | -------- | ----------- |
-| Apache Log | 7,180 ms      | 422.71 ms  | 728.58 ms  | 267.23ms | 661.69ms    |
+### Indexing latency
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 7165613 microseconds  | 713539 microseconds  | 256540 microseconds  | 653353 microseconds  |
+
 
 ### Search latency
 
-| # of words in query | Elasticsearch | Tantivy   | Clickhouse | Infino    | Infino-Rest |
-| ------------------- | ------------- | --------- | ---------- | --------- | ----------- |
-| 1                   | 50ms          | 1.45ms    | 6.60ms     | 1.03ms    | 942.42µs    |
-| 2                   | 4ms           | 61.25µs   | 7.23ms     | 12.25µs   | 710.88µs    |
-| 3                   | 49ms          | 2.32ms    | 10.63ms    | 106.32ms  | 418.25µs    |
-| 4                   | 38ms          | 3.30ms    | 8.05ms     | 29.97ms   | 399.17µs    |
-| 5                   | 34ms          | 155.88µs  | 7.39ms     | 185.83µs  | 531.75µs    |
-| 6                   | 37ms          | 111.29µs  | 8.02ms     | 1.57ms    | 599.13µs    |
-| 7                   | 31ms          | 4.34mms   | 9.28ms     | 86.46ms.  | 577.21µs    |
+Average across different query types. See the detailed output for granular info.
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ---- | ---- |
+| data/Apache.log | 33571 microseconds  | 8139 microseconds  | 9158 microseconds  | 11424 microseconds  |
+
 
 ### Timeseries search latency
 
-Average over 10 queries made
+Average over 10 queries on time series.
 
-| Data points | Prometheus | Infino     |
+| Data points | Prometheus | Infino |
 | ----------- | ---------- | ---------- |
-| CPU Usage   |    2035µs  |   1193µs   |
+| Search Latency | 1796 microseconds | 602 microseconds |

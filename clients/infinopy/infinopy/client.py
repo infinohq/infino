@@ -3,8 +3,11 @@ import requests
 
 
 class InfinoClient:
-    def __init__(self):
-        self.base_url = os.environ.get("INFINO_BASE_URL", "http://localhost:3000")
+    def __init__(self, base_url=None):
+        if base_url:
+            self.base_url = base_url
+        else:
+            self.base_url = os.environ.get("INFINO_BASE_URL", "http://localhost:3000")
 
     def _request(self, method, path, params=None, json=None):
         url = self.base_url + path
@@ -23,13 +26,13 @@ class InfinoClient:
         path = "/append_ts"
         return self._request("POST", path, json=payload)
 
-    def search_log(self, text, start_time, end_time):
+    def search_log(self, text, start_time=None, end_time=None):
         path = "/search_log"
         params = {"text": text, "start_time": start_time, "end_time": end_time}
         response = self._request("GET", path, params=params)
         return response
 
-    def search_ts(self, label_name, label_value, start_time, end_time):
+    def search_ts(self, label_name, label_value, start_time=None, end_time=None):
         path = "/search_ts"
         params = {
             "label_name": label_name,
@@ -42,3 +45,6 @@ class InfinoClient:
     def get_index_dir(self):
         path = "/get_index_dir"
         return self._request("GET", path)
+
+    def get_base_url(self):
+        return self.base_url

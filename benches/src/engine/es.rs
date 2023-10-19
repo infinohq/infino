@@ -79,7 +79,8 @@ impl ElasticsearchEngine {
     ElasticsearchEngine { client: client }
   }
 
-  pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) {
+  /// Indexes input data and returns the time required for insertion as microseconds.
+  pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) -> u128 {
     let mut num_docs = 0;
     let num_docs_per_batch = 100;
     let mut num_docs_in_this_batch = 0;
@@ -145,8 +146,13 @@ impl ElasticsearchEngine {
       .unwrap();
     //println!("Refresh response: {:?}", refresh_response);
 
-    let elapsed = now.elapsed();
-    println!("Elasticsearch time required for insertion: {:.2?}", elapsed);
+    let elapsed = now.elapsed().as_micros();
+    println!(
+      "Elasticsearch time required for insertion: {} microseconds",
+      elapsed
+    );
+
+    return elapsed;
   }
 
   pub async fn forcemerge(&self) {
@@ -170,7 +176,7 @@ impl ElasticsearchEngine {
     }
   }
 
-  pub async fn get_index_size(&self) -> String {
+  pub async fn get_index_size(&self) -> u64 {
     let cat = self
       .client
       .cat()
@@ -184,7 +190,27 @@ impl ElasticsearchEngine {
       panic!("Could not get stats for index {}: {:?}", INDEX_NAME, cat);
     }
 
-    cat.text().await.unwrap()
+    let cat_response: String = cat.text().await.unwrap();
+    println!(
+      "Elasticsearch cat response to figure out index size: {}",
+      cat_response
+    );
+
+    // Parse the JSON response
+    let cat_json: Value = serde_json::from_str(&cat_response).unwrap();
+
+    // Extract the index size in bytes
+    if let Some(index) = cat_json.as_array().and_then(|arr| arr.first()) {
+      if let Some(size) = index.get("store.size") {
+        if let Some(size_bytes) = size.as_str().and_then(|s| s.parse::<u64>().ok()) {
+          println!("Index Size (in bytes): {}", size_bytes);
+          return size_bytes;
+        }
+      }
+    }
+
+    println!("Could not programmatically figure out elasticsearch index size. Figure it out from the cat response printed above");
+    return 0;
   }
 
   fn create_client() -> Result<Elasticsearch, Error> {
@@ -195,8 +221,8 @@ impl ElasticsearchEngine {
     Ok(Elasticsearch::new(transport))
   }
 
-  pub async fn search(&self, query: &str) -> usize {
-    let num_words = query.split_whitespace().count();
+  /// Searches the given term and returns the time required in microseconds
+  pub async fn search(&self, query: &str) -> u128 {
     let response = self
       .client
       .search(SearchParts::Index(&[INDEX_NAME]))
@@ -220,20 +246,20 @@ impl ElasticsearchEngine {
     let search_hits = response_body["hits"]["total"]["value"].as_i64().unwrap();
 
     println!(
-      "Elasticsearch time required for searching {} word query is : {:.2?} ms",
-      num_words, took
+      "Elasticsearch time required for searching query {} is : {} ms",
+      query, took
     );
-    return search_hits.try_into().unwrap();
+
+    // Convert `took` to microseconds and return.
+    return (took * 1000).try_into().unwrap();
   }
 
-  pub async fn search_multiple_queries(&self, queries: &[&str]) -> usize {
-    let mut search_results = vec![];
-
+  /// Runs multiple queries and returns the sum of time needed to run them in microseconds.
+  pub async fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
+    let mut time = 0;
     for query in queries {
-      let result = self.search(query).await;
-      search_results.push(result);
+      time += self.search(query).await;
     }
-
-    search_results.len()
+    return time;
   }
 }
