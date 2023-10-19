@@ -58,7 +58,8 @@ Machine description: Macbook Pro 16 inch, M2 Max, 64GB RAM
 
 Dataset: data/Apache.log
 
-Dataset size: 5135877bytes
+Dataset size: 5135877 bytes
+
 
 
 
