@@ -54,7 +54,7 @@ Run date: 2023-10-19
 
 Operating System: macos
 
-Machine description: MacBook Pro M2 MAX 64GB RAM
+Machine description: Macbook Pro 16 inch, M2 Max, 64GB RAM
 
 Dataset: data/Apache.log
 
@@ -62,18 +62,19 @@ Dataset size: 5135877 bytes
 
 
 
+
 ### Index size
 
 | dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
 | ----- | ----- | ----- | ----- | ---- |
-| data/Apache.log | 2411725 bytes | 28626212 bytes | 1854058 bytes | Same as infino |
+| data/Apache.log | 2411725 bytes | 29477047 bytes | 1876588 bytes | Same as infino |
 
 
 ### Indexing latency
 
 | dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
 | ----- | ----- | ----- | ----- | ---- |
-| data/Apache.log | 7099169 microseconds  | 694490 microseconds  | 272940 microseconds  | 670707 microseconds  |
+| data/Apache.log | 7165613 microseconds  | 713539 microseconds  | 256540 microseconds  | 653353 microseconds  |
 
 
 ### Search latency
@@ -82,7 +83,7 @@ Average across different query types. See the detailed output for granular info.
 
 | dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
 | ----- | ----- | ----- | ---- | ---- |
-| data/Apache.log | 36000 microseconds  | 7163 microseconds  | 9319 microseconds  | 11615 microseconds  |
+| data/Apache.log | 33571 microseconds  | 8139 microseconds  | 9158 microseconds  | 11424 microseconds  |
 
 
 ### Timeseries search latency
@@ -91,4 +92,4 @@ Average over 10 queries on time series.
 
 | Data points | Prometheus | Infino |
 | ----------- | ---------- | ---------- |
-| Search Latency | 1436 microseconds | 730 microseconds |
+| Search Latency | 1796 microseconds | 602 microseconds |
