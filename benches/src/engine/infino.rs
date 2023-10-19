@@ -62,13 +62,12 @@ impl InfinoEngine {
 
   /// Searches the given term and returns the time required in microseconds
   pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
-    let num_words = query.split_whitespace().count();
     let now = Instant::now();
     let result = self.tsldb.search(query, range_start_time, range_end_time);
     let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino time required for searching {} word query is : {} microseconds. Num of results {}",
-      num_words,
+      "Infino time required for searching query {} is : {} microseconds. Num of results {}",
+      query,
       elapsed,
       result.len()
     );

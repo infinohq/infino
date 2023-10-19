@@ -19,38 +19,38 @@ mod utils;
 static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
-  "not exist: /var/www/html/file",
+  "exist: /var/www/html/file",
   "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
-  "[client 222.166.160.244] Directory index forbidden",
+  "Directory index forbidden",
   "Jun 09 06:07:05 2005] [notice] LDAP:",
-  "script not found or unable to stat",
+  "unable to stat",
 ];
 static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
-  "not exist: /var/www/html/file",
+  "exist: /var/www/html/file",
   "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
-  "[client 222.166.160.244] Directory index forbidden",
+  "Directory index forbidden",
   "Jun 09 06:07:05 2005] [notice] LDAP:",
-  "script not found or unable to stat",
+  "unable to stat",
 ];
 static TANTIVY_SEARCH_QUERIES: &'static [&'static str] = &[
   r#"message:"Directory""#,
   r#"message:"Digest: done""#,
-  r#"message:"not exist: /var/www/html/file""#,
+  r#"message:"exist: /var/www/html/file""#,
   r#"message:"[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties""#,
-  r#"message:"[client 222.166.160.244] Directory index forbidden""#,
+  r#"message:"Directory index forbidden""#,
   r#"message:"Jun 09 06:07:05 2005] [notice] LDAP:""#,
-  r#"message:"script not found or unable to stat""#,
+  r#"message:"unable to stat""#,
 ];
 static ELASTICSEARCH_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
-  "not exist: /var/www/html/file",
+  "exist: /var/www/html/file",
   "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
-  "[client 222.166.160.244] Directory index forbidden",
+  "Directory index forbidden",
   "Jun 09 06:07:05 2005] [notice] LDAP:",
-  "script not found or unable to stat",
+  "unable to stat",
 ];
 
 #[tokio::main]
@@ -117,6 +117,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   let mut clickhouse = ClickhouseEngine::new().await;
   let cell_clickhouse_index_time = clickhouse.index_lines(input_data_path, max_docs).await;
+
+  // The index is not necessarily immediately written by clickhouse, so sleep for some time
+  thread::sleep(std::time::Duration::from_millis(5000));
   let cell_clickhouse_index_size = get_directory_size(clickhouse.get_index_dir_path());
   println!(
     "Clickhouse index size = {} bytes",
@@ -139,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   create_dir(&tantivy_index_stored_path).unwrap();
 
   let mut tantivy_with_stored = Tantivy::new(&tantivy_index_stored_path, true);
-  let cell_tantivy_index_time = tantivy_with_stored
+  let _cell_tantivy_index_time = tantivy_with_stored
     .index_lines(input_data_path, max_docs)
     .await;
   let cell_tantivy_index_size = get_directory_size(&tantivy_index_stored_path);
@@ -149,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   );
 
   // Perform search on Tantivy index
-  let cell_tantivy_search_time =
+  let _cell_tantivy_search_time =
     tantivy_with_stored.search_multiple_queries(TANTIVY_SEARCH_QUERIES);
 
   // TANTIVY END
@@ -237,25 +240,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
 
   println!("\n\n### Index size\n");
-  println!("| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |");
-  println!("| ----- | ----- | ----- | ----- | ---- | ---- |");
+  println!("| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |");
+  println!("| ----- | ----- | ----- | ----- | ---- |");
   println!(
-    "| {} | {} bytes | {} bytes | {} bytes | {} bytes | Same as infino |",
-    input_data_path,
-    elasticsearch_index_size,
-    cell_tantivy_index_size,
-    cell_clickhouse_index_size,
-    cell_infino_index_size,
+    "| {} | {} bytes | {} bytes | {} bytes | Same as infino |",
+    input_data_path, elasticsearch_index_size, cell_clickhouse_index_size, cell_infino_index_size,
   );
 
   println!("\n\n### Indexing latency\n");
-  println!("| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |");
-  println!("| ----- | ----- | ----- | ----- | ---- | ---- |");
+  println!("| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |");
+  println!("| ----- | ----- | ----- | ----- | ---- |");
   println!(
-    "| {} | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  |",
+    "| {} | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  |",
     input_data_path,
     cell_es_index_time,
-    cell_tantivy_index_time,
     cell_clickhouse_index_time,
     cell_infino_index_time,
     cell_infino_rest_index_time
@@ -263,13 +261,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   println!("\n\n### Search latency\n");
   println!("Average across different query types. See the detailed output for granular info.\n");
-  println!("| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |");
-  println!("| ----- | ----- | ----- | ----- | ---- | ---- |");
+  println!("| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |");
+  println!("| ----- | ----- | ----- | ---- | ---- |");
   println!(
-    "| {} | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  |",
+    "| {} | {} microseconds  | {} microseconds  | {} microseconds  | {} microseconds  |",
     input_data_path,
     cell_es_search_time / ELASTICSEARCH_SEARCH_QUERIES.len() as u128,
-    cell_tantivy_search_time / TANTIVY_SEARCH_QUERIES.len() as u128,
     cell_clickhouse_search_time / CLICKHOUSE_SEARCH_QUERIES.len() as u128,
     cell_infino_search_time / INFINO_SEARCH_QUERIES.len() as u128,
     cell_infino_rest_search_time / INFINO_SEARCH_QUERIES.len() as u128

@@ -85,7 +85,6 @@ impl ClickhouseEngine {
   /// Searches the given term and returns the time required in microseconds
   pub async fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let words: Vec<_> = query.split_whitespace().collect();
-    let num_words = words.len();
 
     // There is no inverted index in Clickhouse, so we need to use the `like` operator for free-text search.
     let words_with_like: Vec<_> = words
@@ -97,6 +96,7 @@ impl ClickhouseEngine {
       "select * from test_logs.test_logs where {} and time > {} and time < {}",
       like_clause, range_start_time, range_end_time
     );
+    println!("Clickhouse query is {}", clickhouse_query);
 
     let now: Instant = Instant::now();
     let cursor = self.client.query(&clickhouse_query).fetch_all::<LogRow>();
@@ -108,8 +108,8 @@ impl ClickhouseEngine {
     let elapsed = now.elapsed().as_micros();
 
     println!(
-      "Clickhouse time required for searching {} word query is : {} microseconds",
-      num_words, elapsed
+      "Clickhouse time required for searching query {} is : {} microseconds",
+      query, elapsed
     );
     return elapsed;
   }
