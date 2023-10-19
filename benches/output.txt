@@ -143,3 +143,30 @@ Average over 10 queries on time series.
 | Data points | Prometheus | Infino |
 | ----------- | ---------- | ---------- |
 | Search Latency | 1796 microseconds | 602 microseconds |
+
+### Search results optimized version (Skip pointer)
+
+***Now running Infino via tsldb library***
+Infino time required for insertion: 337953 microseconds
+Checking size of directory: index
+Infino index size = 1841327 bytes
+Infino time required for searching query Directory is : 1878 microseconds. Num of results 6784
+Infino time required for searching query Digest: done is : 24 microseconds. Num of results 45
+Infino time required for searching query exist: /var/www/html/file is : 78 microseconds. Num of results 46
+Infino time required for searching query [notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties is : 1586 microseconds. Num of results 5632
+Infino time required for searching query Directory index forbidden is : 1622 microseconds. Num of results 6656
+Infino time required for searching query Jun 09 06:07:05 2005] [notice] LDAP: is : 98 microseconds. Num of results 0
+Infino time required for searching query unable to stat is : 1178 microseconds. Num of results 4352
+Infino avg search time = 923 microseconds
+
+
+***Now running Infino via REST API client***
+Infino REST time required for insertion: 778329 microseconds
+Infino REST time required for searching query Directory is : 6104 microseconds
+Infino REST time required for searching query Digest: done is : 1891 microseconds
+Infino REST time required for searching query exist: /var/www/html/file is : 712 microseconds
+Infino REST time required for searching query [notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties is : 4961 microseconds
+Infino REST time required for searching query Directory index forbidden is : 21784 microseconds
+Infino REST time required for searching query Jun 09 06:07:05 2005] [notice] LDAP: is : 803 microseconds
+Infino REST time required for searching query unable to stat is : 3950 microseconds
+Infino via API avg search time = 5743 microseconds
