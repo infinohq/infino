@@ -93,7 +93,7 @@ impl ClickhouseEngine {
       .collect();
     let like_clause = words_with_like.join(" AND ");
     let clickhouse_query = format!(
-      "select * from test_logs.test_logs where {} and time > {} and time < {}",
+      "select * from test_logs.test_logs where {} and time > {} and time < {} order by time desc",
       like_clause, range_start_time, range_end_time
     );
     println!("Clickhouse query is {}", clickhouse_query);
