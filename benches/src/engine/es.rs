@@ -223,7 +223,6 @@ impl ElasticsearchEngine {
 
   /// Searches the given term and returns the time required in microseconds
   pub async fn search(&self, query: &str) -> u128 {
-    let num_words = query.split_whitespace().count();
     let response = self
       .client
       .search(SearchParts::Index(&[INDEX_NAME]))
@@ -247,8 +246,8 @@ impl ElasticsearchEngine {
     let search_hits = response_body["hits"]["total"]["value"].as_i64().unwrap();
 
     println!(
-      "Elasticsearch time required for searching {} word query is : {} ms",
-      num_words, took
+      "Elasticsearch time required for searching query {} is : {} ms",
+      query, took
     );
 
     // Convert `took` to microseconds and return.

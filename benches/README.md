@@ -48,40 +48,41 @@ $ cd benches
 $ cargo run -r
 ```
 
-## Results:
+## Results: 
 
-Run date: 2023-09-25
+Run date: 2023-10-19
 
 Operating System: macos
 
-Machine description: Macbook Pro 16inch, 32GB RAM, M2 Max
+Machine description: MacBook Pro M2 MAX 64GB RAM
 
 Dataset: data/Apache.log
 
-Dataset size: 5135877bytes
+Dataset size: 5135877 bytes
+
 
 
 ### Index size
 
-| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |
-| ----- | ----- | ----- | ----- | ---- | ---- |
-| data/Apache.log | 2411725 bytes | 3117717 bytes | 26908782 bytes | 1865640 bytes | Same as infino |
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 2411725 bytes | 28626212 bytes | 1854058 bytes | Same as infino |
 
 
 ### Indexing latency
 
-| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |
-| ----- | ----- | ----- | ----- | ---- | ---- |
-| data/Apache.log | 7154332 microseconds  | 456012 microseconds  | 652031 microseconds  | 276466 microseconds  | 660976 microseconds  |
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 7099169 microseconds  | 694490 microseconds  | 272940 microseconds  | 670707 microseconds  |
 
 
 ### Search latency
 
 Average across different query types. See the detailed output for granular info.
 
-| dataset | Elasticsearch | Tantivy | Clickhouse | Infino | Infino-Rest |
-| ----- | ----- | ----- | ----- | ---- | ---- |
-| data/Apache.log | 37571 microseconds  | 1328 microseconds  | 7630 microseconds  | 33613 microseconds  | 476 microseconds  |
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ---- | ---- |
+| data/Apache.log | 36000 microseconds  | 7163 microseconds  | 9319 microseconds  | 11615 microseconds  |
 
 
 ### Timeseries search latency
@@ -90,4 +91,4 @@ Average over 10 queries on time series.
 
 | Data points | Prometheus | Infino |
 | ----------- | ---------- | ---------- |
-| Search Latency | 1472 microseconds | 605 microseconds |
+| Search Latency | 1436 microseconds | 730 microseconds |
