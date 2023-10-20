@@ -14,6 +14,7 @@ use crate::utils::range::is_overlap;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
 use crate::utils::sync::Mutex;
+use crate::utils::tokenize::tokenize;
 
 use super::metadata::Metadata;
 
@@ -304,7 +305,7 @@ impl Segment {
     // TODO: make the implementation below more performant by using the skip pointers (aka initial values)
     // and not decompressing every block in every postings list.
     let query_lowercase = query.to_lowercase();
-    let terms = query_lowercase.split_whitespace();
+    let terms = tokenize(&query_lowercase);
     let mut postings_lists: Vec<Vec<u32>> = Vec::new();
 
     for term in terms {

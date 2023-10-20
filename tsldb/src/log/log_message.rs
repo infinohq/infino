@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::tokenize::tokenize;
+
 /// Struct to represent a log message with timestamp.
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LogMessage {
@@ -53,12 +55,13 @@ impl LogMessage {
   /// Get the terms corresponding to this log message.
   pub fn get_terms(&self) -> Vec<String> {
     let text_lower = self.text.to_lowercase();
+    let mut terms: Vec<String> = Vec::new();
 
     // Each word in text goes as it is in terms.
-    let mut terms: Vec<String> = text_lower
-      .split_whitespace()
-      .map(|s| s.to_owned())
-      .collect();
+    let tokens = tokenize(&text_lower);
+    for token in tokens {
+      terms.push(token.to_owned());
+    }
 
     // Each word in a field value goes with a perfix a of its field name, followed by ":".
     for field in &self.fields {
