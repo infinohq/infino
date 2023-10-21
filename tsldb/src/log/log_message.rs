@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::tokenize::tokenize;
+use crate::utils::tokenize::FIELD_DELIMITER;
 
 /// Struct to represent a log message with timestamp.
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -68,7 +69,7 @@ impl LogMessage {
       let name = field.0;
       let values = Vec::from_iter(field.1.split_whitespace());
       for value in values {
-        let term = format!("{}:{}", name, value);
+        let term = format!("{}{}{}", name, FIELD_DELIMITER, value);
         terms.push(term);
       }
     }
@@ -129,7 +130,7 @@ mod tests {
     assert_eq!(terms.len(), 4);
     assert!(terms.contains(&"mytext1".to_owned()));
     assert!(terms.contains(&"mytext2".to_owned()));
-    assert!(terms.contains(&"field1:value1".to_owned()));
-    assert!(terms.contains(&"field2:value2".to_owned()));
+    assert!(terms.contains(&format!("field1{}value1", FIELD_DELIMITER)));
+    assert!(terms.contains(&format!("field2{}value2", FIELD_DELIMITER)));
   }
 }
