@@ -60,14 +60,12 @@ impl LogMessage {
 
     // Each word in text goes as it is in terms.
     let tokens = tokenize(&text_lower);
-    for token in tokens {
-      terms.push(token.to_owned());
-    }
+    terms.extend(tokens);
 
     // Each word in a field value goes with a perfix a of its field name, followed by ":".
     for field in &self.fields {
       let name = field.0;
-      let values = Vec::from_iter(field.1.split_whitespace());
+      let values = tokenize(field.1);
       for value in values {
         let term = format!("{}{}{}", name, FIELD_DELIMITER, value);
         terms.push(term);
