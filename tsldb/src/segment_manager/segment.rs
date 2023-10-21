@@ -14,6 +14,7 @@ use crate::utils::range::is_overlap;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
 use crate::utils::sync::Mutex;
+use crate::utils::tokenize::tokenize;
 
 use super::metadata::Metadata;
 
@@ -304,11 +305,11 @@ impl Segment {
     // TODO: make the implementation below more performant by using the skip pointers (aka initial values)
     // and not decompressing every block in every postings list.
     let query_lowercase = query.to_lowercase();
-    let terms = query_lowercase.split_whitespace();
+    let terms = tokenize(&query_lowercase);
     let mut postings_lists: Vec<Vec<u32>> = Vec::new();
 
     for term in terms {
-      let result = self.terms.get(term);
+      let result = self.terms.get(&term);
       let term_id: u32 = match result {
         Some(result) => *result,
         None => {
@@ -438,6 +439,7 @@ mod tests {
   use super::*;
   use crate::utils::sync::is_sync;
   use crate::utils::sync::thread;
+  use crate::utils::tokenize::FIELD_DELIMITER;
 
   #[test]
   fn test_new_segment() {
@@ -485,7 +487,9 @@ mod tests {
     assert!(segment.terms.contains_key("blah"));
     assert!(segment.terms.contains_key("log"));
     assert!(segment.terms.contains_key("1st"));
-    assert!(segment.terms.contains_key("key1:val1"));
+    assert!(segment
+      .terms
+      .contains_key(&format!("key1{}val1", FIELD_DELIMITER)));
 
     // Test search.
     let mut results = segment.search("this", 0, u64::MAX);
@@ -504,7 +508,7 @@ mod tests {
     assert!(results.len() == 1);
     assert_eq!(results.get(0).unwrap().get_text(), "blah");
 
-    results = segment.search("key1:val1", start, end);
+    results = segment.search(&format!("key1{}val1", FIELD_DELIMITER), start, end);
     assert!(results.len() == 1);
     assert_eq!(results.get(0).unwrap().get_text(), "blah");
 
@@ -528,7 +532,7 @@ mod tests {
     results = segment.search("1st log message", start, end);
     assert_eq!(results.len(), 1);
 
-    results = segment.search("blah key1:val1", start, end);
+    results = segment.search(&format!("blah key1{}val1", FIELD_DELIMITER), start, end);
     assert_eq!(results.len(), 1);
 
     // Test with ranges that do not exist in the index.

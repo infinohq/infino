@@ -3,6 +3,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::tokenize::tokenize;
+use crate::utils::tokenize::FIELD_DELIMITER;
+
 /// Struct to represent a log message with timestamp.
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LogMessage {
@@ -53,19 +56,18 @@ impl LogMessage {
   /// Get the terms corresponding to this log message.
   pub fn get_terms(&self) -> Vec<String> {
     let text_lower = self.text.to_lowercase();
+    let mut terms: Vec<String> = Vec::new();
 
     // Each word in text goes as it is in terms.
-    let mut terms: Vec<String> = text_lower
-      .split_whitespace()
-      .map(|s| s.to_owned())
-      .collect();
+    let tokens = tokenize(&text_lower);
+    terms.extend(tokens);
 
     // Each word in a field value goes with a perfix a of its field name, followed by ":".
     for field in &self.fields {
       let name = field.0;
-      let values = Vec::from_iter(field.1.split_whitespace());
+      let values = tokenize(field.1);
       for value in values {
-        let term = format!("{}:{}", name, value);
+        let term = format!("{}{}{}", name, FIELD_DELIMITER, value);
         terms.push(term);
       }
     }
@@ -126,7 +128,7 @@ mod tests {
     assert_eq!(terms.len(), 4);
     assert!(terms.contains(&"mytext1".to_owned()));
     assert!(terms.contains(&"mytext2".to_owned()));
-    assert!(terms.contains(&"field1:value1".to_owned()));
-    assert!(terms.contains(&"field2:value2".to_owned()));
+    assert!(terms.contains(&format!("field1{}value1", FIELD_DELIMITER)));
+    assert!(terms.contains(&format!("field2{}value2", FIELD_DELIMITER)));
   }
 }
