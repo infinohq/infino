@@ -15,7 +15,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1"
 tsz = "0.1.4"
-zstd = "0.12"
+unicode-segmentation = "1.10.1"
+zstd = "0.13.0"
 
 [dev-dependencies]
 env_logger = "*"
@@ -33,4 +34,4 @@ features = [
 ]
 
 [target.'cfg(loom)'.dependencies]
-loom = { version = "0.5.6" }
+loom = { version = "0.7.1" }

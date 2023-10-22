@@ -843,6 +843,45 @@ mod tests {
   }
 
   #[test]
+  fn test_search_logs_count() {
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_search_logs_count"
+    );
+
+    let index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
+    let message_prefix = "message";
+    let num_message_suffixes = 20;
+
+    // Create tokens with differnt numeric message suffixes, such as message1, message2, message3, etc.
+    // Write each token to the index 2^{suffix} times. For example:
+    // - message1 is written to index 2^1 times,
+    // - message2 is written to index 2^2 times,
+    // - message10 is written to index 2^10 times,
+    for i in 1..num_message_suffixes {
+      let message = &format!("{}{}", message_prefix, i);
+      let count = 2u32.pow(i);
+      for _ in 0..count {
+        index.append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        );
+      }
+      index.commit(false);
+    }
+
+    for i in 1..num_message_suffixes {
+      let message = &format!("{}{}", message_prefix, i);
+      let expected_count = 2u32.pow(i);
+      let results = index.search(message, 0, Utc::now().timestamp_millis() as u64);
+      assert_eq!(expected_count, results.len() as u32);
+    }
+  }
+
+  #[test]
   fn test_multiple_segments_data_points() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
