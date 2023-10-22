@@ -459,6 +459,7 @@ mod tests {
   use tsldb::log::log_message::LogMessage;
   use tsldb::ts::data_point::DataPoint;
   use tsldb::utils::io::get_joined_path;
+  use tsldb::utils::tokenize::FIELD_DELIMITER;
 
   use super::*;
 
@@ -736,7 +737,7 @@ mod tests {
     // Sort the expected log messages in reverse chronological order.
     log_messages_expected.sort();
 
-    let search_query = "value1 field34:value4";
+    let search_query = &format!("value1 field34{}value4", FIELD_DELIMITER);
 
     let query = SearchQuery {
       start_time: None,
