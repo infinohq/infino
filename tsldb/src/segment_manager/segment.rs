@@ -381,15 +381,18 @@ impl Segment {
       accumulator.append(&mut posting_block.get_log_message_ids().read().unwrap().clone());
     }
 
+    accumulator.append(
+      &mut last_block_list[shortest_list_index]
+        .get_log_message_ids()
+        .read()
+        .unwrap()
+        .clone(),
+    );
+
     // If postings_list is empty, then accumulator should be loaded from last_block_list
     if accumulator.is_empty() {
-      accumulator.append(
-        &mut last_block_list[shortest_list_index]
-          .get_log_message_ids()
-          .read()
-          .unwrap()
-          .clone(),
-      );
+      // No postings list
+      return vec![];
     }
 
     for i in 0..initial_values_list.len() {
