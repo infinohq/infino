@@ -735,6 +735,32 @@ mod tests {
   }
 
   #[test]
+  fn test_basic_log_messages_with_colon() {
+    let segment = Segment::new();
+
+    segment
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        "test: this is my 1st log message",
+      )
+      .unwrap();
+
+    // Test terms map.
+    assert!(segment.terms.contains_key("log"));
+    assert!(segment.terms.contains_key("1st"));
+    assert!(segment.terms.contains_key("test:"));
+
+    // Test search.
+    let results = segment.search("test:", 0, u64::MAX);
+    assert!(results.len() == 1);
+    assert_eq!(
+      results.get(0).unwrap().get_text(),
+      "test: this is my 1st log message"
+    );
+  }
+
+  #[test]
   fn test_commit_refresh() {
     let original_segment = Segment::new();
     let segment_dir = TempDir::new("segment_test").unwrap();
