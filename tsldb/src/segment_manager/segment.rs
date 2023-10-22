@@ -338,14 +338,14 @@ impl Segment {
 
       // Extract List of PostingBlockCompressed from posting list
       // posting_block_compressed is Vec<PostingsBlockCompressed> which is extracted by cloning get_postings_list_compressed from postings_lists
-      let mut posting_block_compressed: Vec<PostingsBlockCompressed> = Vec::new();
+      let mut postings_block_compressed_vec: Vec<PostingsBlockCompressed> = Vec::new();
       for posting_block in postings_list
         .get_postings_list_compressed()
         .read()
         .unwrap()
         .iter()
       {
-        posting_block_compressed.push(posting_block.clone());
+        postings_block_compressed_vec.push(posting_block.clone());
       }
 
       // Extract last posting block from posting list
@@ -357,12 +357,12 @@ impl Segment {
           .clone(),
       );
 
-      if posting_block_compressed.len() < shortest_list_len {
-        shortest_list_len = posting_block_compressed.len();
+      if postings_block_compressed_vec.len() < shortest_list_len {
+        shortest_list_len = postings_block_compressed_vec.len();
         shortest_list_index = index;
       }
 
-      postings_lists.push(posting_block_compressed);
+      postings_lists.push(postings_block_compressed_vec);
     }
 
     // If initial values list is empty which means there are no posting block compressed or last block

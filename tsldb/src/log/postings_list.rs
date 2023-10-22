@@ -90,6 +90,26 @@ impl PostingsList {
   pub fn get_last_postings_block(&self) -> &RwLock<PostingsBlock> {
     &self.last_block
   }
+
+  #[cfg(test)]
+  pub fn flatten(&self) -> Vec<u32> {
+    let postings_list_compressed = &*self.postings_list_compressed.read().unwrap();
+    let last_block = &*self.last_block.read().unwrap();
+    let mut retval: Vec<u32> = Vec::new();
+
+    // Flatten the compressed postings blocks.
+    for postings_block_compressed in postings_list_compressed {
+      let postings_block = PostingsBlock::try_from(postings_block_compressed).unwrap();
+      let mut log_message_ids = (*postings_block.get_log_message_ids().read().unwrap()).clone();
+      retval.append(&mut log_message_ids);
+    }
+
+    // Flatten the last block.
+    let mut log_message_ids = (*last_block.get_log_message_ids().read().unwrap()).clone();
+    retval.append(&mut log_message_ids);
+
+    retval
+  }
 }
 
 impl Default for PostingsList {
@@ -239,10 +259,12 @@ mod tests {
   fn test_postings_create_multiple_blocks() {
     let num_blocks: usize = 4;
     let pl = PostingsList::new();
+    let mut expected = Vec::new();
 
     // Insert num_blocks*BLOCK_SIZE_FOR_LOG_MESSAGES entries.
     for i in 0..num_blocks * BLOCK_SIZE_FOR_LOG_MESSAGES {
       pl.append(i as u32);
+      expected.push(i as u32);
     }
 
     // num_blocks blocks should be created. The first num_blocks-1 of these should be compressed.
@@ -272,5 +294,8 @@ mod tests {
       initial_values.read().unwrap()[num_blocks - 1],
       ((num_blocks - 1) * BLOCK_SIZE_FOR_LOG_MESSAGES) as u32
     );
+
+    let received = pl.flatten();
+    assert_eq!(expected, received);
   }
 }
