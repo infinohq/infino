@@ -19,3 +19,6 @@ benches/target
 
 # the index created by running benches folder
 benches/index
+
+# ignore clickhouse binary
+benches/ch-tmp/
