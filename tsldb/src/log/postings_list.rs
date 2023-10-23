@@ -86,13 +86,12 @@ impl PostingsList {
     &self.initial_values
   }
 
-  #[cfg(test)]
   /// Get the last postings block, wrapped in RwLock.
   pub fn get_last_postings_block(&self) -> &RwLock<PostingsBlock> {
     &self.last_block
   }
 
-  /// Flatten the postings list to return vector of log message ids.
+  #[cfg(test)]
   pub fn flatten(&self) -> Vec<u32> {
     let postings_list_compressed = &*self.postings_list_compressed.read().unwrap();
     let last_block = &*self.last_block.read().unwrap();

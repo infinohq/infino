@@ -412,7 +412,7 @@ async fn search_ts(
     &time_series_query.label_name,
     &time_series_query.label_value,
     // The default for range start time is 0.
-    time_series_query.start_time.unwrap_or(0 as u64),
+    time_series_query.start_time.unwrap_or(0_u64),
     // The default for range end time is the current time.
     time_series_query
       .end_time

@@ -35,6 +35,14 @@ impl PostingsBlockCompressed {
     }
   }
 
+  pub fn new_with_params(initial: u32, num_bits: u8, log_message_ids_compressed: &[u8]) -> Self {
+    PostingsBlockCompressed {
+      initial: AtomicCell::new(initial),
+      num_bits: AtomicCell::new(num_bits),
+      log_message_ids_compressed: RwLock::new(log_message_ids_compressed.to_owned()),
+    }
+  }
+
   /// Get the initial value.
   pub fn get_initial(&self) -> u32 {
     self.initial.load()
@@ -113,6 +121,21 @@ impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
     );
 
     Ok(postings_block_compressed)
+  }
+}
+
+// Write test for this Clone on PostingsBlockCompressed.
+impl Clone for PostingsBlockCompressed {
+  fn clone(&self) -> PostingsBlockCompressed {
+    PostingsBlockCompressed::new_with_params(
+      self.get_initial(),
+      self.get_num_bits(),
+      &self
+        .get_log_message_ids_compressed()
+        .read()
+        .unwrap()
+        .clone(),
+    )
   }
 }
 
@@ -255,5 +278,23 @@ mod tests {
     // The memory consumed by log_message_ids for compressed block should be equal to sizeof(u8)*16,
     // as there are 16 integers, each occupying 1 byte.
     assert_eq!(mem_pbc_log_message_ids_compressed, 1 * 16);
+  }
+
+  #[test]
+  fn test_posting_block_compressed_clone() {
+    let mut increasing_by_one: Vec<u32> = Vec::new();
+    for i in 0..128 {
+      increasing_by_one.push(i);
+    }
+    let pb = PostingsBlock::new_with_log_message_ids(increasing_by_one);
+    let pbc = PostingsBlockCompressed::try_from(&pb).unwrap();
+
+    let pbc_clone = pbc.clone();
+    assert_eq!(pbc, pbc_clone);
+
+    assert_eq!(
+      *pbc.log_message_ids_compressed.read().unwrap(),
+      *pbc_clone.log_message_ids_compressed.read().unwrap()
+    );
   }
 }

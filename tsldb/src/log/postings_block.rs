@@ -98,6 +98,17 @@ impl PartialEq for PostingsBlock {
   }
 }
 
+impl Clone for PostingsBlock {
+  fn clone(&self) -> Self {
+    let v = self.get_log_message_ids().read().unwrap();
+    let mut v_clone = Vec::new();
+    for i in v.iter() {
+      v_clone.push(*i);
+    }
+    Self::new_with_log_message_ids(v_clone)
+  }
+}
+
 impl Eq for PostingsBlock {}
 
 impl TryFrom<&PostingsBlockCompressed> for PostingsBlock {
@@ -221,5 +232,22 @@ mod tests {
     // Decompress the compressed block, and verify that the result is as expected.
     let received = PostingsBlock::try_from(&pbc).unwrap();
     assert_eq!(&received, &expected);
+  }
+
+  // Write test for Clone of PostingBlock
+  #[test]
+  fn test_clone() {
+    let pb = PostingsBlock::new();
+    pb.append(1000).unwrap();
+    pb.append(2000).unwrap();
+    pb.append(3000).unwrap();
+    let pb_clone = pb.clone();
+    assert_eq!(pb, pb_clone);
+
+    // Assert log message ids are same but not the same pointer
+    assert_ne!(
+      pb.get_log_message_ids().read().unwrap().as_ptr(),
+      pb_clone.get_log_message_ids().read().unwrap().as_ptr()
+    );
   }
 }
