@@ -64,14 +64,13 @@ When we decided to write an open-source platform that stores both of these toget
 
 * Store metrics and logs together,
 * Ingest using [FluentBit](https://fluentbit.io/),
-* Search logs using boolean *AND* queries,
+* [Superfast](https://github.com/infinohq/infino/tree/main/benches#search-latency) searching of logs using boolean *AND* queries,
 * Query time series of metrics stored,
 * Python client for ingestion as well as queries,
 * [Dashboard-as-code](dashboard/README.md) using streamlit,
 * Integration with LangChain for LLM monitoring,
 * Coming Soon:
   * Support for traces,
-  * Additional performance improvements while searching logs,
   * Natural language queries and dashboards for traces, metrics, and logs,
   * Optionally use S3 as backend storage,
   * Hosted cloud offering,
