@@ -52,7 +52,7 @@ $ cargo run -r
 
 ## Results:
 
-Run date: 2023-10-19
+Run date: 2023-10-23
 
 Operating System: macos
 
@@ -66,26 +66,26 @@ Dataset size: 5135877 bytes
 
 | dataset         | Elasticsearch | Clickhouse     | Infino        | Infino-Rest    |
 | --------------- | ------------- | -------------- | ------------- | -------------- |
-| data/Apache.log | 2411725 bytes | 29477047 bytes | 1850754 bytes | Same as infino |
+| data/Apache.log | 2411725 bytes | 35488638 bytes | 1614523 bytes | Same as infino |
 
 ### Indexing latency
 
-| dataset         | Elasticsearch        | Clickhouse          | Infino              | Infino-Rest         |
-| --------------- | -------------------- | ------------------- | ------------------- | ------------------- |
-| data/Apache.log | 7165613 microseconds | 713539 microseconds | 337953 microseconds | 778329 microseconds |
+| dataset         | Elasticsearch         | Clickhouse           | Infino              | Infino-Rest          |
+| --------------- | --------------------- | -------------------- | ------------------- | -------------------- |
+| data/Apache.log | 35378212 microseconds | 1364551 microseconds | 427316 microseconds | 1081403 microseconds |
 
 ### Search latency
 
 Average across different query types. See the detailed output for granular info.
 
-| dataset         | Elasticsearch      | Clickhouse        | Infino           | Infino-Rest       |
-| --------------- | ------------------ | ----------------- | ---------------- | ----------------- |
-| data/Apache.log | 33571 microseconds | 8139 microseconds | 923 microseconds | 5743 microseconds |
+| dataset         | Elasticsearch       | Clickhouse         | Infino           | Infino-Rest       |
+| --------------- | ------------------- | ------------------ | ---------------- | ----------------- |
+| data/Apache.log | 134571 microseconds | 18084 microseconds | 888 microseconds | 3804 microseconds |
 
 ### Timeseries search latency
 
 Average over 10 queries on time series.
 
-| Data points    | Prometheus        | Infino           |
-| -------------- | ----------------- | ---------------- |
-| Search Latency | 1796 microseconds | 602 microseconds |
+| Data points    | Prometheus        | Infino            |
+| -------------- | ----------------- | ----------------- |
+| Search Latency | 2678 microseconds | 2864 microseconds |
