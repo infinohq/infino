@@ -88,4 +88,4 @@ Average over 10 queries on time series.
 
 | Data points    | Prometheus        | Infino            |
 | -------------- | ----------------- | ----------------- |
-| Search Latency | 2678 microseconds | 2864 microseconds |
+| Search Latency | 2678 nanoseconds | 2864 nanoseconds |
