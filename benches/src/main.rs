@@ -19,8 +19,8 @@ mod utils;
 static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
-  "exist: /var/www/html/file",
-  "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
+  "2006] [notice] mod_jk2 Shutting down",
+  "mod_jk child workerEnv in error state 5",
   "Directory index forbidden",
   "Jun 09 06:07:05 2005] [notice] LDAP:",
   "unable to stat",
@@ -28,8 +28,8 @@ static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
 static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
-  "exist: /var/www/html/file",
-  "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
+  "2006] [notice] mod_jk2 Shutting down",
+  "mod_jk child workerEnv in error state 5",
   "Directory index forbidden",
   "Jun 09 06:07:05 2005] [notice] LDAP:",
   "unable to stat",
@@ -37,8 +37,8 @@ static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
 static TANTIVY_SEARCH_QUERIES: &'static [&'static str] = &[
   r#"message:"Directory""#,
   r#"message:"Digest: done""#,
-  r#"message:"exist: /var/www/html/file""#,
-  r#"message:"[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties""#,
+  r#"message:"2006] [notice] mod_jk2 Shutting down""#,
+  r#"message:"mod_jk child workerEnv in error state 5""#,
   r#"message:"Directory index forbidden""#,
   r#"message:"Jun 09 06:07:05 2005] [notice] LDAP:""#,
   r#"message:"unable to stat""#,
@@ -46,8 +46,8 @@ static TANTIVY_SEARCH_QUERIES: &'static [&'static str] = &[
 static ELASTICSEARCH_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
-  "exist: /var/www/html/file",
-  "[notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties",
+  "2006] [notice] mod_jk2 Shutting down",
+  "mod_jk child workerEnv in error state 5",
   "Directory index forbidden",
   "Jun 09 06:07:05 2005] [notice] LDAP:",
   "unable to stat",
