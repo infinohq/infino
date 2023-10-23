@@ -124,6 +124,7 @@ impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
   }
 }
 
+// Write test for this Clone on PostingsBlockCompressed.
 impl Clone for PostingsBlockCompressed {
   fn clone(&self) -> PostingsBlockCompressed {
     PostingsBlockCompressed::new_with_params(
@@ -277,5 +278,23 @@ mod tests {
     // The memory consumed by log_message_ids for compressed block should be equal to sizeof(u8)*16,
     // as there are 16 integers, each occupying 1 byte.
     assert_eq!(mem_pbc_log_message_ids_compressed, 1 * 16);
+  }
+
+  #[test]
+  fn test_posting_block_compressed_clone() {
+    let mut increasing_by_one: Vec<u32> = Vec::new();
+    for i in 0..128 {
+      increasing_by_one.push(i);
+    }
+    let pb = PostingsBlock::new_with_log_message_ids(increasing_by_one);
+    let pbc = PostingsBlockCompressed::try_from(&pb).unwrap();
+
+    let pbc_clone = pbc.clone();
+    assert_eq!(pbc, pbc_clone);
+
+    assert_eq!(
+      *pbc.log_message_ids_compressed.read().unwrap(),
+      *pbc_clone.log_message_ids_compressed.read().unwrap()
+    );
   }
 }

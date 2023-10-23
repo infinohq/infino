@@ -233,4 +233,21 @@ mod tests {
     let received = PostingsBlock::try_from(&pbc).unwrap();
     assert_eq!(&received, &expected);
   }
+
+  // Write test for Clone of PostingBlock
+  #[test]
+  fn test_clone() {
+    let pb = PostingsBlock::new();
+    pb.append(1000).unwrap();
+    pb.append(2000).unwrap();
+    pb.append(3000).unwrap();
+    let pb_clone = pb.clone();
+    assert_eq!(pb, pb_clone);
+
+    // Assert log message ids are same but not the same pointer
+    assert_ne!(
+      pb.get_log_message_ids().read().unwrap().as_ptr(),
+      pb_clone.get_log_message_ids().read().unwrap().as_ptr()
+    );
+  }
 }
