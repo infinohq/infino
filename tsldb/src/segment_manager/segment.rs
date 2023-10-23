@@ -16,6 +16,7 @@ use crate::utils::range::is_overlap;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
 use crate::utils::sync::Mutex;
+use crate::utils::tokenize::tokenize;
 
 use super::metadata::Metadata;
 
@@ -305,7 +306,7 @@ impl Segment {
   pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> Vec<LogMessage> {
     // TODO: make the implementation below more performant by not decompressing every block in every postings list.
     let query_lowercase = query.to_lowercase();
-    let terms = query_lowercase.split_whitespace();
+    let terms = tokenize(&query_lowercase);
 
     // initial_values_list wil contain list of initial_values corresponding to every posting_list
     let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
@@ -318,7 +319,7 @@ impl Segment {
     let mut shortest_list_len = usize::MAX;
 
     for (index, term) in terms.into_iter().enumerate() {
-      let result = self.terms.get(term);
+      let result = self.terms.get(&term);
       let term_id: u32 = match result {
         Some(result) => *result,
         None => {
@@ -749,7 +750,7 @@ mod tests {
     // Test terms map.
     assert!(segment.terms.contains_key("log"));
     assert!(segment.terms.contains_key("1st"));
-    assert!(segment.terms.contains_key("test:"));
+    assert!(segment.terms.contains_key("test"));
 
     // Test search.
     let results = segment.search("test:", 0, u64::MAX);
