@@ -66,7 +66,7 @@ Dataset size: 5135877 bytes
 
 | dataset         | Elasticsearch | Clickhouse     | Infino        | Infino-Rest    |
 | --------------- | ------------- | -------------- | ------------- | -------------- |
-| data/Apache.log | 2411725 bytes | 35488638 bytes | 1614523 bytes | Same as infino |
+| data/Apache.log | 2411725 bytes | 35488638 bytes | 1012294 bytes | Same as infino |
 
 ### Indexing latency
 
