@@ -18,46 +18,46 @@ mod utils;
 
 static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
-  "Digest: done",
+  "1465 8",
   "2006] [notice] mod_jk2 Shutting down",
   "mod_jk child workerEnv in error state 5",
-  "Directory index forbidden",
-  "Jun 09 06:07:05 2005] [notice] LDAP:",
-  "unable to stat",
+  "[debug] [client 1756]",
+  "2005] [warn] mod_jk2 Shutting down",
+  "[Mon Sep 12 15:56:58 2005] [notice] mod_jk child init 1555 1",
 ];
 static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
-  "Digest: done",
+  "1465 8",
   "2006] [notice] mod_jk2 Shutting down",
   "mod_jk child workerEnv in error state 5",
-  "Directory index forbidden",
-  "Jun 09 06:07:05 2005] [notice] LDAP:",
-  "unable to stat",
+  "[debug] [client 1756]",
+  "2005] [warn] mod_jk2 Shutting down",
+  "[Mon Sep 12 15:56:58 2005] [notice] mod_jk child init 1555 1",
 ];
 static TANTIVY_SEARCH_QUERIES: &'static [&'static str] = &[
   r#"message:"Directory""#,
-  r#"message:"Digest: done""#,
+  r#"message:"1465 8""#,
   r#"message:"2006] [notice] mod_jk2 Shutting down""#,
   r#"message:"mod_jk child workerEnv in error state 5""#,
-  r#"message:"Directory index forbidden""#,
-  r#"message:"Jun 09 06:07:05 2005] [notice] LDAP:""#,
-  r#"message:"unable to stat""#,
+  r#"message:"[debug] [client 1756]""#,
+  r#"message:"2005] [warn] mod_jk2 Shutting down""#,
+  r#"message:"[Mon Sep 12 15:56:58 2005] [notice] mod_jk child init 1555 1""#,
 ];
 static ELASTICSEARCH_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
-  "Digest: done",
+  "1465 8",
   "2006] [notice] mod_jk2 Shutting down",
   "mod_jk child workerEnv in error state 5",
-  "Directory index forbidden",
-  "Jun 09 06:07:05 2005] [notice] LDAP:",
-  "unable to stat",
+  "[debug] [client 1756]",
+  "2005] [warn] mod_jk2 Shutting down",
+  "[Mon Sep 12 15:56:58 2005] [notice] mod_jk child init 1555 1",
 ];
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Path to the input data to index from. Points to a log file - where each line is indexed
   // as a separate document in the elasticsearch index and the infino index.
-  let input_data_path = "data/Apache.log";
+  let input_data_path = "data/Apache2.log";
   let cell_input_data_size = std::fs::metadata(input_data_path)
     .map(|metadata| metadata.len())
     .expect("Could not get the input data size");

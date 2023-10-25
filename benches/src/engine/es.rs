@@ -82,7 +82,7 @@ impl ElasticsearchEngine {
   /// Indexes input data and returns the time required for insertion as microseconds.
   pub async fn index_lines(&self, input_data_path: &str, max_docs: i32) -> u128 {
     let mut num_docs = 0;
-    let num_docs_per_batch = 100;
+    let num_docs_per_batch = 1000;
     let mut num_docs_in_this_batch = 0;
     let mut logs_batch = Vec::new();
     let now = Instant::now();
@@ -228,7 +228,7 @@ impl ElasticsearchEngine {
       .search(SearchParts::Index(&[INDEX_NAME]))
       .from(0)
       // FIXME: ES not returning more than 10k results, if there are more than 10k results it panics
-      .size(10000)
+      .size(200000)
       .body(json!({
           "query": {
               "match": {
