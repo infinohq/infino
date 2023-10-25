@@ -189,7 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
   cell_infino_ts_search_time = cell_infino_ts_search_time / 10;
   println!(
-    "Infino timeseries search avg {} nanoseconds",
+    "Infino timeseries search avg {} microseconds",
     cell_infino_ts_search_time
   );
   // INFINO API FOR TIME SERIES END
@@ -211,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
   cell_prometheus_search_time = cell_prometheus_search_time / 10;
   println!(
-    "Prometheus timeseries search avg {} nanoseconds",
+    "Prometheus timeseries search avg {} microseconds",
     cell_prometheus_search_time
   );
   prometheus_client.stop();
