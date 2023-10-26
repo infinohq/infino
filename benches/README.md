@@ -50,7 +50,7 @@ $ cd benches
 $ cargo run -r
 ```
 
-## Results:
+## Results (Apache log - small):
 
 Run date: 2023-10-23
 
@@ -89,3 +89,48 @@ Average over 10 queries on time series.
 | Data points    | Prometheus        | Infino            |
 | -------------- | ----------------- | ----------------- |
 | Search Latency | 2678 nanoseconds | 2864 nanoseconds |
+
+## Results (Apache log - medium): 
+
+Run date: 2023-10-26
+
+Operating System: macos
+
+Machine description: Macbook Pro 2023, 16 inch, M2 Max, 64 GB RAM
+
+Dataset: data/Apache.log
+
+Dataset size: 104,857,667 bytes
+
+
+
+### Index size
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 46,241,201 bytes | 822,056,628 bytes | 34,354,516 bytes | Same as infino |
+
+
+### Indexing latency
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 141,224,285 microseconds  | 16,924,729 microseconds  | 29,839,987 microseconds  | 44,180,081 microseconds  |
+
+
+### Search latency
+
+Average across different query types. See the detailed output for granular info.
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ---- | ---- |
+| data/Apache.log | 124,285 microseconds  | 34,469 microseconds  | 12,648 microseconds  | 32,689 microseconds  |
+
+
+### Timeseries search latency
+
+Average over 10 queries on time series.
+
+| Data points | Prometheus | Infino |
+| ----------- | ---------- | ---------- |
+| Search Latency | 1,770 microseconds | 459 microseconds |
