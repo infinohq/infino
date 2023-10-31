@@ -37,7 +37,8 @@ pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool
 /// Read the map from the given file.
 pub fn read<T: DeserializeOwned>(file_path: &str) -> T {
   let file = File::open(file_path).unwrap();
-  let mmap = unsafe { Mmap::map(&file).expect(&format!("Could not map file {}", file_path)) };
+  let mmap =
+    unsafe { Mmap::map(&file).unwrap_or_else(|_| panic!("Could not map file {}", file_path)) };
   let data = zstd::decode_all(&mmap[..]).unwrap();
   let retval: T = serde_json::from_slice(&data).unwrap();
   retval
