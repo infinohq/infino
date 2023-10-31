@@ -8,11 +8,11 @@ use std::sync::Arc;
 use axum::extract::Query;
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
-use crossbeam::atomic::AtomicCell;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
@@ -48,15 +48,16 @@ struct TimeSeriesQuery {
   end_time: Option<u64>,
 }
 
-const COMMIT_THREAD_SHUTDOWN_FLAG: AtomicCell<bool> = AtomicCell::new(false);
-
 /// Periodically commits tsldb (typically called in a thread, so that tsldb can be asyncronously committed).
-async fn commit_in_loop(state: Arc<AppState>, commit_interval_in_seconds: u32) {
+async fn commit_in_loop(
+  state: Arc<AppState>,
+  commit_interval_in_seconds: u32,
+  shutdown_flag: Arc<Mutex<bool>>,
+) {
   loop {
-    state.tsldb.commit(false);
+    state.tsldb.commit(true);
 
-    let is_shutdown = COMMIT_THREAD_SHUTDOWN_FLAG.load();
-    if is_shutdown {
+    if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
       break;
     }
@@ -70,7 +71,7 @@ async fn app(
   config_dir_path: &str,
   image_name: &str,
   image_tag: &str,
-) -> (Router, JoinHandle<()>, Arc<AppState>) {
+) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -112,9 +113,11 @@ async fn app(
 
   // Start a thread to periodically commit tsldb.
   info!("Spawning new thread to periodically commit");
+  let commit_thread_shutdown_flag = Arc::new(Mutex::new(false));
   let commit_thread_handle = tokio::spawn(commit_in_loop(
     shared_state.clone(),
     commit_interval_in_seconds,
+    commit_thread_shutdown_flag.clone(),
   ));
 
   // Build our application with a route
@@ -131,7 +134,12 @@ async fn app(
     .route("/flush", post(flush))
     .with_state(shared_state.clone());
 
-  (router, commit_thread_handle, shared_state)
+  (
+    router,
+    commit_thread_handle,
+    commit_thread_shutdown_flag,
+    shared_state,
+  )
 }
 
 #[tokio::main]
@@ -147,7 +155,8 @@ async fn main() {
   let image_tag = "3";
 
   // Create app.
-  let (app, commit_thread_handle, shared_state) = app(config_dir_path, image_name, image_tag).await;
+  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) =
+    app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -175,7 +184,7 @@ async fn main() {
   }
 
   info!("Shutting down commit thread and waiting for it to finish...");
-  COMMIT_THREAD_SHUTDOWN_FLAG.store(true);
+  *commit_thread_shutdown_flag.lock().await = true;
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
@@ -677,7 +686,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create the app.
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Check whether the /ping works.
     let response = app
