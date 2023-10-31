@@ -32,3 +32,6 @@ features = ["attributes"]
 
 [dev-dependencies]
 clickhouse = { version = "*", features = ["test-util"] }
+
+[profile.release]
+debug = true
