@@ -50,6 +50,13 @@ $ cd benches
 $ cargo run -r
 ```
 
+## Run only Infino
+
+Sometimes, you may want to run only Infino to see its resource usage, or profile the code. In this scenario, to run only Infino, use:
+```
+$ cargo run -r -- --stop-after-infino
+```
+
 ## Results (Apache log - small):
 
 Run date: 2023-10-23
