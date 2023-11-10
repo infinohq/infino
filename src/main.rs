@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::Query;
+use axum::routing::delete;
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
@@ -13,6 +14,7 @@ use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
@@ -27,7 +29,7 @@ use crate::utils::shutdown::shutdown_signal;
 struct AppState {
   // The queue will be created only if use_rabbitmq = yes is specified in server config.
   queue: Option<RabbitMQ>,
-  tsldb: Tsldb,
+  tsldb: Arc<RwLock<Tsldb>>,
   settings: Settings,
 }
 
@@ -54,8 +56,10 @@ async fn commit_in_loop(
   commit_interval_in_seconds: u32,
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
+  let tsldb_lock = Arc::clone(&state.tsldb);
+  let tsldb = tsldb_lock.read().await;
   loop {
-    state.tsldb.commit(true);
+    tsldb.commit(true);
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
@@ -77,7 +81,7 @@ async fn app(
 
   // Create a new tsldb.
   let tsldb = match Tsldb::new(config_dir_path) {
-    Ok(tsldb) => tsldb,
+    Ok(tsldb) => Arc::new(RwLock::new(tsldb)),
     Err(err) => panic!("Unable to initialize tsldb with err {}", err),
   };
 
@@ -129,9 +133,13 @@ async fn app(
     .route("/search_ts", get(search_ts))
     //---
     // POST methods
+    // TODO: all the APIs should have index name
     .route("/append_log", post(append_log))
     .route("/append_ts", post(append_ts))
     .route("/flush", post(flush))
+    // POST methods to create and delete index
+    .route("{index_name}", post(create_index))
+    .route("{index_name}", delete(delete_index))
     .with_state(shared_state.clone());
 
   (
@@ -290,7 +298,10 @@ async fn append_log(
       }
     }
 
-    state.tsldb.append_log_message(timestamp, &fields, &text);
+    let tsldb_lock = Arc::clone(&state.tsldb);
+    let tsldb = tsldb_lock.read().await;
+
+    tsldb.append_log_message(timestamp, &fields, &text);
   }
 
   Ok(())
@@ -353,6 +364,9 @@ async fn append_ts(
       }
     }
 
+    let tsldb_lock = Arc::clone(&state.tsldb);
+    let tsldb = tsldb_lock.read().await;
+
     // Find individual data points in this time series entry and insert in tsldb.
     for (key, value) in obj.iter() {
       if key != timestamp_key && key != labels_key {
@@ -371,9 +385,7 @@ async fn append_ts(
           continue;
         }
 
-        state
-          .tsldb
-          .append_data_point(key, &labels, timestamp, value_f64);
+        tsldb.append_data_point(key, &labels, timestamp, value_f64);
       }
     }
   }
@@ -388,7 +400,10 @@ async fn search_log(
 ) -> String {
   debug!("Searching log: {:?}", search_query);
 
-  let results = state.tsldb.search(
+  let tsldb_lock = Arc::clone(&state.tsldb);
+  let tsldb = tsldb_lock.read().await;
+
+  let results = tsldb.search(
     &search_query.text,
     // The default for range start time is 0.
     search_query.start_time.unwrap_or(0),
@@ -408,7 +423,10 @@ async fn search_ts(
 ) -> String {
   debug!("Searching time series: {:?}", time_series_query);
 
-  let results = state.tsldb.get_time_series(
+  let tsldb_lock = Arc::clone(&state.tsldb);
+  let tsldb = tsldb_lock.read().await;
+
+  let results = tsldb.get_time_series(
     &time_series_query.label_name,
     &time_series_query.label_value,
     // The default for range start time is 0.
@@ -425,19 +443,65 @@ async fn search_ts(
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
   // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
-  state.tsldb.commit(true);
+  let tsldb_lock = Arc::clone(&state.tsldb);
+  let tsldb = tsldb_lock.read().await;
+  tsldb.commit(true);
 
   Ok(())
 }
 
 /// Get index directory used by tsldb.
 async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
-  state.tsldb.get_index_dir()
+  let tsldb_lock = Arc::clone(&state.tsldb);
+  let tsldb = tsldb_lock.read().await;
+  tsldb.get_index_dir()
 }
 
 /// Ping to check if the server is up.
 async fn ping(State(_state): State<Arc<AppState>>) -> String {
   "OK".to_owned()
+}
+
+/// Create a new index in tsldb with given name.
+async fn create_index(
+  State(state): State<Arc<AppState>>,
+  Json(index_name): Json<String>,
+) -> Result<(), (StatusCode, String)> {
+  debug!("Creating index {}", index_name);
+
+  let tsldb_lock = Arc::clone(&state.tsldb);
+  // take write lock on tsldb.
+  let mut tsldb = tsldb_lock.write().await;
+
+  let result = tsldb.create_index(&index_name);
+
+  if result.is_err() {
+    let msg = format!("Could not create index {}", index_name);
+    error!("{}", msg);
+    return Err((StatusCode::BAD_REQUEST, msg));
+  }
+
+  Ok(())
+}
+
+/// Create a function to delete an index with given name.
+async fn delete_index(
+  State(state): State<Arc<AppState>>,
+  Json(index_name): Json<String>,
+) -> Result<(), (StatusCode, String)> {
+  debug!("Deleting index {}", index_name);
+
+  let tsldb_lock = Arc::clone(&state.tsldb);
+  let mut tsldb = tsldb_lock.write().await;
+
+  let result = tsldb.delete_index(&index_name);
+  if result.is_err() {
+    let msg = format!("Could not delete index {}", index_name);
+    error!("{}", msg);
+    return Err((StatusCode::BAD_REQUEST, msg));
+  }
+
+  Ok(())
 }
 
 #[cfg(test)]
@@ -491,6 +555,7 @@ mod tests {
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
+      let default_index_name = format!("default_index_name = \"{}\"\n", "default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = (use_rabbitmq == true)
         .then(|| "yes".to_string())
@@ -508,6 +573,7 @@ mod tests {
       // Write tsldb section.
       file.write_all(b"[tsldb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file.write_all(default_index_name.as_bytes()).unwrap();
       file
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();

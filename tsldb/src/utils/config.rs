@@ -8,6 +8,7 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 /// Settings for tsldb.
 pub struct TsldbSettings {
   index_dir_path: String,
+  default_index_name: String,
   num_log_messages_threshold: u32,
   num_data_points_threshold: u32,
 }
@@ -16,6 +17,11 @@ impl TsldbSettings {
   /// Get the settings for the directory where the index is stored.
   pub fn get_index_dir_path(&self) -> &str {
     self.index_dir_path.as_str()
+  }
+
+  /// Get the settings for the default index name.
+  pub fn get_default_index_name(&self) -> &str {
+    self.default_index_name.as_str()
   }
 
   /// Get the setting for the threshold number of log messages per segment.
