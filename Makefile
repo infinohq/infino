@@ -15,6 +15,7 @@ run:
 
 check:
 	cargo check
+	cargo clippy
 
 fmt:
 	echo "Running format"

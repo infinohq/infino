@@ -9,6 +9,7 @@ use std::{
   fs::{self, create_dir},
   thread, time,
 };
+use structopt::StructOpt;
 use timeseries::{infino::InfinoTsClient, prometheus::PrometheusClient};
 use uuid::Uuid;
 
@@ -53,8 +54,18 @@ static ELASTICSEARCH_SEARCH_QUERIES: &'static [&'static str] = &[
   "unable to stat",
 ];
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "basic")]
+struct Opt {
+  #[structopt(short, long)]
+  stop_after_infino: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let opt = Opt::from_args();
+  println!("{:#?}", opt.stop_after_infino);
+
   // Path to the input data to index from. Points to a log file - where each line is indexed
   // as a separate document in the elasticsearch index and the infino index.
   let input_data_path = "data/Apache.log";
@@ -84,6 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let _ = fs::remove_dir_all(format! {"{}/index", &curr_dir.to_str().unwrap()});
 
   // INFINO END
+
+  if opt.stop_after_infino {
+    println!("stop_after_infino is set. Stopping now...");
+    return Ok(());
+  }
 
   // INFINO REST START
   println!("\n\n***Now running Infino via REST API client***");
@@ -189,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
   cell_infino_ts_search_time = cell_infino_ts_search_time / 10;
   println!(
-    "Infino timeseries search avg {} nanoseconds",
+    "Infino timeseries search avg {} microseconds",
     cell_infino_ts_search_time
   );
   // INFINO API FOR TIME SERIES END
@@ -211,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
   cell_prometheus_search_time = cell_prometheus_search_time / 10;
   println!(
-    "Prometheus timeseries search avg {} nanoseconds",
+    "Prometheus timeseries search avg {} microseconds",
     cell_prometheus_search_time
   );
   prometheus_client.stop();

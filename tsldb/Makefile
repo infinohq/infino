@@ -9,6 +9,11 @@ else
   release :=--release
 endif
 
+
+check:
+	cargo check
+	cargo clippy
+
 build:
 	cargo build $(release)
 

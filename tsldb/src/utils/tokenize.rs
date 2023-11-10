@@ -16,7 +16,7 @@ pub fn tokenize(input: &str) -> Vec<String> {
     // As an example, if the first segment is vec!["a", "b"], and the next segment is vec!["c", "d"], and the
     // field delimiter is "~", the tokens will be vec!["a", "b~c", "d"]
     for (pos, word) in words.iter().enumerate() {
-      if pos == 0 && tokens.len() > 0 {
+      if pos == 0 && !tokens.is_empty() {
         let word_with_tilde = format!("{}{}", FIELD_DELIMITER, word);
         tokens.last_mut().unwrap().push_str(&word_with_tilde);
       } else {

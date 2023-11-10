@@ -14,6 +14,7 @@ tokio = { version = "*", features = ["full"] }
 url = "2.3.1"
 uuid = "1.2.2"
 reqwest = "0.11.17"
+structopt = "0.3.26"
 tantivy = "0.19.2"
 tempfile = "*"
 tempdir = "*"
@@ -32,3 +33,6 @@ features = ["attributes"]
 
 [dev-dependencies]
 clickhouse = { version = "*", features = ["test-util"] }
+
+[profile.release]
+debug = true

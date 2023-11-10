@@ -1,19 +1,19 @@
 use std::fs::File;
 use std::io::Write;
 
+use memmap2::Mmap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+
+// Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
+const COMPRESSION_LEVEL: i32 = 15;
 
 /// Compress and write the specified map to the given file.
 pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool) {
   let input = serde_json::to_string(&to_write).unwrap();
   let mut output = Vec::new();
-  zstd::stream::copy_encode(
-    input.as_bytes(),
-    &mut output,
-    zstd::DEFAULT_COMPRESSION_LEVEL,
-  )
-  .unwrap();
+
+  zstd::stream::copy_encode(input.as_bytes(), &mut output, COMPRESSION_LEVEL).unwrap();
 
   let mut file = File::options()
     .create(true)
@@ -37,7 +37,9 @@ pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool
 /// Read the map from the given file.
 pub fn read<T: DeserializeOwned>(file_path: &str) -> T {
   let file = File::open(file_path).unwrap();
-  let data = zstd::stream::decode_all(file).unwrap();
+  let mmap =
+    unsafe { Mmap::map(&file).unwrap_or_else(|_| panic!("Could not map file {}", file_path)) };
+  let data = zstd::decode_all(&mmap[..]).unwrap();
   let retval: T = serde_json::from_slice(&data).unwrap();
   retval
 }
