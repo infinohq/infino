@@ -14,7 +14,6 @@ use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::Mutex;
-use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
@@ -29,7 +28,7 @@ use crate::utils::shutdown::shutdown_signal;
 struct AppState {
   // The queue will be created only if use_rabbitmq = yes is specified in server config.
   queue: Option<RabbitMQ>,
-  tsldb: Arc<RwLock<Tsldb>>,
+  tsldb: Tsldb,
   settings: Settings,
 }
 
@@ -56,10 +55,8 @@ async fn commit_in_loop(
   commit_interval_in_seconds: u32,
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
-  let tsldb_lock = Arc::clone(&state.tsldb);
-  let tsldb = tsldb_lock.read().await;
   loop {
-    tsldb.commit(true);
+    state.tsldb.commit(true);
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
@@ -81,7 +78,7 @@ async fn app(
 
   // Create a new tsldb.
   let tsldb = match Tsldb::new(config_dir_path) {
-    Ok(tsldb) => Arc::new(RwLock::new(tsldb)),
+    Ok(tsldb) => tsldb,
     Err(err) => panic!("Unable to initialize tsldb with err {}", err),
   };
 
@@ -138,8 +135,8 @@ async fn app(
     .route("/append_ts", post(append_ts))
     .route("/flush", post(flush))
     // POST methods to create and delete index
-    .route("{index_name}", post(create_index))
-    .route("{index_name}", delete(delete_index))
+    .route("/{index_name}", post(create_index))
+    .route("/{index_name}", delete(delete_index))
     .with_state(shared_state.clone());
 
   (
@@ -298,10 +295,7 @@ async fn append_log(
       }
     }
 
-    let tsldb_lock = Arc::clone(&state.tsldb);
-    let tsldb = tsldb_lock.read().await;
-
-    tsldb.append_log_message(timestamp, &fields, &text);
+    state.tsldb.append_log_message(timestamp, &fields, &text);
   }
 
   Ok(())
@@ -364,9 +358,6 @@ async fn append_ts(
       }
     }
 
-    let tsldb_lock = Arc::clone(&state.tsldb);
-    let tsldb = tsldb_lock.read().await;
-
     // Find individual data points in this time series entry and insert in tsldb.
     for (key, value) in obj.iter() {
       if key != timestamp_key && key != labels_key {
@@ -385,7 +376,9 @@ async fn append_ts(
           continue;
         }
 
-        tsldb.append_data_point(key, &labels, timestamp, value_f64);
+        state
+          .tsldb
+          .append_data_point(key, &labels, timestamp, value_f64);
       }
     }
   }
@@ -400,10 +393,7 @@ async fn search_log(
 ) -> String {
   debug!("Searching log: {:?}", search_query);
 
-  let tsldb_lock = Arc::clone(&state.tsldb);
-  let tsldb = tsldb_lock.read().await;
-
-  let results = tsldb.search(
+  let results = state.tsldb.search(
     &search_query.text,
     // The default for range start time is 0.
     search_query.start_time.unwrap_or(0),
@@ -423,10 +413,7 @@ async fn search_ts(
 ) -> String {
   debug!("Searching time series: {:?}", time_series_query);
 
-  let tsldb_lock = Arc::clone(&state.tsldb);
-  let tsldb = tsldb_lock.read().await;
-
-  let results = tsldb.get_time_series(
+  let results = state.tsldb.get_time_series(
     &time_series_query.label_name,
     &time_series_query.label_value,
     // The default for range start time is 0.
@@ -443,18 +430,14 @@ async fn search_ts(
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
   // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
-  let tsldb_lock = Arc::clone(&state.tsldb);
-  let tsldb = tsldb_lock.read().await;
-  tsldb.commit(true);
+  state.tsldb.commit(true);
 
   Ok(())
 }
 
 /// Get index directory used by tsldb.
 async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
-  let tsldb_lock = Arc::clone(&state.tsldb);
-  let tsldb = tsldb_lock.read().await;
-  tsldb.get_index_dir()
+  state.tsldb.get_index_dir()
 }
 
 /// Ping to check if the server is up.
@@ -469,11 +452,7 @@ async fn create_index(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Creating index {}", index_name);
 
-  let tsldb_lock = Arc::clone(&state.tsldb);
-  // take write lock on tsldb.
-  let mut tsldb = tsldb_lock.write().await;
-
-  let result = tsldb.create_index(&index_name);
+  let result = state.tsldb.create_index(&index_name);
 
   if result.is_err() {
     let msg = format!("Could not create index {}", index_name);
@@ -491,10 +470,7 @@ async fn delete_index(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Deleting index {}", index_name);
 
-  let tsldb_lock = Arc::clone(&state.tsldb);
-  let mut tsldb = tsldb_lock.write().await;
-
-  let result = tsldb.delete_index(&index_name);
+  let result = state.tsldb.delete_index(&index_name);
   if result.is_err() {
     let msg = format!("Could not delete index {}", index_name);
     error!("{}", msg);

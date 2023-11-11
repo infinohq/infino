@@ -106,6 +106,9 @@ mod tests {
         .write_all(b"index_dir_path = \"/var/index\"\n")
         .unwrap();
       file
+        .write_all(b"default_index_name = \".default\"\n")
+        .unwrap();
+      file
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();
       file

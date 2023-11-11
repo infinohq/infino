@@ -4,8 +4,10 @@ pub(crate) mod segment_manager;
 pub mod ts;
 pub mod utils;
 
-use ::log::debug;
 use std::collections::HashMap;
+
+use ::log::debug;
+use dashmap::DashMap;
 
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
@@ -15,7 +17,7 @@ use crate::utils::error::TsldbError;
 
 /// Database for storing time series (ts) and logs (l).
 pub struct Tsldb {
-  index_map: HashMap<String, Index>,
+  index_map: DashMap<String, Index>,
   settings: Settings,
 }
 
@@ -41,7 +43,7 @@ impl Tsldb {
         )?;
 
         // Add the default index to the index map and create tsldb object from it and settings
-        let mut index_map = HashMap::new();
+        let index_map = DashMap::new();
         index_map.insert(default_index_name.to_string(), index);
         let tsldb = Tsldb {
           index_map,
@@ -57,12 +59,6 @@ impl Tsldb {
     }
   }
 
-  /// Create a function to return default index
-  pub fn get_default_index(&self) -> &Index {
-    let default_index_name = self.settings.get_tsldb_settings().get_default_index_name();
-    self.index_map.get(default_index_name).unwrap()
-  }
-
   /// Append a log message.
   pub fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, text: &str) {
     debug!(
@@ -70,7 +66,10 @@ impl Tsldb {
       time, fields, text
     );
     self
-      .get_default_index()
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
       .append_log_message(time, fields, text);
   }
 
@@ -83,14 +82,20 @@ impl Tsldb {
     value: f64,
   ) {
     self
-      .get_default_index()
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
       .append_data_point(metric_name, labels, time, value);
   }
 
   /// Search log messages for given query and range.
   pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> Vec<LogMessage> {
     self
-      .get_default_index()
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
       .search(query, range_start_time, range_end_time)
   }
 
@@ -102,19 +107,24 @@ impl Tsldb {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Vec<DataPoint> {
-    self.get_default_index().get_time_series(
-      label_name,
-      label_value,
-      range_start_time,
-      range_end_time,
-    )
+    self
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
+      .get_time_series(label_name, label_value, range_start_time, range_end_time)
   }
 
   /// Commit the index.
   /// If the flag sync_after_commit is set to true, the directory is sync-ed immediately instead of relying on the OS to do so,
   /// hence this flag is usually set to true only in tests.
   pub fn commit(&self, sync_after_commit: bool) {
-    self.get_default_index().commit(sync_after_commit);
+    self
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
+      .commit(sync_after_commit);
   }
 
   /// Refresh the default index from the given directory path.
@@ -129,7 +139,7 @@ impl Tsldb {
     // Refresh the index.
     let index = Index::refresh(&default_index_dir_path).unwrap();
 
-    let mut index_map = HashMap::new();
+    let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
 
     Tsldb {
@@ -140,7 +150,12 @@ impl Tsldb {
 
   /// Get the directory where the index is stored.
   pub fn get_index_dir(&self) -> String {
-    self.get_default_index().get_index_dir()
+    self
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
+      .get_index_dir()
   }
 
   /// Get the settings for this tsldb.
@@ -149,7 +164,7 @@ impl Tsldb {
   }
 
   /// Function to create new index with given name
-  pub fn create_index(&mut self, index_name: &str) -> Result<(), TsldbError> {
+  pub fn create_index(&self, index_name: &str) -> Result<(), TsldbError> {
     let index_dir_path = self.settings.get_tsldb_settings().get_index_dir_path();
     let num_log_messages_threshold = self
       .settings
@@ -172,11 +187,11 @@ impl Tsldb {
   }
 
   /// Function to delete index with given name
-  pub fn delete_index(&mut self, index_name: &str) -> Result<(), TsldbError> {
+  pub fn delete_index(&self, index_name: &str) -> Result<(), TsldbError> {
     let index = self.index_map.remove(index_name);
     match index {
       Some(index) => {
-        index.delete();
+        index.1.delete();
         Ok(())
       }
       None => {
@@ -184,6 +199,10 @@ impl Tsldb {
         Err(error)
       }
     }
+  }
+
+  pub fn get_default_index_name(&self) -> &str {
+    self.settings.get_tsldb_settings().get_default_index_name()
   }
 }
 
