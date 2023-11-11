@@ -1,4 +1,5 @@
 [tsldb]
-index_dir_path = "index"
+index_dir_path = "data"
+default_index_name = ".default"
 num_log_messages_threshold = 100000
 num_data_points_threshold = 100000

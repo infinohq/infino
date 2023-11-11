@@ -6,7 +6,7 @@ pub mod utils;
 
 use std::collections::HashMap;
 
-use ::log::debug;
+use ::log::{debug, info};
 use dashmap::DashMap;
 
 use crate::index_manager::index::Index;
@@ -35,16 +35,38 @@ impl Tsldb {
         let num_log_messages_threshold = tsldb_settings.get_num_log_messages_threshold();
         let num_data_points_threshold = tsldb_settings.get_num_data_points_threshold();
 
-        let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
-        let index = Index::new_with_threshold_params(
-          &default_index_dir_path,
-          num_log_messages_threshold,
-          num_data_points_threshold,
-        )?;
-
-        // Add the default index to the index map and create tsldb object from it and settings
+        // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
-        index_map.insert(default_index_name.to_string(), index);
+        let index_dir = std::fs::read_dir(&index_dir_path);
+        match index_dir {
+          Ok(_) => {
+            info!(
+              "Index directory {} already exists. Loading existing index",
+              index_dir_path
+            );
+
+            for entry in std::fs::read_dir(&index_dir_path).unwrap() {
+              let entry = entry.unwrap();
+              let index_name = entry.file_name().into_string().unwrap();
+              let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
+              let index = Index::refresh(&full_index_path_name)?;
+              index_map.insert(index_name, index);
+            }
+          }
+          Err(_) => {
+            info!(
+              "Index directory {} does not exist. Creating it.",
+              index_dir_path
+            );
+            let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
+            let index = Index::new_with_threshold_params(
+              &default_index_dir_path,
+              num_log_messages_threshold,
+              num_data_points_threshold,
+            )?;
+            index_map.insert(default_index_name.to_string(), index);
+          }
+        }
         let tsldb = Tsldb {
           index_map,
           settings,
@@ -229,7 +251,7 @@ mod tests {
 
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
-      let default_index_name_line = format!("default_index_name = \"{}\"\n", "default");
+      let default_index_name_line = format!("default_index_name = \"{}\"\n", ".default");
 
       let mut file = File::create(&config_file_path).unwrap();
       file.write_all(b"[tsldb]\n").unwrap();
