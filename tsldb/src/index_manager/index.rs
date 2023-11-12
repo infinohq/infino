@@ -391,6 +391,11 @@ impl Index {
   pub fn get_index_dir(&self) -> String {
     self.index_dir_path.to_owned()
   }
+
+  /// Function to delete the index directory.
+  pub fn delete(&self) {
+    std::fs::remove_dir_all(&self.index_dir_path).unwrap();
+  }
 }
 
 #[cfg(test)]

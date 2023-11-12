@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::Query;
+use axum::extract::{Path, Query};
+use axum::routing::delete;
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
@@ -129,9 +130,13 @@ async fn app(
     .route("/search_ts", get(search_ts))
     //---
     // POST methods
+    // TODO: all the APIs should have index name
     .route("/append_log", post(append_log))
     .route("/append_ts", post(append_ts))
     .route("/flush", post(flush))
+    // POST methods to create and delete index
+    .route("/:index_name", post(create_index))
+    .route("/:index_name", delete(delete_index))
     .with_state(shared_state.clone());
 
   (
@@ -440,6 +445,41 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
   "OK".to_owned()
 }
 
+/// Create a new index in tsldb with given name.
+async fn create_index(
+  state: State<Arc<AppState>>,
+  Path(index_name): Path<String>,
+) -> Result<(), (StatusCode, String)> {
+  debug!("Creating index {}", index_name);
+
+  let result = state.tsldb.create_index(&index_name);
+
+  if result.is_err() {
+    let msg = format!("Could not create index {}", index_name);
+    error!("{}", msg);
+    return Err((StatusCode::BAD_REQUEST, msg));
+  }
+
+  Ok(())
+}
+
+/// Create a function to delete an index with given name.
+async fn delete_index(
+  State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
+) -> Result<(), (StatusCode, String)> {
+  debug!("Deleting index {}", index_name);
+
+  let result = state.tsldb.delete_index(&index_name);
+  if result.is_err() {
+    let msg = format!("Could not delete index {}", index_name);
+    error!("{} with error: {}", msg, result.err().unwrap());
+    return Err((StatusCode::BAD_REQUEST, msg));
+  }
+
+  Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use std::fs::File;
@@ -491,6 +531,7 @@ mod tests {
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
+      let default_index_name = format!("default_index_name = \"{}\"\n", "default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = (use_rabbitmq == true)
         .then(|| "yes".to_string())
@@ -508,6 +549,7 @@ mod tests {
       // Write tsldb section.
       file.write_all(b"[tsldb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file.write_all(default_index_name.as_bytes()).unwrap();
       file
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();
@@ -828,6 +870,67 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    // Stop the RabbbitMQ container.
+    let _ = RabbitMQ::stop_queue_container(container_name);
+  }
+
+  /// Write test to test Create and Delete index APIs.
+  #[test_case(false ; "do not use rabbitmq")]
+  #[tokio::test]
+  async fn test_create_delete_index(use_rabbitmq: bool) {
+    init();
+
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let container_name = "infino-test-main-rs";
+
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      container_name,
+      use_rabbitmq,
+    );
+    println!("Config dir path {}", config_dir_path);
+
+    // Create the app.
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // Create an index.
+    let index_name = "test_index";
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Check whether the index directory exists.
+    let index_dir_path = get_joined_path(index_dir_path, index_name);
+    assert!(std::path::Path::new(&index_dir_path).exists());
+
+    // Delete the index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::DELETE)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Check whether the index directory exists.
+    assert!(!std::path::Path::new(&index_dir_path).exists());
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);

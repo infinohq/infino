@@ -4,8 +4,10 @@ pub(crate) mod segment_manager;
 pub mod ts;
 pub mod utils;
 
-use ::log::debug;
 use std::collections::HashMap;
+
+use ::log::{debug, info};
+use dashmap::DashMap;
 
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
@@ -15,13 +17,13 @@ use crate::utils::error::TsldbError;
 
 /// Database for storing time series (ts) and logs (l).
 pub struct Tsldb {
-  /// Index storing the time series and log data.
-  index: Index,
+  index_map: DashMap<String, Index>,
   settings: Settings,
 }
 
 impl Tsldb {
   /// Create a new tsldb at the directory path specified in the config.
+  /// Default index is always created with tsldb
   pub fn new(config_dir_path: &str) -> Result<Self, TsldbError> {
     let result = Settings::new(config_dir_path);
 
@@ -29,16 +31,47 @@ impl Tsldb {
       Ok(settings) => {
         let tsldb_settings = settings.get_tsldb_settings();
         let index_dir_path = tsldb_settings.get_index_dir_path();
+        let default_index_name = tsldb_settings.get_default_index_name();
         let num_log_messages_threshold = tsldb_settings.get_num_log_messages_threshold();
         let num_data_points_threshold = tsldb_settings.get_num_data_points_threshold();
 
-        let index = Index::new_with_threshold_params(
-          index_dir_path,
-          num_log_messages_threshold,
-          num_data_points_threshold,
-        )?;
+        // Check if index_dir_path exist and has some directories in it
+        let index_map = DashMap::new();
+        let index_dir = std::fs::read_dir(&index_dir_path);
+        match index_dir {
+          Ok(_) => {
+            info!(
+              "Index directory {} already exists. Loading existing index",
+              index_dir_path
+            );
 
-        let tsldb = Tsldb { index, settings };
+            for entry in std::fs::read_dir(&index_dir_path).unwrap() {
+              let entry = entry.unwrap();
+              let index_name = entry.file_name().into_string().unwrap();
+              let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
+              let index = Index::refresh(&full_index_path_name)?;
+              index_map.insert(index_name, index);
+            }
+          }
+          Err(_) => {
+            info!(
+              "Index directory {} does not exist. Creating it.",
+              index_dir_path
+            );
+            let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
+            let index = Index::new_with_threshold_params(
+              &default_index_dir_path,
+              num_log_messages_threshold,
+              num_data_points_threshold,
+            )?;
+            index_map.insert(default_index_name.to_string(), index);
+          }
+        }
+        let tsldb = Tsldb {
+          index_map,
+          settings,
+        };
+
         Ok(tsldb)
       }
       Err(e) => {
@@ -54,7 +87,12 @@ impl Tsldb {
       "Appending log message in tsldb: time {}, fields {:?}, text {}",
       time, fields, text
     );
-    self.index.append_log_message(time, fields, text);
+    self
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
+      .append_log_message(time, fields, text);
   }
 
   /// Append a data point.
@@ -66,13 +104,21 @@ impl Tsldb {
     value: f64,
   ) {
     self
-      .index
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
       .append_data_point(metric_name, labels, time, value);
   }
 
   /// Search log messages for given query and range.
   pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> Vec<LogMessage> {
-    self.index.search(query, range_start_time, range_end_time)
+    self
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
+      .search(query, range_start_time, range_end_time)
   }
 
   /// Get the time series for given label and range.
@@ -84,7 +130,10 @@ impl Tsldb {
     range_end_time: u64,
   ) -> Vec<DataPoint> {
     self
-      .index
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
       .get_time_series(label_name, label_value, range_start_time, range_end_time)
   }
 
@@ -92,29 +141,90 @@ impl Tsldb {
   /// If the flag sync_after_commit is set to true, the directory is sync-ed immediately instead of relying on the OS to do so,
   /// hence this flag is usually set to true only in tests.
   pub fn commit(&self, sync_after_commit: bool) {
-    self.index.commit(sync_after_commit);
+    self
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
+      .commit(sync_after_commit);
   }
 
-  /// Refresh the index from the given directory path.
+  /// Refresh the default index from the given directory path.
+  /// TODO: what to do if there are multiple indices?
   pub fn refresh(config_dir_path: &str) -> Self {
     // Read the settings and the index directory path.
     let settings = Settings::new(config_dir_path).unwrap();
     let index_dir_path = settings.get_tsldb_settings().get_index_dir_path();
+    let default_index_name = settings.get_tsldb_settings().get_default_index_name();
+    let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
 
     // Refresh the index.
-    let index = Index::refresh(index_dir_path).unwrap();
+    let index = Index::refresh(&default_index_dir_path).unwrap();
 
-    Tsldb { index, settings }
+    let index_map = DashMap::new();
+    index_map.insert(default_index_name.to_string(), index);
+
+    Tsldb {
+      index_map,
+      settings,
+    }
   }
 
   /// Get the directory where the index is stored.
   pub fn get_index_dir(&self) -> String {
-    self.index.get_index_dir()
+    self
+      .index_map
+      .get(self.get_default_index_name())
+      .unwrap()
+      .value()
+      .get_index_dir()
   }
 
   /// Get the settings for this tsldb.
   pub fn get_settings(&self) -> &Settings {
     &self.settings
+  }
+
+  /// Function to create new index with given name
+  pub fn create_index(&self, index_name: &str) -> Result<(), TsldbError> {
+    let index_dir_path = self.settings.get_tsldb_settings().get_index_dir_path();
+    let num_log_messages_threshold = self
+      .settings
+      .get_tsldb_settings()
+      .get_num_log_messages_threshold();
+    let num_data_points_threshold = self
+      .settings
+      .get_tsldb_settings()
+      .get_num_data_points_threshold();
+
+    let index_dir_path = format!("{}/{}", index_dir_path, index_name);
+    let index = Index::new_with_threshold_params(
+      &index_dir_path,
+      num_log_messages_threshold,
+      num_data_points_threshold,
+    )?;
+
+    self.index_map.insert(index_name.to_string(), index);
+    Ok(())
+  }
+
+  /// Function to delete index with given name
+  pub fn delete_index(&self, index_name: &str) -> Result<(), TsldbError> {
+    let index = self.index_map.remove(index_name);
+    match index {
+      Some(index) => {
+        index.1.delete();
+        Ok(())
+      }
+      None => {
+        let error = TsldbError::IndexNotFound(index_name.to_string());
+        Err(error)
+      }
+    }
+  }
+
+  pub fn get_default_index_name(&self) -> &str {
+    self.settings.get_tsldb_settings().get_default_index_name()
   }
 }
 
@@ -141,10 +251,12 @@ mod tests {
 
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
+      let default_index_name_line = format!("default_index_name = \"{}\"\n", ".default");
 
       let mut file = File::create(&config_file_path).unwrap();
       file.write_all(b"[tsldb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file.write_all(default_index_name_line.as_bytes()).unwrap();
       file
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();
