@@ -287,8 +287,8 @@ mod tests {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!("{}/data", index_dir.path().to_str().unwrap());
-    create_test_config(config_dir_path, &index_dir_path);
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    create_test_config(config_dir_path, index_dir_path);
     println!("Config dir path {}", config_dir_path);
 
     // Create a new tsldb instance.

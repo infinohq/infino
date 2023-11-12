@@ -721,7 +721,7 @@ mod tests {
 
     create_test_config(
       config_dir_path,
-      &index_dir_path,
+      index_dir_path,
       container_name,
       use_rabbitmq,
     );
