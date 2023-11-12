@@ -37,7 +37,7 @@ impl Tsldb {
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
-        let index_dir = std::fs::read_dir(&index_dir_path);
+        let index_dir = std::fs::read_dir(index_dir_path);
         match index_dir {
           Ok(_) => {
             info!(
@@ -45,12 +45,28 @@ impl Tsldb {
               index_dir_path
             );
 
-            for entry in std::fs::read_dir(&index_dir_path).unwrap() {
-              let entry = entry.unwrap();
-              let index_name = entry.file_name().into_string().unwrap();
-              let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
-              let index = Index::refresh(&full_index_path_name)?;
-              index_map.insert(index_name, index);
+            let directories = std::fs::read_dir(index_dir_path).unwrap();
+
+            if directories.count() == 0 {
+              info!(
+                "Index directory {} does not exist. Creating it.",
+                index_dir_path
+              );
+              let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
+              let index = Index::new_with_threshold_params(
+                &default_index_dir_path,
+                num_log_messages_threshold,
+                num_data_points_threshold,
+              )?;
+              index_map.insert(default_index_name.to_string(), index);
+            } else {
+              for entry in std::fs::read_dir(index_dir_path).unwrap() {
+                let entry = entry.unwrap();
+                let index_name = entry.file_name().into_string().unwrap();
+                let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
+                let index = Index::refresh(&full_index_path_name)?;
+                index_map.insert(index_name, index);
+              }
             }
           }
           Err(_) => {
@@ -271,8 +287,8 @@ mod tests {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    create_test_config(config_dir_path, index_dir_path);
+    let index_dir_path = format!("{}/data", index_dir.path().to_str().unwrap());
+    create_test_config(config_dir_path, &index_dir_path);
     println!("Config dir path {}", config_dir_path);
 
     // Create a new tsldb instance.
