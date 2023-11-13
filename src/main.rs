@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query};
-use axum::routing::delete;
+use axum::routing::{delete, put};
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
@@ -135,7 +135,7 @@ async fn app(
     .route("/append_ts", post(append_ts))
     .route("/flush", post(flush))
     // POST methods to create and delete index
-    .route("/:index_name", post(create_index))
+    .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
     .with_state(shared_state.clone());
 
@@ -903,7 +903,7 @@ mod tests {
     let response = app
       .call(
         Request::builder()
-          .method(http::Method::POST)
+          .method(http::Method::PUT)
           .uri(&format!("/{}", index_name))
           .body(Body::from(""))
           .unwrap(),
