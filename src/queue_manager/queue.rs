@@ -265,10 +265,7 @@ impl RabbitMQ {
     let retval = if next.is_none() {
       None
     } else {
-      let delivery = Some(next)
-        .unwrap()
-        .unwrap()
-        .expect("Could not get delivery");
+      let delivery = next.unwrap().expect("Could not get delivery");
       let data = delivery.message().data().unwrap();
       let str_data = std::str::from_utf8(data).unwrap();
       Some(str_data.to_owned())

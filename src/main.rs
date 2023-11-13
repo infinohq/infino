@@ -533,7 +533,7 @@ mod tests {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let default_index_name = format!("default_index_name = \"{}\"\n", "default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
-      let use_rabbitmq_str = (use_rabbitmq == true)
+      let use_rabbitmq_str = use_rabbitmq
         .then(|| "yes".to_string())
         .unwrap_or_else(|| "no".to_string());
       let use_rabbitmq_line = format!("use_rabbitmq = \"{}\"\n", use_rabbitmq_str);
@@ -544,7 +544,7 @@ mod tests {
       let rabbimq_listen_port_line = format!("listen_port = \"{}\"\n", rabbitmq_listen_port);
       let rabbimq_stream_port_line = format!("stream_port = \"{}\"\n", rabbitmq_stream_port);
 
-      let mut file = File::create(&config_file_path).unwrap();
+      let mut file = File::create(config_file_path).unwrap();
 
       // Write tsldb section.
       file.write_all(b"[tsldb]\n").unwrap();
