@@ -6,7 +6,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::Query;
-use axum::{extract::State, routing::get, routing::post, Json, Router};
+use axum::http::Uri;
+use axum::response::IntoResponse;
+use axum::{extract::State, routing::any, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
 use log::{debug, error, info};
@@ -132,6 +134,9 @@ async fn app(
     .route("/append_log", post(append_log))
     .route("/append_ts", post(append_ts))
     .route("/flush", post(flush))
+    // ---
+    // Default route to log unknown requests
+    .route("/*path", any(default_handler))
     .with_state(shared_state.clone());
 
   (
@@ -440,6 +445,15 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
   "OK".to_owned()
 }
 
+// Default handler for unmatched routes
+async fn default_handler(uri: Uri) -> impl IntoResponse {
+  // Log the unmatched route
+  error!("404 - Not Found: {:?}", uri);
+
+  // Respond with a 404 status code
+  (StatusCode::NOT_FOUND, "Not Found")
+}
+
 #[cfg(test)]
 mod tests {
   use std::fs::File;
@@ -700,6 +714,19 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    // Check whether an invalid route returns 404
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::GET)
+          .uri("/iaminvalid")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     // **Part 1**: Test insertion and search of log messages
     let num_log_messages = 100;
