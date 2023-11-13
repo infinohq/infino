@@ -156,10 +156,7 @@ impl Segment {
       // Need to lock the shard that contains the term, so that some other thread doesn't insert the same term.
       // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
       {
-        let entry = self
-          .inverted_map
-          .entry(term_id)
-          .or_insert(PostingsList::new());
+        let entry = self.inverted_map.entry(term_id).or_default();
         let pl = &*entry;
         pl.append(log_message_id);
       }
@@ -211,10 +208,7 @@ impl Segment {
       // Need to lock the shard that contains the label_id, so that some other thread doesn't insert the same label_id.
       // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
       {
-        let entry = self
-          .time_series
-          .entry(label_id)
-          .or_insert(TimeSeries::new());
+        let entry = self.time_series.entry(label_id).or_default();
         let ts = &*entry;
         ts.append(time, value);
       }

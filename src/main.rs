@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query};
-use axum::routing::delete;
+use axum::routing::{delete, put};
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
@@ -135,7 +135,7 @@ async fn app(
     .route("/append_ts", post(append_ts))
     .route("/flush", post(flush))
     // POST methods to create and delete index
-    .route("/:index_name", post(create_index))
+    .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
     .with_state(shared_state.clone());
 
@@ -533,7 +533,7 @@ mod tests {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let default_index_name = format!("default_index_name = \"{}\"\n", "default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
-      let use_rabbitmq_str = (use_rabbitmq == true)
+      let use_rabbitmq_str = use_rabbitmq
         .then(|| "yes".to_string())
         .unwrap_or_else(|| "no".to_string());
       let use_rabbitmq_line = format!("use_rabbitmq = \"{}\"\n", use_rabbitmq_str);
@@ -544,7 +544,7 @@ mod tests {
       let rabbimq_listen_port_line = format!("listen_port = \"{}\"\n", rabbitmq_listen_port);
       let rabbimq_stream_port_line = format!("stream_port = \"{}\"\n", rabbitmq_stream_port);
 
-      let mut file = File::create(&config_file_path).unwrap();
+      let mut file = File::create(config_file_path).unwrap();
 
       // Write tsldb section.
       file.write_all(b"[tsldb]\n").unwrap();
@@ -903,7 +903,7 @@ mod tests {
     let response = app
       .call(
         Request::builder()
-          .method(http::Method::POST)
+          .method(http::Method::PUT)
           .uri(&format!("/{}", index_name))
           .body(Body::from(""))
           .unwrap(),

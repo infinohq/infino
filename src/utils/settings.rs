@@ -113,7 +113,7 @@ impl Settings {
   #[cfg(test)]
   /// Get the default config file name.
   pub fn get_default_config_file_name() -> &'static str {
-    &DEFAULT_CONFIG_FILE_NAME
+    DEFAULT_CONFIG_FILE_NAME
   }
 }
 
@@ -124,7 +124,7 @@ mod tests {
   #[test]
   fn test_settings() {
     let config_dir_path = "config";
-    let settings = Settings::new(&config_dir_path).expect("Could not parse config");
+    let settings = Settings::new(config_dir_path).expect("Could not parse config");
 
     // Check server settings.
     let server_settings = settings.get_server_settings();
