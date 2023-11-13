@@ -26,4 +26,13 @@ pub enum TsldbError {
 
   #[error("Invalid configuration. {0}")]
   InvalidConfiguration(String),
+
+  #[error("Cannot create index. {0}")]
+  CannotCreateIndex(String),
+
+  #[error("Cannot delete index. {0}")]
+  CannotDeleteIndex(String),
+
+  #[error("Index not found. {0}")]
+  IndexNotFound(String),
 }
