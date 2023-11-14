@@ -2,6 +2,7 @@ mod queue_manager;
 mod utils;
 
 use std::collections::HashMap;
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -16,6 +17,9 @@ use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
+
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::EnvFilter;
 
 use tsldb::Tsldb;
 use utils::error::InfinoError;
@@ -137,7 +141,8 @@ async fn app(
     // POST methods to create and delete index
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
-    .with_state(shared_state.clone());
+    .with_state(shared_state.clone())
+    .layer(TraceLayer::new_for_http());
 
   (
     router,
@@ -150,10 +155,15 @@ async fn app(
 #[tokio::main]
 /// Program entry point.
 async fn main() {
-  // Initialize logger from env. If no log level specified, default to info.
-  env_logger::init_from_env(
-    env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
-  );
+  // If log level isn't set, set it to info.
+  if env::var("RUST_LOG").is_err() {
+    env::set_var("RUST_LOG", "info")
+  }
+
+  // Set up logging.
+  tracing_subscriber::fmt()
+    .with_env_filter(EnvFilter::from_default_env())
+    .init();
 
   let config_dir_path = "config";
   let image_name = "rabbitmq";
