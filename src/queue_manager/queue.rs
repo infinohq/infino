@@ -262,14 +262,16 @@ impl RabbitMQ {
 
     let handle = consumer.handle();
     let next = consumer.next().await;
-    let retval = if next.is_none() {
-      None
-    } else {
-      let delivery = next.unwrap().expect("Could not get delivery");
-      let data = delivery.message().data().unwrap();
-      let str_data = std::str::from_utf8(data).unwrap();
-      Some(str_data.to_owned())
+    let retval = match next {
+      None => None,
+      Some(delivery) => {
+        let delivery = delivery.expect("Could not get next message");
+        let data = delivery.message().data().expect("Could not get data");
+        let str_data = std::str::from_utf8(data).expect("Invalid UTF-8 data");
+        Some(str_data.to_owned())
+      }
     };
+
     handle.close().await.unwrap();
 
     retval
