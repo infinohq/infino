@@ -13,6 +13,10 @@ run:
 	echo "Running $(prog) server..."
 	cargo run $(release)
 
+run-debug:
+	echo "Running $(prog) server in debug mode..."
+	RUST_LOG=debug cargo run $(release)
+
 check:
 	cargo check
 	cargo clippy
