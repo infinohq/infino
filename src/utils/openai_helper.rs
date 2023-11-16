@@ -68,9 +68,6 @@ mod tests {
   use super::*;
   use crate::utils::environment;
 
-  use mockall::predicate::*;
-  use mockall::*;
-
   #[test]
   fn test_summarize_no_openai_key() {
     environment::with_env_vars(vec![], || {

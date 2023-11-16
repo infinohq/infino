@@ -1,7 +1,13 @@
 use lazy_static::lazy_static;
-use std::env::VarError;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::Mutex;
+
+#[cfg(test)]
+use std::env::VarError;
+
+#[cfg(test)]
+use std::panic::{RefUnwindSafe, UnwindSafe};
+
+#[cfg(test)]
 use std::{env, panic};
 
 lazy_static! {
@@ -45,6 +51,7 @@ where
   };
 }
 
+#[cfg(test)]
 fn reset_env(k: &str, old: Result<String, VarError>) {
   if let Ok(v) = old {
     env::set_var(k, v);
