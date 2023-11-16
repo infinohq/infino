@@ -45,6 +45,15 @@ struct SearchQuery {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+/// Represents summarization query. 'k' is the number of results to summarize.
+struct SummarizeQuery {
+  text: String,
+  k: Option<u32>,
+  start_time: Option<u64>,
+  end_time: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 /// Represents a query to time series db.
 struct TimeSeriesQuery {
   label_name: String,
@@ -132,6 +141,7 @@ async fn app(
     .route("/ping", get(ping))
     .route("/search_log", get(search_log))
     .route("/search_ts", get(search_ts))
+    .route("/summarize", get(summarize))
     //---
     // POST methods
     // TODO: all the APIs should have index name
@@ -409,6 +419,26 @@ async fn search_log(
     search_query.start_time.unwrap_or(0),
     // The default for range end time is the current time.
     search_query
+      .end_time
+      .unwrap_or(Utc::now().timestamp_millis() as u64),
+  );
+
+  serde_json::to_string(&results).expect("Could not convert search results to json")
+}
+
+/// Search and summarize logs in tsldb.
+async fn summarize(
+  State(state): State<Arc<AppState>>,
+  Query(summarize_query): Query<SummarizeQuery>,
+) -> String {
+  debug!("Summarizing logs: {:?}", summarize_query);
+
+  let results = state.tsldb.search(
+    &summarize_query.text,
+    // The default for range start time is 0.
+    summarize_query.start_time.unwrap_or(0),
+    // The default for range end time is the current time.
+    summarize_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
