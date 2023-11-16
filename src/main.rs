@@ -21,10 +21,12 @@ use tokio::time::{sleep, Duration};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+use tsldb::log::log_message::LogMessage;
 use tsldb::Tsldb;
 use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
+use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
 
@@ -34,6 +36,7 @@ struct AppState {
   queue: Option<RabbitMQ>,
   tsldb: Tsldb,
   settings: Settings,
+  openai_helper: OpenAIHelper,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -51,6 +54,13 @@ struct SummarizeQuery {
   k: Option<u32>,
   start_time: Option<u64>,
   end_time: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+/// Represents summarization query. 'k' is the number of results to summarize.
+struct SummarizeQueryResponse {
+  summary: String,
+  results: Vec<LogMessage>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -116,10 +126,13 @@ async fn app(
     );
   }
 
+  let openai_helper = OpenAIHelper::new();
+
   let shared_state = Arc::new(AppState {
     queue,
     tsldb,
     settings,
+    openai_helper,
   });
 
   let server_settings = shared_state.settings.get_server_settings();
@@ -430,7 +443,7 @@ async fn search_log(
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
-) -> String {
+) -> Result<String, (StatusCode, String)> {
   debug!("Summarizing logs: {:?}", summarize_query);
 
   let results = state.tsldb.search(
@@ -443,7 +456,20 @@ async fn summarize(
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
 
-  serde_json::to_string(&results).expect("Could not convert search results to json")
+  let summary = state.openai_helper.summarize(&results);
+  match summary {
+    Some(summary) => {
+      let response = SummarizeQueryResponse { summary, results };
+
+      let retval =
+        serde_json::to_string(&response).expect("Could not convert search results to json");
+      Ok(retval)
+    }
+    None => {
+      let msg = format!("Could not summarize logs");
+      Err((StatusCode::FAILED_DEPENDENCY, msg))
+    }
+  }
 }
 
 /// Search time series.
