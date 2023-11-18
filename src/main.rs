@@ -21,10 +21,12 @@ use tokio::time::{sleep, Duration};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+use tsldb::log::log_message::LogMessage;
 use tsldb::Tsldb;
 use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
+use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
 
@@ -34,6 +36,7 @@ struct AppState {
   queue: Option<RabbitMQ>,
   tsldb: Tsldb,
   settings: Settings,
+  openai_helper: OpenAIHelper,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -42,6 +45,22 @@ struct SearchQuery {
   text: String,
   start_time: Option<u64>,
   end_time: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+/// Represents summarization query. 'k' is the number of results to summarize.
+struct SummarizeQuery {
+  text: String,
+  k: Option<u32>,
+  start_time: Option<u64>,
+  end_time: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+/// Represents summarization query. 'k' is the number of results to summarize.
+struct SummarizeQueryResponse {
+  summary: String,
+  results: Vec<LogMessage>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -107,10 +126,13 @@ async fn app(
     );
   }
 
+  let openai_helper = OpenAIHelper::new();
+
   let shared_state = Arc::new(AppState {
     queue,
     tsldb,
     settings,
+    openai_helper,
   });
 
   let server_settings = shared_state.settings.get_server_settings();
@@ -132,6 +154,7 @@ async fn app(
     .route("/ping", get(ping))
     .route("/search_log", get(search_log))
     .route("/search_ts", get(search_ts))
+    .route("/summarize", get(summarize))
     //---
     // POST methods
     // TODO: all the APIs should have index name
@@ -414,6 +437,47 @@ async fn search_log(
   );
 
   serde_json::to_string(&results).expect("Could not convert search results to json")
+}
+
+/// Search and summarize logs in tsldb.
+async fn summarize(
+  State(state): State<Arc<AppState>>,
+  Query(summarize_query): Query<SummarizeQuery>,
+) -> Result<String, (StatusCode, String)> {
+  debug!("Summarizing logs: {:?}", summarize_query);
+
+  // Number of log message to summarize.
+  let k = summarize_query.k.unwrap_or(100);
+
+  let results = state.tsldb.search(
+    &summarize_query.text,
+    // The default for range start time is 0.
+    summarize_query.start_time.unwrap_or(0),
+    // The default for range end time is the current time.
+    summarize_query
+      .end_time
+      .unwrap_or(Utc::now().timestamp_millis() as u64),
+  );
+
+  let summary = state.openai_helper.summarize(&results, k);
+  match summary {
+    Some(summary) => {
+      let response = SummarizeQueryResponse { summary, results };
+
+      let retval =
+        serde_json::to_string(&response).expect("Could not convert search results to json");
+      Ok(retval)
+    }
+    None => {
+      let mut msg: String = "Could not summarize logs.".to_owned();
+      let is_var_set = std::env::var_os("OPENAI_API_KEY").is_some();
+      if !is_var_set {
+        msg = format!("{} Pl check if OPENAU_API_KEY is set.", msg);
+      }
+
+      Err((StatusCode::FAILED_DEPENDENCY, msg))
+    }
+  }
 }
 
 /// Search time series.

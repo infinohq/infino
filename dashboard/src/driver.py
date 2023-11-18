@@ -1,5 +1,5 @@
+import argparse
 import concurrent.futures
-
 from datetime import datetime
 import os
 import psutil
@@ -120,9 +120,18 @@ def run_command(command):
 
 
 if __name__ == "__main__":
-    # Start Infino server
-    print("Starting Infino server...")
-    container = start_infino()
+    parser = argparse.ArgumentParser(description="Infino Dashboard Example")
+    parser.add_argument(
+        "--do-not-start-infino",
+        action="store_true",
+        help="Do not start Infino server via this program - use this if you already have Infino running",
+    )
+    args = parser.parse_args()
+
+    if not args.do_not_start_infino:
+        # Start Infino server
+        print("Starting Infino server...")
+        container = start_infino()
 
     # Set up the Infino client
     print("Creating client...")
@@ -154,5 +163,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Ctrl+C received.")
 
-    print("Now shutting down Infino...")
-    stop_infino(container)
+    if not args.do_not_start_infino:
+        # Infino was started by this program - shut it down before exiting.
+        print("Now shutting down Infino...")
+        stop_infino(container)
