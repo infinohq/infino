@@ -16,5 +16,8 @@ metrics-dashboard:
 run-driver: build
 	. venv/bin/activate; python src/driver.py
 
+run-driver-do-not-start-infino: build
+	. venv/bin/activate; python src/driver.py --do-not-start-infino
+
 test: build
 	. venv/bin/activate; export PYTHONPATH=./src:${PYTHONPATH}; pytest -o log_cli=true tests

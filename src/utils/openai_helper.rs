@@ -3,7 +3,7 @@ use std::env;
 use log::error;
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
-use openai_api_rs::v1::common::GPT3_5_TURBO;
+use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
 
 use tsldb::log::log_message::LogMessage;
 
@@ -27,19 +27,21 @@ impl OpenAIHelper {
     Self { client }
   }
 
-  /// Summarize the given logs messages and retruns the summary, or return None in case of any error.
-  pub fn summarize(&self, logs: &Vec<LogMessage>) -> Option<String> {
+  /// Summarize the given logs messages (first k) and retruns the summary, or return None in
+  /// case of any error.
+  pub fn summarize(&self, logs: &Vec<LogMessage>, k: u32) -> Option<String> {
     if self.client.is_none() {
       error!("OpenAI API client is not initialized, summarization will not work");
       return None;
     }
     let client = self.client.as_ref().unwrap();
 
-    let logs_json = serde_json::to_string(logs).expect("Could not covert logs to json");
+    let first_k_logs = &logs[..k as usize];
+    let logs_json = serde_json::to_string(first_k_logs).expect("Could not covert logs to json");
     let prompt = "Summarize the log messages below: ".to_owned() + &logs_json;
 
     let req = ChatCompletionRequest::new(
-      GPT3_5_TURBO.to_string(),
+      GPT3_5_TURBO_16K.to_string(),
       vec![chat_completion::ChatCompletionMessage {
         role: chat_completion::MessageRole::user,
         content: prompt,

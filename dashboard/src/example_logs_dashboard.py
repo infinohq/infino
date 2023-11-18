@@ -23,6 +23,7 @@ def get_user_query():
     # user_query = st.text_input(
     #    "Enter search text below and hit Enter:", "directory index forbidden"
     # )
+
     return user_query
 
 

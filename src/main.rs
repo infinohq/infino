@@ -446,6 +446,9 @@ async fn summarize(
 ) -> Result<String, (StatusCode, String)> {
   debug!("Summarizing logs: {:?}", summarize_query);
 
+  // Number of log message to summarize.
+  let k = summarize_query.k.unwrap_or(100);
+
   let results = state.tsldb.search(
     &summarize_query.text,
     // The default for range start time is 0.
@@ -456,7 +459,7 @@ async fn summarize(
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
 
-  let summary = state.openai_helper.summarize(&results);
+  let summary = state.openai_helper.summarize(&results, k);
   match summary {
     Some(summary) => {
       let response = SummarizeQueryResponse { summary, results };
@@ -466,7 +469,12 @@ async fn summarize(
       Ok(retval)
     }
     None => {
-      let msg = format!("Could not summarize logs");
+      let mut msg: String = "Could not summarize logs.".to_owned();
+      let is_var_set = std::env::var_os("OPENAI_API_KEY").is_some();
+      if !is_var_set {
+        msg = format!("{} Pl check if OPENAU_API_KEY is set.", msg);
+      }
+
       Err((StatusCode::FAILED_DEPENDENCY, msg))
     }
   }
