@@ -1,6 +1,6 @@
-# Benchmark - Elasticsearch, Clickhouse and Tantivy Comparison with Infino
+# Benchmark - ElasticSearch, Clickhouse and Prometheus performance comparison with Infino
 
-This pacakge contains comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) and [Tantivy](https://github.com/quickwit-oss/tantivy). The raw output of comparison can be found [here](output.txt).
+Benchmarks are always hard but are important to provide a reasonable sense of performance. This package contains a comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) and [Prometheus](https://github.com/prometheus/prometheus), the most popular storage tools for observability today. The raw output of comparison can be found [here](output.txt). Feedback is welcome; we will add more tests as we go.
 
 Want to jump directly to the results? Scroll below towards the end of this page.
 
