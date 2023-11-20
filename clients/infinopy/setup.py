@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="infinopy",
-    version="0.0.4",
+    version="0.0.5",
     author="Vinay K",
     author_email="vinaykakade@gmail.com",
     description="A Python package for Infino",

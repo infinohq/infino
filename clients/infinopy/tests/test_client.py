@@ -74,6 +74,11 @@ class InfinoClientTestCase(unittest.TestCase):
         results = response.json()
         self.assertEqual(len(results), 2)
 
+        # Test the summarize api.
+        # We haven't set OPENAU_API_KEY while starting the container, so this should fail.
+        response = self.client.summarize(text="my message")
+        self.assert_((400 <= response.status_code) and (response.status_code < 500))
+
     def test_ts(self):
         current_time = int(time.time())
 
@@ -110,7 +115,7 @@ class InfinoClientTestCase(unittest.TestCase):
         # Test the get_index_dir method.
         response = self.client.get_index_dir()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.text, "index")
+        self.assertEqual(response.text, "data/.default")
 
     def test_base_url(self):
         # Check default base url
