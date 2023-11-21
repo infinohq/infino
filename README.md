@@ -37,7 +37,6 @@ To address **complexity**, Infino focuses on AI and automation:
 - **Dashboards:** OSS dashboard support + SQL support for BI interfaces like Tableau or Sigma.
 - **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
 
-
 ![Architecture](docs/Infino_architecture.png)
 
 ## Features

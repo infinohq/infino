@@ -1,5 +1,5 @@
 docker
-infinopy
+infinopy==0.0.5
 plotly
 psutil
 pyyaml

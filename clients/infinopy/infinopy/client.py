@@ -32,6 +32,12 @@ class InfinoClient:
         response = self._request("GET", path, params=params)
         return response
 
+    def summarize(self, text, start_time=None, end_time=None):
+        path = "/summarize"
+        params = {"text": text, "start_time": start_time, "end_time": end_time}
+        response = self._request("GET", path, params=params)
+        return response
+
     def search_ts(self, label_name, label_value, start_time=None, end_time=None):
         path = "/search_ts"
         params = {
