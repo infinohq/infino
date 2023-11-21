@@ -34,7 +34,7 @@ idna==3.4
     # via requests
 importlib-metadata==6.8.0
     # via streamlit
-infinopy==0.0.4
+infinopy==0.0.5
     # via -r requirements.in
 iniconfig==2.0.0
     # via pytest
