@@ -1,118 +1,98 @@
-<h1 align="center">
-  Infino
-</h1>
+![Infino Logo (Light)](docs/Infino_logo_light.svg#gh-light-mode-only)
+![Infino Logo (Dark)](docs/Infino_logo_dark.svg#gh-dark-mode-only)
 
-<p align="center">
-  &nbsp;&nbsp;:part_alternation_mark::wood: &nbsp;&#151;&nbsp; :mag::bar_chart: &nbsp;&#151;&nbsp; :balance_scale::moneybag:
-</p>
+# Store, search, and analyze telemetry data at scale.
 
-<p align="center">
-<strong>
-  Ingest Metrics and Logs &#151; Query and Insights &#151; Scale and Save &dollar;&dollar;
-</strong>
-</p>
+![Elastic Logo](docs/ElasticLicenseLogo.svg)
+[![Github Commits](https://img.shields.io/github/commit-activity/m/infinohq/infino)](https://github.com/infinohq/infino/commits)
+<a href="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml">
+  <img src="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml/badge.svg?branch=main" alt="Status" >
+</a>
+[![Join Slack](https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social)](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email)
 
-<p align="center">
-  Infino is an observability platform for storing metrics and logs at scale, and at lower cost
-</p>
+
+[Report Bug](https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=bug_report.md) |
+[Request Feature](https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=feature_request.md)
 
 <hr style="border:2px solid gray">
 
-<p align="center">
-  <a href="http://www.apache.org/licenses/LICENSE-2.0.html">
-    <img src="https://img.shields.io/badge/LICENSE-Apache2.0-ff69b4.svg" alt="License" />
-  </a>
-  <a href="https://github.com/infinohq/infino/commits">
-    <img src="https://img.shields.io/github/commit-activity/m/infinohq/infino" alt="GitHub commit activity" >
-  </a>
-  <a href="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml">
-    <img src="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml/badge.svg?branch=main" alt="Status" >
-  </a>
-  <a href="https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email">
-    <img src="https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social" alt="Join Infino Slack" />
-  </a>
-</p>
+## What is Infino?
 
-<p align="center">
-  <a href="https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=bug_report.md">Report Bug</a>
-  ·
-  <a href="https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=feature_request.md">Request Feature</a>
-</p>
+Infino is a scalable telemetry store designed for logs, metrics, and traces. Infino can function as a standalone observability solution or as the storage layer in your observability stack.
 
-<hr style="border:2px solid gray">
+## Why Infino?
+Telemetry data volumes are increasing exponentially yet there is no  purpose-built storage platform for telemetry. Most observability stacks are built on [ElasticSearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data so the stacks become complex and expensive to manage. Infino's goal is to reduce the **cost** and **complexity** of observability with smart, high-performance storage for customers and vendors alike.
 
-## :question: What is Infino?
+## How it works
+To address **cost**, Infino focuses on performance ([**see benchmarks here**](benches/README.md)):
 
-Infino is an observability platform that stores both metrics and application logs together. The key differences between Infino and other tools are:
+- **Index:** Append-only inverted index (more performant on telemetry data than general-purpose indexes like Lucene).
+- **Time:** Efficient sharding and storage based on data recency.
+- **Tools:** Rust core using SIMD instruction sets and telemetry-optimized compression.
 
-* It stores metrics and logs together - so you won't need to use two separate systems to store these.
-* It is built for focused observability use-case and written in Rust - you will find it faster and more cost-efficient than other tools. See [benchmark](benches/README.md).
+To address **complexity**, Infino focuses on AI and automation:
 
-## :moneybag: Benchmarks
+- **Access:** NLP support + charts-on-demand for chat interfaces like Slack or Teams.
+- **Management:** No schema, no labels, no master node + autoscaled everything.
+- **Dashboards:** OSS dashboard support + SQL support for BI interfaces like Tableau or Sigma.
+- **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
 
-Benchmarks are always hard, but are necesary to understand performance. You will generally find Infino to be faster than alternatives. See the comparison
-[here](benches/README.md).
+</br>
+Here's a quick architecture of the core storage engine.
+</br>
+</br>
+</br>
+
+![Architecture](docs/architecture.drawio.svg)
+
+## Features
+Note that we are still very much an alpha product but we have lots on the roadmap. Our development at the moment is focused on increasing the performance of the core engine to address **cost** but we are starting to add features to address **complexity**. 
+
+#### Available now
+ - Store logs and metrics
+ - Ingest using [FluentBit](https://fluentbit.io/)
+ - Query logs and metrics
+ - Python client
+ - LLM monitoring using [Langchain](https://github.com/langchain-ai/langchain)
+
+#### Coming soon
+- Dashboards
+- SQL
+- NLP
+- Traces
+- AI copilot
+
+## Getting started
+
+### Try it
+For now, you need to build the repo. You will first need to:
+
+- Install [Docker](https://docs.docker.com/engine/install/).
+- Install [Rust toolchain](https://www.rust-lang.org/tools/install).
 
 
-## :thinking: Why Infino?
+### Examples
 
-Infino was born out of the frustation of needing two open source systems (such as Prometheus + ELK) for storing metrics and application logs, even though the purpose of these two is the same - i.e., improve obervability and reliability of systems.
+* [Integration with Fluentbit](examples/fluentbit/README.md) - Learn how to publish logs and metrics to Infino using FluentBit.
+* [LLM monitoring with Langchain](examples/llm-monitoring-langchain/llm-monitoring-langchain.ipynb) - Discover how Infino's callback in Langchain can be used for monitoring requests in real-time. Also checkout the [Langchain <> Infino docs](https://python.langchain.com/docs/ecosystem/integrations/infino).
+* [LLM monitoring with OpenAI](examples/llm-monitoring-openai/llm-monitoring-openai.ipynb) - See an example of monitoring OpenAI's services.
+* [Using Infino's Python client](https://pyup.io/packages/pypi/infinopy/) - Get started with the Python client for Infino and explore its functionalities.
 
-When we decided to write an open-source platform that stores both of these together, we built it from the ground up in Rust, with performance (which leads to cost reduction) as **THE** key criteria to focus on. Give us a try if you'd like to store metrics and logs together, and reduce the cost of your observability infrastructure along the way!
+</br>
 
-## :fire: Features
+Please file an issue if you face any problems or [contact us](#telephone_receiver-contact-us) if you
+want to discuss your use-case over virtual coffee.
 
-* Store metrics and logs together,
-* Ingest using [FluentBit](https://fluentbit.io/),
-* [Superfast](https://github.com/infinohq/infino/tree/main/benches#search-latency) searching of logs using boolean *AND* queries,
-* Query time series of metrics stored,
-* Python client for ingestion as well as queries,
-* [Dashboard-as-code](dashboard/README.md) using streamlit,
-* Integration with LangChain for LLM monitoring,
-* Coming Soon:
-  * Support for traces,
-  * Natural language queries and dashboards for traces, metrics, and logs,
-  * Optionally use S3 as backend storage,
-  * Hosted cloud offering,
-  * More integration examples: logstash, prometheus, and open telemetry,
-  * Inbuilt queue for disaster recovery - no data loss in case of hard crash.
+## Contributions
 
-## :beginner: Getting started
+Contributions are welcome and highly appreciated! To get started, check out the [contributing guidelines](CONTRIBUTING.md).
 
-* Install [Docker](https://docs.docker.com/engine/install/).
-* Install [Rust toolchain](https://www.rust-lang.org/tools/install).
-* To get a quick taste of Infino, run the [fluentbit example](examples/fluentbit/README.md) to publish logs and time series to Infino.
-This demonstrates how to use fluentbit (a popular observability tool) to publish logs or metrics to Infino.
-* We are a project in active development, see the [Contributions](#punch-contributions) section below to understand the details as well as
-how you can contribute.
+## Contact Us
 
-### :see_no_evil: Caveat
+Ping us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email) or send us an email: ![Infino Logo (Light)](docs/Infino_email_light.svg#gh-light-mode-only)
+![Infino Logo (Dark)](docs/Infino_email_dark.svg#gh-dark-mode-only).
 
-We are currently very much an Alpha product. Please file an issue if you face any problems. Please [Contact Us](#telephone_receiver-contact-us) if you
-want to discuss your use-case over virtual :coffee:.
-
-## :punch: Contributions
-
-Contributions are welcome in a bunch of areas and highly appreciated! To get started, check out the [contributing guidelines](CONTRIBUTING.md).
-
-You can also join us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email).
-
-## :telephone_receiver: Contact Us
-
-[Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email), or send an email to vinaykakade AT gmail DOT com.
-
-## :bulb: Examples
-
-Explore the following examples to see how Infino can be integrated into different environments:
-
-* [Integration with Fluentbit](examples/fluentbit/README.md) - Learn how to publish logs and time series to Infino using FluentBit, a popular observability tool.
-* [LLM Monitoring with langchain](examples/llm-monitoring-langchain/llm-monitoring-langchain.ipynb) - Discover how Infino's callback in Langchain can be used for monitoring the requests in real-time. Feel free to checkout [langchain documentation](https://python.langchain.com/docs/ecosystem/integrations/infino).
-* [LLM Monitoring with OpenAI](examples/llm-monitoring-openai/llm-monitoring-openai.ipynb) - See an example of monitoring OpenAI's services using Infino's powerful observability features.
-* Using Infino's Python client - Get started with the Python client for Infino and explore its functionalities. Checkout Infino's [python package](https://pyup.io/packages/pypi/infinopy/).
-
-Please navigate to the respective example folders to find instructions and code samples for each scenario.
-
-## :hearts: Contributors
+## Contributors
 
 A big thank you to the community for making Infino possible!
 
@@ -120,4 +100,5 @@ A big thank you to the community for making Infino possible!
   <img src="https://contrib.rocks/image?repo=infinohq/infino" />
 </a>
 
-<span style="font-size: .5rem">Made with [contrib.rocks](https://contrib.rocks).</span>
+## License
+Infino is distributed under the Elastic 2.0 license.
