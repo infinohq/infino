@@ -1,5 +1,5 @@
-![Infino Logo (Light)](docs/Infino_logo_light.svg#gh-light-mode-only)
-![Infino Logo (Dark)](docs/Infino_logo_dark.svg#gh-dark-mode-only)
+![Infino Logo (Light)](docs/Infino_logo_light.png#gh-light-mode-only)
+![Infino Logo (Dark)](docs/Infino_logo_dark.png#gh-dark-mode-only)
 
 # Store, search, and analyze telemetry data at scale.
 
@@ -37,13 +37,8 @@ To address **complexity**, Infino focuses on AI and automation:
 - **Dashboards:** OSS dashboard support + SQL support for BI interfaces like Tableau or Sigma.
 - **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
 
-</br>
-Here's a quick architecture of the core storage engine.
-</br>
-</br>
-</br>
 
-![Architecture](docs/architecture.drawio.svg)
+![Architecture](docs/Infino_architecture.png)
 
 ## Features
 Note that we are still very much an alpha product but we have lots on the roadmap. Our development at the moment is focused on increasing the performance of the core engine to address **cost** but we are starting to add features to address **complexity**. 
