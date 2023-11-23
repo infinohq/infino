@@ -2,7 +2,6 @@ use crate::engine::clickhouse::ClickhouseEngine;
 use crate::engine::es::ElasticsearchEngine;
 use crate::engine::infino::InfinoEngine;
 use crate::engine::infino_rest::InfinoApiClient;
-use crate::engine::tantivy::Tantivy;
 use crate::utils::io::get_directory_size;
 
 use std::{
@@ -35,15 +34,7 @@ static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
   "Jun 09 06:07:05 2005] [notice] LDAP:",
   "unable to stat",
 ];
-static TANTIVY_SEARCH_QUERIES: &'static [&'static str] = &[
-  r#"message:"Directory""#,
-  r#"message:"Digest: done""#,
-  r#"message:"2006] [notice] mod_jk2 Shutting down""#,
-  r#"message:"mod_jk child workerEnv in error state 5""#,
-  r#"message:"Directory index forbidden""#,
-  r#"message:"Jun 09 06:07:05 2005] [notice] LDAP:""#,
-  r#"message:"unable to stat""#,
-];
+
 static ELASTICSEARCH_SEARCH_QUERIES: &'static [&'static str] = &[
   "Directory",
   "Digest: done",
@@ -148,30 +139,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await;
 
   // CLICKHOUSE END
-
-  // TANTIVY START
-  println!("\n\n***Now running Tantivy***");
-
-  // Index the data using tantivy with STORED and find the output size
-  let suffix = Uuid::new_v4();
-  let tantivy_index_stored_path = format!("/tmp/tantivy-index-stored-{suffix}");
-  create_dir(&tantivy_index_stored_path).unwrap();
-
-  let mut tantivy_with_stored = Tantivy::new(&tantivy_index_stored_path, true);
-  let _cell_tantivy_index_time = tantivy_with_stored
-    .index_lines(input_data_path, max_docs)
-    .await;
-  let cell_tantivy_index_size = get_directory_size(&tantivy_index_stored_path);
-  println!(
-    "Tantivy index size with STORED flag = {} bytes",
-    cell_tantivy_index_size
-  );
-
-  // Perform search on Tantivy index
-  let _cell_tantivy_search_time =
-    tantivy_with_stored.search_multiple_queries(TANTIVY_SEARCH_QUERIES);
-
-  // TANTIVY END
 
   // ELASTICSEARCH START
   println!("\n\n***Now running Elasticsearch***");

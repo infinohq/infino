@@ -93,9 +93,9 @@ Average across different query types. See the detailed output for granular info.
 
 Average over 10 queries on time series.
 
-| Data points    | Prometheus        | Infino            |
+| Metric points  | Prometheus        | Infino            |
 | -------------- | ----------------- | ----------------- |
-| Search Latency | 2678 nanoseconds | 2864 nanoseconds |
+| Search Latency | 2678 nanoseconds  | 2864 nanoseconds |
 
 ## Results (Apache log - medium): 
 
@@ -130,7 +130,7 @@ Dataset size: 104,857,667 bytes
 Average across different query types. See the detailed output for granular info.
 
 | dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
-| ----- | ----- | ----- | ---- | ---- |
+| ------- | ------------- | ---------- | ------ | ----------- |
 | data/Apache.log | 124,285 microseconds  | 34,469 microseconds  | 12,648 microseconds  | 32,689 microseconds  |
 
 
@@ -138,6 +138,6 @@ Average across different query types. See the detailed output for granular info.
 
 Average over 10 queries on time series.
 
-| Data points | Prometheus | Infino |
-| ----------- | ---------- | ---------- |
+|  Metric points |     Prometheus     |      Infino      |
+| -------------- | ------------------ | ---------------- |
 | Search Latency | 1,770 microseconds | 459 microseconds |
