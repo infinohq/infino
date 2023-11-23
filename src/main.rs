@@ -769,7 +769,7 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = coredb::refresh(config_dir_path);
+    let refreshed_coredb = CoreDB::refresh(config_dir_path);
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time

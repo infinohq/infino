@@ -3,13 +3,13 @@ use std::time::Instant;
 
 use chrono::Utc;
 use coredb::utils::config::Settings;
-use coredb::coredb;
+use coredb::CoreDB;
 
 use crate::utils::io;
 
 pub struct InfinoEngine {
   index_dir_path: String,
-  coredb: coredb,
+  coredb: CoreDB,
 }
 
 impl InfinoEngine {

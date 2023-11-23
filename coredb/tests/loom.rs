@@ -10,7 +10,7 @@ mod loom_tests {
 
   use tempdir::TempDir;
   use coredb::utils::io::get_joined_path;
-  use coredb::Tsldb;
+  use coredb::CoreDB;
 
   /// Helper function to create a test configuration.
   fn create_test_config(config_dir_path: &str, index_dir_path: &str) {
@@ -43,7 +43,7 @@ mod loom_tests {
       create_test_config(config_dir_path, index_dir_path);
 
       // Create index.
-      let index = Tsldb::new(config_dir_path).unwrap();
+      let index = CoreDB::new(config_dir_path).unwrap();
       let arc_index = Arc::new(index);
 
       // Start threads to append to the index.
