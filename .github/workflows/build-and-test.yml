@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
 
-# Skipping TSLDB tests for now
+# Skipping COREDB tests for now
 jobs:
   build-and-test:
     runs-on: ubuntu-latest

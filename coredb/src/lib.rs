@@ -252,7 +252,7 @@ mod tests {
   use chrono::Utc;
   use tempdir::TempDir;
 
-  use crate::utils::config::coredbSettings;
+  use crate::utils::config::TsldbSettings;
   use crate::utils::io::get_joined_path;
 
   use super::*;
@@ -262,7 +262,7 @@ mod tests {
     // Create a test config in the directory config_dir_path.
     let config_file_path = get_joined_path(
       config_dir_path,
-      coredbSettings::get_default_config_file_name(),
+      TsldbSettings::get_default_config_file_name(),
     );
 
     {
@@ -292,7 +292,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create a new coredb instance.
-    let coredb = coredb::new(config_dir_path).expect("Could not create coredb");
+    let coredb = Tsldb::new(config_dir_path).expect("Could not create coredb");
 
     let start = Utc::now().timestamp_millis() as u64;
 
@@ -323,7 +323,7 @@ mod tests {
     );
 
     coredb.commit(true);
-    let coredb = coredb::refresh(config_dir_path);
+    let coredb = Tsldb::refresh(config_dir_path);
 
     let end = Utc::now().timestamp_millis() as u64;
 

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::log::constants::{BITPACKER, BLOCK_SIZE_FOR_LOG_MESSAGES};
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
 use crate::utils::custom_serde::rwlock_serde;
-use crate::utils::error::TsldbError;
+use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;
 
 /// Represents (an uncompressed) postings block.
@@ -40,7 +40,7 @@ impl PostingsBlock {
   }
 
   /// Append a log message id to this postings block.
-  pub fn append(&self, log_message_id: u32) -> Result<(), TsldbError> {
+  pub fn append(&self, log_message_id: u32) -> Result<(), CoreDBError> {
     trace!("Appending log message id {}", log_message_id);
 
     let mut log_message_ids_lock = self.log_message_ids.write().unwrap();
@@ -50,7 +50,7 @@ impl PostingsBlock {
         "The postings block capacity is full as it already has {} messages",
         BLOCK_SIZE_FOR_LOG_MESSAGES
       );
-      return Err(TsldbError::CapacityFull(BLOCK_SIZE_FOR_LOG_MESSAGES));
+      return Err(CoreDBError::CapacityFull(BLOCK_SIZE_FOR_LOG_MESSAGES));
     }
 
     // Note that we don't synchronize across log_message_id generation and its subsequent append to the postings block.
@@ -112,7 +112,7 @@ impl Clone for PostingsBlock {
 impl Eq for PostingsBlock {}
 
 impl TryFrom<&PostingsBlockCompressed> for PostingsBlock {
-  type Error = TsldbError;
+  type Error = CoreDBError;
 
   /// Create a postings block from compressed postings block. (i.e., decompress a compressed postings block.)
   fn try_from(postings_block_compressed: &PostingsBlockCompressed) -> Result<Self, Self::Error> {

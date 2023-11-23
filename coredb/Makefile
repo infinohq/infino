@@ -1,4 +1,4 @@
-prog := tsldb
+prog := coredb
 debug ?=
 
 ifdef debug

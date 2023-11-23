@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::utils::custom_serde::atomic_cell_serde;
 
 #[derive(Debug, Deserialize, Serialize)]
-/// Metadata for tsldb's index.
+/// Metadata for coredb's index.
 pub struct Metadata {
   /// Number of segments.
   /// Note that this may not be same as the number of segments in the index, esp when

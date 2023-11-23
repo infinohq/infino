@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::ts::time_series_block::TimeSeriesBlock;
 use crate::ts::tsutils::compress_metric_point_vector;
 use crate::utils::custom_serde::rwlock_serde;
-use crate::utils::error::TsldbError;
+use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;
 
 /// Represents a compressed time series block.
@@ -48,7 +48,7 @@ impl PartialEq for TimeSeriesBlockCompressed {
 impl Eq for TimeSeriesBlockCompressed {}
 
 impl TryFrom<&TimeSeriesBlock> for TimeSeriesBlockCompressed {
-  type Error = TsldbError;
+  type Error = CoreDBError;
 
   /// Compress the given time series block.
   fn try_from(time_series_block: &TimeSeriesBlock) -> Result<Self, Self::Error> {
@@ -59,7 +59,7 @@ impl TryFrom<&TimeSeriesBlock> for TimeSeriesBlockCompressed {
 
     if time_series_metric_points.is_empty() {
       error!("Cannot compress an empty time series block");
-      return Err(TsldbError::EmptyTimeSeriesBlock());
+      return Err(CoreDBError::EmptyTimeSeriesBlock());
     }
     let metric_points_compressed_vec = compress_metric_point_vector(time_series_metric_points);
 

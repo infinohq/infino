@@ -2,25 +2,25 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use chrono::Utc;
-use tsldb::utils::config::Settings;
-use tsldb::Tsldb;
+use coredb::utils::config::Settings;
+use coredb::coredb;
 
 use crate::utils::io;
 
 pub struct InfinoEngine {
   index_dir_path: String,
-  tsldb: Tsldb,
+  coredb: coredb,
 }
 
 impl InfinoEngine {
   pub fn new(config_path: &str) -> InfinoEngine {
     let setting = Settings::new(config_path).unwrap();
-    let index_dir_path = String::from(setting.get_tsldb_settings().get_index_dir_path());
-    let tsldb = Tsldb::new(&config_path).unwrap();
+    let index_dir_path = String::from(setting.get_coredb_settings().get_index_dir_path());
+    let coredb = CoreDB::new(&config_path).unwrap();
 
     InfinoEngine {
       index_dir_path,
-      tsldb,
+      coredb,
     }
   }
 
@@ -42,7 +42,7 @@ impl InfinoEngine {
           break;
         }
         if let Ok(message) = line {
-          self.tsldb.append_log_message(
+          self.coredb.append_log_message(
             Utc::now().timestamp_millis() as u64,
             &HashMap::new(),
             message.as_str(),
@@ -50,7 +50,7 @@ impl InfinoEngine {
         }
       }
 
-      self.tsldb.commit(false);
+      self.coredb.commit(false);
     }
     let elapsed = now.elapsed().as_micros();
     println!(
@@ -63,7 +63,7 @@ impl InfinoEngine {
   /// Searches the given term and returns the time required in microseconds
   pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let now = Instant::now();
-    let result = self.tsldb.search(query, range_start_time, range_end_time);
+    let result = self.coredb.search(query, range_start_time, range_end_time);
     let elapsed = now.elapsed().as_micros();
     println!(
       "Infino time required for searching query {} is : {} microseconds. Num of results {}",

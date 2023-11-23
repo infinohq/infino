@@ -11,7 +11,7 @@ use crate::log::postings_block_compressed::PostingsBlockCompressed;
 use crate::log::postings_list::PostingsList;
 use crate::ts::metric_point::MetricPoint;
 use crate::ts::time_series::TimeSeries;
-use crate::utils::error::TsldbError;
+use crate::utils::error::CoreDBError;
 use crate::utils::range::is_overlap;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
@@ -129,7 +129,7 @@ impl Segment {
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
-  ) -> Result<(), TsldbError> {
+  ) -> Result<(), CoreDBError> {
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
@@ -173,7 +173,7 @@ impl Segment {
     name_value_labels: &HashMap<String, String>,
     time: u64,
     value: f64,
-  ) -> Result<(), TsldbError> {
+  ) -> Result<(), CoreDBError> {
     // Increment the number of data points appended so far.
     self.metadata.fetch_increment_metric_point_count();
 

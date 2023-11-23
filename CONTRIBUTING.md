@@ -19,8 +19,7 @@ If you are using VSCode, the `Rust Analyzer` plugin with pickup the `rustfmt.tom
 
 ### Run tests
 
-The core database behind Infino is Time Series and Log DB (Tsldb), which is cargo workspace crate in this repo in `tsldb` folder. We run
-tests for both Infino server and Tsldb below:
+The core database behind Infino is telemtry database (CoreDB), which is cargo workspace crate in this repo in the `coredb` folder. We run tests for both Infino server and CoreDB below:
 
 ```
 $ make test
@@ -34,13 +33,13 @@ You can find code coverage using [Tarpaulin](https://github.com/xd009642/tarpaul
 ```
 $ cargo install cargo-tarpaulin
 $ cargo tarpaulin
-$ cargo tarpaulin -p tsldb
+$ cargo tarpaulin -p coredb
 ```
 
 
-### Loom test for Tsldb
+### Loom test for CoreDB
 
-Tsldb is a multithreaded application. In addition to exchaustive functional tests, we use [Loom](https://docs.rs/loom/latest/loom/) to test permutations of threads and data access.
+CoreDB is a multithreaded application. In addition to exchaustive functional tests, we use [Loom](https://docs.rs/loom/latest/loom/) to test permutations of threads and data access.
 
 ```
 $ RUSTFLAGS="--cfg loom" cargo test --test loom --release

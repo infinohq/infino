@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::log::constants::{BITPACKER, BLOCK_SIZE_FOR_LOG_MESSAGES};
 use crate::log::postings_block::PostingsBlock;
 use crate::utils::custom_serde::{atomic_cell_serde, rwlock_serde};
-use crate::utils::error::TsldbError;
+use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;
 
 /// Represents a delta-compressed PostingsBlock.
@@ -75,7 +75,7 @@ impl PartialEq for PostingsBlockCompressed {
 impl Eq for PostingsBlockCompressed {}
 
 impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
-  type Error = TsldbError;
+  type Error = CoreDBError;
 
   /// Convert PostingsBlock to PostingsBlockCompressed, i.e. compress a postings block.
   fn try_from(postings_block: &PostingsBlock) -> Result<Self, Self::Error> {
@@ -87,7 +87,7 @@ impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
         BLOCK_SIZE_FOR_LOG_MESSAGES, log_message_ids_len
       );
 
-      return Err(TsldbError::InvalidSize(
+      return Err(CoreDBError::InvalidSize(
         log_message_ids_len,
         BLOCK_SIZE_FOR_LOG_MESSAGES,
       ));

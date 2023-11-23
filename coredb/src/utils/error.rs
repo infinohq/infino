@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]
-/// Enum for various errors in Tsldb.
-pub enum TsldbError {
+/// Enum for various errors in coredb.
+pub enum CoreDBError {
   #[error("Invalid size. Expected {0}, Received {1}.")]
   InvalidSize(usize, usize),
 

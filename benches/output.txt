@@ -3,7 +3,7 @@
      Running `target/release/benches`
 
 
-***Now running Infino via tsldb library***
+***Now running Infino via coredb library***
 Infino time required for insertion: 29839987 microseconds
 Checking size of directory: index
 Infino index size = 34354516 bytes

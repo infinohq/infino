@@ -2,7 +2,7 @@ use log::trace;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::custom_serde::rwlock_serde;
-use crate::utils::error::TsldbError;
+use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;
 
 use super::constants::BLOCK_SIZE_FOR_LOG_MESSAGES;
@@ -57,7 +57,7 @@ impl PostingsList {
     let retval = last_block_lock.append(log_message_id);
 
     if retval.is_err()
-      && retval.err().unwrap() == TsldbError::CapacityFull(BLOCK_SIZE_FOR_LOG_MESSAGES)
+      && retval.err().unwrap() == CoreDBError::CapacityFull(BLOCK_SIZE_FOR_LOG_MESSAGES)
     {
       // The last block is full. So,
       // (1) compress last and append it to postings_list_compressed,

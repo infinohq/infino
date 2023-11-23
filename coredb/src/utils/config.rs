@@ -5,15 +5,15 @@ use std::env;
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
 #[derive(Debug, Deserialize)]
-/// Settings for tsldb.
-pub struct TsldbSettings {
+/// Settings for coredb.
+pub struct CoreDBSettings {
   index_dir_path: String,
   default_index_name: String,
   num_log_messages_threshold: u32,
   num_metric_points_threshold: u32,
 }
 
-impl TsldbSettings {
+impl CoreDBSettings {
   /// Get the settings for the directory where the index is stored.
   pub fn get_index_dir_path(&self) -> &str {
     self.index_dir_path.as_str()
@@ -44,9 +44,9 @@ impl TsldbSettings {
 }
 
 #[derive(Debug, Deserialize)]
-/// Settings for Tsldb, read from config file.
+/// Settings for coredb, read from config file.
 pub struct Settings {
-  tsldb: TsldbSettings,
+  coredb: CoreDBSettings,
 }
 
 impl Settings {
@@ -63,18 +63,18 @@ impl Settings {
       // Default to 'development' env
       // Note that this file is _optional_
       .add_source(File::with_name(&config_environment_file_name).required(false))
-      // Add in settings from the environment (with a prefix of TSLDB)
-      // Eg.. `TSLDB_DEBUG=1` would set the `debug` key
-      .add_source(Environment::with_prefix("tsldb"))
+      // Add in settings from the environment (with a prefix of COREDB)
+      // Eg.. `COREDB_DEBUG=1` would set the `debug` key
+      .add_source(Environment::with_prefix("coredb"))
       .build()?;
 
     // You can deserialize (and thus freeze) the entire configuration as
     config.try_deserialize()
   }
 
-  /// Get tsldb settings.
-  pub fn get_tsldb_settings(&self) -> &TsldbSettings {
-    &self.tsldb
+  /// Get coredb settings.
+  pub fn get_coredb_settings(&self) -> &CoreDBSettings {
+    &self.coredb
   }
 }
 
@@ -101,7 +101,7 @@ mod tests {
     let config_file_path = get_joined_path(config_dir_path, DEFAULT_CONFIG_FILE_NAME);
     {
       let mut file = File::create(&config_file_path).unwrap();
-      file.write_all(b"[tsldb]\n").unwrap();
+      file.write_all(b"[coredb]\n").unwrap();
       file
         .write_all(b"index_dir_path = \"/var/index\"\n")
         .unwrap();
@@ -117,23 +117,23 @@ mod tests {
     }
 
     let settings = Settings::new(&config_dir_path).unwrap();
-    let tsldb_settings = settings.get_tsldb_settings();
-    assert_eq!(tsldb_settings.get_index_dir_path(), "/var/index");
-    assert_eq!(tsldb_settings.get_num_log_messages_threshold(), 1000);
-    assert_eq!(tsldb_settings.get_num_metric_points_threshold(), 10000);
+    let coredb_settings = settings.get_coredb_settings();
+    assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
+    assert_eq!(coredb_settings.get_num_log_messages_threshold(), 1000);
+    assert_eq!(coredb_settings.get_num_metric_points_threshold(), 10000);
 
     // Check settings override using RUN_MODE environment variable.
     env::set_var("RUN_MODE", "SETTINGSTEST");
     let config_file_path = get_joined_path(config_dir_path, "settingstest.toml");
     {
       let mut file = File::create(&config_file_path).unwrap();
-      file.write_all(b"[tsldb]\n").unwrap();
+      file.write_all(b"[coredb]\n").unwrap();
       file.write_all(b"num_log_messages_threshold=1\n").unwrap();
     }
     let settings = Settings::new(&config_dir_path).unwrap();
-    let tsldb_settings = settings.get_tsldb_settings();
-    assert_eq!(tsldb_settings.get_index_dir_path(), "/var/index");
-    assert_eq!(tsldb_settings.get_num_log_messages_threshold(), 1);
-    assert_eq!(tsldb_settings.get_num_metric_points_threshold(), 10000);
+    let coredb_settings = settings.get_coredb_settings();
+    assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
+    assert_eq!(coredb_settings.get_num_log_messages_threshold(), 1);
+    assert_eq!(coredb_settings.get_num_metric_points_threshold(), 10000);
   }
 }

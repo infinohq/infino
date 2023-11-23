@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let max_docs = -1;
 
   // INFINO START
-  println!("\n\n***Now running Infino via tsldb library***");
+  println!("\n\n***Now running Infino via coredb library***");
 
   // Index the data using infino and find the output size.
   let curr_dir = std::env::current_dir().unwrap();
