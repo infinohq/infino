@@ -20,14 +20,14 @@ def get_metric_name():
     return choice
 
 
-def search_ts(infino_server_url, metric_name):
+def search_metrics(infino_server_url, metric_name):
     """
     Search infino logs and returns a dataframe of time and metric values, for the given metric name
     """
 
     # Search Infino for the given query
     client = InfinoClient(infino_server_url)
-    response = client.search_ts(label_name="__name__", label_value=metric_name)
+    response = client.search_metrics(label_name="__name__", label_value=metric_name)
     if response.status_code != 200:
         st.error("Could not execute time series query")
         return None
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     metric_name = get_metric_name()
 
     # Get the timeseries metric values as a dataframe
-    df = search_ts(infino_server_url, metric_name)
+    df = search_metrics(infino_server_url, metric_name)
 
     # Display metric values
     display_results_df(df, metric_name)

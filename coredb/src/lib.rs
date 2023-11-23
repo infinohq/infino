@@ -1,7 +1,7 @@
 pub(crate) mod index_manager;
 pub mod log;
 pub(crate) mod segment_manager;
-pub mod ts;
+pub mod metric;
 pub mod utils;
 
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use dashmap::DashMap;
 
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
-use crate::ts::metric_point::MetricPoint;
+use crate::metric::metric_point::MetricPoint;
 use crate::utils::config::Settings;
 use crate::utils::error::CoreDBError;
 

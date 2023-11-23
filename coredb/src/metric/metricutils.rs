@@ -4,7 +4,7 @@ use tsz::stream::{BufferedReader, BufferedWriter};
 use tsz::Encode;
 use tsz::{Decode, StdDecoder, StdEncoder};
 
-use crate::ts::metric_point::MetricPoint;
+use crate::metric::metric_point::MetricPoint;
 use crate::utils::error::CoreDBError;
 
 /// Decompress the given vector of u8 integers to a MetricPoint vector.

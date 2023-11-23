@@ -1,10 +1,10 @@
 use log::debug;
 use serde::{Deserialize, Serialize};
 
-use crate::ts::constants::BLOCK_SIZE_FOR_TIME_SERIES;
-use crate::ts::metric_point::MetricPoint;
-use crate::ts::time_series_block_compressed::TimeSeriesBlockCompressed;
-use crate::ts::tsutils::decompress_numeric_vector;
+use crate::metric::constants::BLOCK_SIZE_FOR_TIME_SERIES;
+use crate::metric::metric_point::MetricPoint;
+use crate::metric::time_series_block_compressed::TimeSeriesBlockCompressed;
+use crate::metric::metricutils::decompress_numeric_vector;
 use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;

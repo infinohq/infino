@@ -2,7 +2,7 @@ use std::collections::BinaryHeap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ts::metric_point::MetricPoint;
+use crate::metric::metric_point::MetricPoint;
 use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::CoreDBError;
 use crate::utils::range::is_overlap;

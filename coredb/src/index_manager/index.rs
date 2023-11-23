@@ -8,7 +8,7 @@ use log::{debug, error, info};
 use crate::index_manager::metadata::Metadata;
 use crate::log::log_message::LogMessage;
 use crate::segment_manager::segment::Segment;
-use crate::ts::metric_point::MetricPoint;
+use crate::metric::metric_point::MetricPoint;
 use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;

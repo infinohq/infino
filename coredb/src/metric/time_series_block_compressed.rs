@@ -1,8 +1,8 @@
 use log::error;
 use serde::{Deserialize, Serialize};
 
-use crate::ts::time_series_block::TimeSeriesBlock;
-use crate::ts::tsutils::compress_metric_point_vector;
+use crate::metric::time_series_block::TimeSeriesBlock;
+use crate::metric::metricutils::compress_metric_point_vector;
 use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;

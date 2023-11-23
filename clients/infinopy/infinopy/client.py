@@ -26,8 +26,8 @@ class InfinoClient:
         path = "/append_ts"
         return self._request("POST", path, json=payload)
 
-    def search_log(self, text, start_time=None, end_time=None):
-        path = "/search_log"
+    def search_logs(self, text, start_time=None, end_time=None):
+        path = "/search_logs"
         params = {"text": text, "start_time": start_time, "end_time": end_time}
         response = self._request("GET", path, params=params)
         return response
@@ -38,8 +38,8 @@ class InfinoClient:
         response = self._request("GET", path, params=params)
         return response
 
-    def search_ts(self, label_name, label_value, start_time=None, end_time=None):
-        path = "/search_ts"
+    def search_metrics(self, label_name, label_value, start_time=None, end_time=None):
+        path = "/search_metrics"
         params = {
             "label_name": label_name,
             "label_value": label_value,

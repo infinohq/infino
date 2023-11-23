@@ -47,7 +47,7 @@ impl InfinoTsClient {
 
   pub async fn search(&self) -> u128 {
     let query_url =
-      "http://localhost:3000/search_ts?label_name=__name__&&label_value=cpu_usage&start_time=0";
+      "http://localhost:3000/search_metrics?label_name=__name__&&label_value=cpu_usage&start_time=0";
     let now = Instant::now();
     let response = reqwest::get(query_url).await;
     let elapsed = now.elapsed();

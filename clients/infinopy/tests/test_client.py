@@ -51,9 +51,9 @@ class InfinoClientTestCase(unittest.TestCase):
         response = self.client.append_log(payload)
         self.assertEqual(response.status_code, 200)
 
-        # Test the search_log method.
+        # Test the search_logs method.
         # Query for text that is present in both the payloads.
-        response = self.client.search_log(
+        response = self.client.search_logs(
             text="my message", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
@@ -61,7 +61,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
         # Query for text that is present in only one payload.
-        response = self.client.search_log(
+        response = self.client.search_logs(
             text="two", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
@@ -69,7 +69,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(len(results), 1)
 
         # Test that default values for start and end time work.
-        response = self.client.search_log(text="my message")
+        response = self.client.search_logs(text="my message")
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 2)
@@ -91,8 +91,8 @@ class InfinoClientTestCase(unittest.TestCase):
         response = self.client.append_ts(payload)
         self.assertEqual(response.status_code, 200)
 
-        # Test the search_ts method.
-        response = self.client.search_ts(
+        # Test the search_metrics method.
+        response = self.client.search_metrics(
             label_name="__name__",
             label_value="some_metric_name",
             start_time=current_time - 10,
@@ -103,7 +103,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
         # Test that default values for start and end time work.
-        response = self.client.search_ts(
+        response = self.client.search_metrics(
             label_name="__name__",
             label_value="some_metric_name",
         )

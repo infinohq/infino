@@ -20,11 +20,11 @@ for indexing. The mount in the docker command are needed so that the container h
 
 
 * In the fourth shell window, try searching for logs and metrics:
-  * search logs by calling `search_log` api, example below. You can change the `text` parameter to try different queries. The end time,
+  * search logs by calling `search_logs` api, example below. You can change the `text` parameter to try different queries. The end time,
 if not specified, is assumed to be the current time.
-  ```curl "http://localhost:3000/search_log?text=workerenv%20error&start_time=0"```
-  * search time series by calling `search_ts` api, example below. You can change the `label_value` parameter to try different metrics.
+  ```curl "http://localhost:3000/search_logs?text=workerenv%20error&start_time=0"```
+  * search time series by calling `search_metrics` api, example below. You can change the `label_value` parameter to try different metrics.
 The end time, if not specified, is assumed to be the current time.
-  ```curl "http://localhost:3000/search_ts?label_name=__name__&&label_value=cpu_p&start_time=0"```
+  ```curl "http://localhost:3000/search_metrics?label_name=__name__&&label_value=cpu_p&start_time=0"```
 
 * Shutdown the Infino server gracefully by pressing `Ctrl-C` in the Infino server window, and shutdown the fluentbit docker container by pressing `Ctrl-C` in the both the fluentbit shell windows.

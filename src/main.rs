@@ -40,9 +40,18 @@ struct AppState {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-/// Represents search query.
-struct SearchQuery {
+/// Represents a logs query.
+struct LogsQuery {
   text: String,
+  start_time: Option<u64>,
+  end_time: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+/// Represents a metrics query.
+struct MetricsQuery {
+  label_name: String,
+  label_value: String,
   start_time: Option<u64>,
   end_time: Option<u64>,
 }
@@ -61,15 +70,6 @@ struct SummarizeQuery {
 struct SummarizeQueryResponse {
   summary: String,
   results: Vec<LogMessage>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-/// Represents a query to time series db.
-struct TimeSeriesQuery {
-  label_name: String,
-  label_value: String,
-  start_time: Option<u64>,
-  end_time: Option<u64>,
 }
 
 /// Periodically commits coredb (typically called in a thread, so that coredb can be asyncronously committed).
@@ -152,14 +152,14 @@ async fn app(
     // GET methods
     .route("/get_index_dir", get(get_index_dir))
     .route("/ping", get(ping))
-    .route("/search_log", get(search_log))
-    .route("/search_ts", get(search_ts))
+    .route("/search_logs", get(search_logs))
+    .route("/search_metrics", get(search_metrics))
     .route("/summarize", get(summarize))
     //---
     // POST methods
     // TODO: all the APIs should have index name
     .route("/append_log", post(append_log))
-    .route("/append_ts", post(append_ts))
+    .route("/append_metric", post(append_metric))
     .route("/flush", post(flush))
     // POST methods to create and delete index
     .route("/:index_name", put(create_index))
@@ -334,12 +334,12 @@ async fn append_log(
   Ok(())
 }
 
-/// Append time series data to coredb.
-async fn append_ts(
+/// Append metrics to coredb.
+async fn append_metric(
   State(state): State<Arc<AppState>>,
   Json(ts_json): Json<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
-  debug!("Appending time series entry: {:?}", ts_json);
+  debug!("Appending metric entry: {:?}", ts_json);
 
   let is_queue = state.queue.is_some();
 
@@ -420,18 +420,18 @@ async fn append_ts(
 }
 
 /// Search logs in coredb.
-async fn search_log(
+async fn search_logs(
   State(state): State<Arc<AppState>>,
-  Query(search_query): Query<SearchQuery>,
+  Query(logs_query): Query<LogsQuery>,
 ) -> String {
-  debug!("Searching log: {:?}", search_query);
+  debug!("Searching logs: {:?}", logs_query);
 
   let results = state.coredb.search(
-    &search_query.text,
+    &logs_query.text,
     // The default for range start time is 0.
-    search_query.start_time.unwrap_or(0),
+    logs_query.start_time.unwrap_or(0),
     // The default for range end time is the current time.
-    search_query
+    logs_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
@@ -480,20 +480,20 @@ async fn summarize(
   }
 }
 
-/// Search time series.
-async fn search_ts(
+/// Search metrics in coredb.
+async fn search_metrics(
   State(state): State<Arc<AppState>>,
-  Query(time_series_query): Query<TimeSeriesQuery>,
+  Query(metrics_query): Query<MetricsQuery>,
 ) -> String {
-  debug!("Searching time series: {:?}", time_series_query);
+  debug!("Searching metrics: {:?}", metrics_query);
 
   let results = state.coredb.get_time_series(
-    &time_series_query.label_name,
-    &time_series_query.label_value,
+    &metrics_query.label_name,
+    &metrics_query.label_value,
     // The default for range start time is 0.
-    time_series_query.start_time.unwrap_or(0_u64),
+    metrics_query.start_time.unwrap_or(0_u64),
     // The default for range end time is the current time.
-    time_series_query
+    metrics_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
@@ -571,15 +571,15 @@ mod tests {
   use urlencoding::encode;
 
   use coredb::log::log_message::LogMessage;
-  use coredb::ts::metric_point::MetricPoint;
+  use coredb::metric::metric_point::MetricPoint;
   use coredb::utils::io::get_joined_path;
   use coredb::utils::tokenize::FIELD_DELIMITER;
 
   use super::*;
 
   #[derive(Debug, Deserialize, Serialize)]
-  /// Represents an entry in the time series append request.
-  struct TimeSeriesEntry {
+  /// Represents an entry in the metric append request.
+  struct Metric {
     time: u64,
     metric_name_value: HashMap<String, f64>,
     labels: HashMap<String, String>,
@@ -651,7 +651,7 @@ mod tests {
     app: &mut Router,
     config_dir_path: &str,
     search_text: &str,
-    query: SearchQuery,
+    query: LogsQuery,
     log_messages_expected: Vec<LogMessage>,
   ) {
     let query_start_time = query
@@ -668,7 +668,7 @@ mod tests {
       query_end_time
     );
 
-    let uri = format!("/search_log?{}", query_string);
+    let uri = format!("/search_logs?{}", query_string);
     info!("Checking for uri: {}", uri);
 
     // Now call search to get the documents.
@@ -725,7 +725,7 @@ mod tests {
   async fn check_time_series(
     app: &mut Router,
     config_dir_path: &str,
-    query: TimeSeriesQuery,
+    query: MetricsQuery,
     metric_points_expected: Vec<MetricPoint>,
   ) {
     let query_start_time = query
@@ -742,7 +742,7 @@ mod tests {
       query_end_time
     );
 
-    let uri = format!("/search_ts?{}", query_string);
+    let uri = format!("/search_metrics?{}", query_string);
     info!("Checking for uri: {}", uri);
 
     // Now call search to get the documents.
@@ -855,7 +855,7 @@ mod tests {
 
     let search_query = &format!("value1 field34{}value4", FIELD_DELIMITER);
 
-    let query = SearchQuery {
+    let query = LogsQuery {
       start_time: None,
       end_time: None,
       text: search_query.to_owned(),
@@ -870,7 +870,7 @@ mod tests {
     .await;
 
     // End time in this query is too old - this should yield 0 results.
-    let query_too_old = SearchQuery {
+    let query_too_old = LogsQuery {
       start_time: Some(1),
       end_time: Some(10000),
       text: search_query.to_owned(),
@@ -884,7 +884,7 @@ mod tests {
     )
     .await;
 
-    // **Part 2**: Test insertion and search of time series data points.
+    // **Part 2**: Test insertion and search of time series metric points.
     let num_metric_points = 100;
     let mut metric_points_expected = Vec::new();
     let name_for_metric_name_label = "__name__";
@@ -898,12 +898,12 @@ mod tests {
       let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, metric_name, value);
       metric_points_expected.push(metric_point);
 
-      // Insert the time series.
+      // Insert the metric.
       let response = app
         .call(
           Request::builder()
             .method(http::Method::POST)
-            .uri("/append_ts")
+            .uri("/append_metric")
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
             .body(Body::from(json_str))
             .unwrap(),
@@ -915,7 +915,7 @@ mod tests {
 
     // Check whether we get all the data points back when the start and end_times are not specified
     // (i.e., they will default to 0 and to current time respectively).
-    let query = TimeSeriesQuery {
+    let query = MetricsQuery {
       label_name: name_for_metric_name_label.to_owned(),
       label_value: metric_name.to_owned(),
       start_time: None,
@@ -924,7 +924,7 @@ mod tests {
     check_time_series(&mut app, config_dir_path, query, metric_points_expected).await;
 
     // End time in this query is too old - this should yield 0 results.
-    let query_too_old = TimeSeriesQuery {
+    let query_too_old = MetricsQuery {
       label_name: name_for_metric_name_label.to_owned(),
       label_value: metric_name.to_owned(),
       start_time: Some(1),
