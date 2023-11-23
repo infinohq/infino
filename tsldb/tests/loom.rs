@@ -25,7 +25,7 @@ mod loom_tests {
       file
         .write_all(b"num_log_messages_threshold = 20\n")
         .unwrap();
-      file.write_all(b"num_data_points_threshold = 40\n").unwrap();
+      file.write_all(b"num_metric_points_threshold = 40\n").unwrap();
     }
   }
 
@@ -59,7 +59,7 @@ mod loom_tests {
             arc_index_clone.append_log_message(time as u64, &HashMap::new(), "message");
             let mut labels: HashMap<String, String> = HashMap::new();
             labels.insert("label1".to_string(), "value1".to_string());
-            arc_index_clone.append_data_point("some_name", &labels, time as u64, 1.0);
+            arc_index_clone.append_metric_point("some_name", &labels, time as u64, 1.0);
           }
         });
         handles.push(handle);
@@ -82,8 +82,8 @@ mod loom_tests {
 
       // Check whether the number of data points is as expected.
       let results = tsldb.get_time_series("label1", "value1", 0, expected_len as u64);
-      let received_data_points_len = results.len();
-      assert_eq!(expected_len, received_data_points_len);
+      let received_metric_points_len = results.len();
+      assert_eq!(expected_len, received_metric_points_len);
     })
   }
 }

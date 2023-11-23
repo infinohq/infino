@@ -24,7 +24,7 @@ pub struct Metadata {
 
   /// Number of data points.
   #[serde(with = "atomic_cell_serde")]
-  data_point_count: AtomicCell<u32>,
+  metric_point_count: AtomicCell<u32>,
 
   /// Least timestamp.
   #[serde(with = "atomic_cell_serde")]
@@ -43,7 +43,7 @@ impl Metadata {
       log_message_count: AtomicCell::new(0),
       term_count: AtomicCell::new(0),
       label_count: AtomicCell::new(0),
-      data_point_count: AtomicCell::new(0),
+      metric_point_count: AtomicCell::new(0),
       start_time: AtomicCell::new(u64::MAX),
       end_time: AtomicCell::new(0),
     }
@@ -73,8 +73,8 @@ impl Metadata {
   }
 
   /// Get number of data points in this segment.
-  pub fn get_data_point_count(&self) -> u32 {
-    self.data_point_count.load()
+  pub fn get_metric_point_count(&self) -> u32 {
+    self.metric_point_count.load()
   }
 
   /// Get the earliest timestamp in this segment.
@@ -103,8 +103,8 @@ impl Metadata {
   }
 
   /// Get the current count of data points in this segement and increment it by 1.
-  pub fn fetch_increment_data_point_count(&self) -> u32 {
-    self.data_point_count.fetch_add(1)
+  pub fn fetch_increment_metric_point_count(&self) -> u32 {
+    self.metric_point_count.fetch_add(1)
   }
 
   /// Update the start time of this segment to the given value.
@@ -135,7 +135,7 @@ mod tests {
     assert_eq!(m.get_log_message_count(), 0);
     assert_eq!(m.get_term_count(), 0);
     assert_eq!(m.get_label_count(), 0);
-    assert_eq!(m.get_data_point_count(), 0);
+    assert_eq!(m.get_metric_point_count(), 0);
     assert_eq!(m.get_start_time(), u64::MAX);
     assert_eq!(m.get_end_time(), 0);
   }
@@ -145,7 +145,7 @@ mod tests {
   pub fn test_increment_specific_values(
     log_message_increment: u32,
     term_increment: u32,
-    data_point_increment: u32,
+    metric_point_increment: u32,
     label_increment: u32,
   ) {
     let m: Metadata = Metadata::new();
@@ -155,8 +155,8 @@ mod tests {
     for _ in 0..term_increment {
       m.fetch_increment_term_count();
     }
-    for _ in 0..data_point_increment {
-      m.fetch_increment_data_point_count();
+    for _ in 0..metric_point_increment {
+      m.fetch_increment_metric_point_count();
     }
     for _ in 0..label_increment {
       m.fetch_increment_label_count();
@@ -164,7 +164,7 @@ mod tests {
 
     assert_eq!(m.get_log_message_count(), log_message_increment);
     assert_eq!(m.get_term_count(), term_increment);
-    assert_eq!(m.get_data_point_count(), data_point_increment);
+    assert_eq!(m.get_metric_point_count(), metric_point_increment);
     assert_eq!(m.get_label_count(), label_increment);
   }
 }

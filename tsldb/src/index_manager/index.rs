@@ -8,7 +8,7 @@ use log::{debug, error, info};
 use crate::index_manager::metadata::Metadata;
 use crate::log::log_message::LogMessage;
 use crate::segment_manager::segment::Segment;
-use crate::ts::data_point::DataPoint;
+use crate::ts::metric_point::MetricPoint;
 use crate::utils::error::TsldbError;
 use crate::utils::io;
 use crate::utils::serialize;
@@ -67,10 +67,10 @@ impl Index {
   pub fn new_with_threshold_params(
     index_dir: &str,
     num_log_messages_threshold: u32,
-    num_data_points_threshold: u32,
+    num_metric_points_threshold: u32,
   ) -> Result<Self, TsldbError> {
     info!("Creating index - dir {}, max log messages per segment (approx): {}, max data points per segment {}",
-          index_dir, num_log_messages_threshold, num_data_points_threshold);
+          index_dir, num_log_messages_threshold, num_metric_points_threshold);
 
     let index_dir_path = Path::new(index_dir);
     if !index_dir_path.is_dir() {
@@ -86,7 +86,7 @@ impl Index {
             .update_max_log_message_count_per_segment(num_log_messages_threshold);
           index
             .metadata
-            .update_max_data_point_count_per_segment(num_data_points_threshold);
+            .update_max_metric_point_count_per_segment(num_metric_points_threshold);
           return Ok(index);
         }
         Err(err) => {
@@ -112,7 +112,7 @@ impl Index {
 
     // Create an initial segment.
     let segment = Segment::new();
-    let metadata = Metadata::new(0, 0, num_log_messages_threshold, num_data_points_threshold);
+    let metadata = Metadata::new(0, 0, num_log_messages_threshold, num_metric_points_threshold);
 
     // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
@@ -162,7 +162,7 @@ impl Index {
   }
 
   /// Append a data point to this index.
-  pub fn append_data_point(
+  pub fn append_metric_point(
     &self,
     metric_name: &str,
     labels: &HashMap<String, String>,
@@ -180,7 +180,7 @@ impl Index {
 
     // Append the data point to the current segment.
     current_segment
-      .append_data_point(metric_name, labels, time, value)
+      .append_metric_point(metric_name, labels, time, value)
       .unwrap();
   }
 
@@ -230,8 +230,8 @@ impl Index {
 
     // Check if this segment is 'too big', and return a boolean indicating the same.
     segment.get_log_message_count() > self.metadata.get_approx_max_log_message_count_per_segment()
-      || segment.get_data_point_count()
-        > self.metadata.get_approx_max_data_point_count_per_segment()
+      || segment.get_metric_point_count()
+        > self.metadata.get_approx_max_metric_point_count_per_segment()
   }
 
   /// Commit the segment to disk.
@@ -375,15 +375,15 @@ impl Index {
     label_value: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<DataPoint> {
+  ) -> Vec<MetricPoint> {
     let mut retval = Vec::new();
 
     let segment_numbers = self.get_overlapping_segments(range_start_time, range_end_time);
     for segment_number in segment_numbers {
       let segment = self.all_segments_map.get(&segment_number).unwrap();
-      let mut data_points =
+      let mut metric_points =
         segment.get_time_series(label_name, label_value, range_start_time, range_end_time);
-      retval.append(&mut data_points);
+      retval.append(&mut metric_points);
     }
     retval
   }
@@ -456,7 +456,7 @@ mod tests {
     let expected = Index::new(&index_dir_path).unwrap();
     let num_log_messages = 5;
     let message_prefix = "content#";
-    let num_data_points = 5;
+    let num_metric_points = 5;
 
     for i in 1..=num_log_messages {
       let message = format!("{}{}", message_prefix, i);
@@ -472,8 +472,8 @@ mod tests {
     let other_label_value = "GET";
     let mut label_map = HashMap::new();
     label_map.insert(other_label_name.to_owned(), other_label_value.to_owned());
-    for i in 1..=num_data_points {
-      expected.append_data_point(
+    for i in 1..=num_metric_points {
+      expected.append_metric_point(
         metric_name,
         &label_map,
         Utc::now().timestamp_millis() as u64,
@@ -499,8 +499,8 @@ mod tests {
       &received_segment.get_log_message_count()
     );
     assert_eq!(
-      &expected_segment.get_data_point_count(),
-      &received_segment.get_data_point_count()
+      &expected_segment.get_metric_point_count(),
+      &received_segment.get_metric_point_count()
     );
   }
 
@@ -560,26 +560,26 @@ mod tests {
     );
 
     let index = Index::new(&index_dir_path).unwrap();
-    let num_data_points = 1000;
-    let mut expected_data_points: Vec<DataPoint> = Vec::new();
+    let num_metric_points = 1000;
+    let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
-    for i in 1..num_data_points {
-      index.append_data_point("some_name", &HashMap::new(), i, i as f64);
-      let dp = DataPoint::new(i, i as f64);
-      expected_data_points.push(dp);
+    for i in 1..num_metric_points {
+      index.append_metric_point("some_name", &HashMap::new(), i, i as f64);
+      let dp = MetricPoint::new(i, i as f64);
+      expected_metric_points.push(dp);
     }
 
     let metric_name_label = "__name__";
     println!("{}", metric_name_label);
-    let received_data_points = index.get_time_series(metric_name_label, "some_name", 0, u64::MAX);
+    let received_metric_points = index.get_time_series(metric_name_label, "some_name", 0, u64::MAX);
 
-    assert_eq!(expected_data_points, received_data_points);
+    assert_eq!(expected_metric_points, received_metric_points);
   }
 
   #[test_case(true, false; "when only logs are appended")]
   #[test_case(false, true; "when only data points are appended")]
   #[test_case(true, true; "when both logs and data points are appended")]
-  fn test_two_segments(append_log: bool, append_data_point: bool) {
+  fn test_two_segments(append_log: bool, append_metric_point: bool) {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
     for _ in 0..100 {
       let index_dir = TempDir::new("index_test").unwrap();
@@ -596,7 +596,7 @@ mod tests {
 
       let message_prefix = "message";
       let mut expected_log_messages: Vec<String> = Vec::new();
-      let mut expected_data_points: Vec<DataPoint> = Vec::new();
+      let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
       let mut original_segment_num_log_messages = if append_log {
         index
@@ -605,8 +605,8 @@ mod tests {
       } else {
         0
       };
-      let mut original_segment_num_data_points = if append_data_point {
-        index.metadata.get_approx_max_data_point_count_per_segment()
+      let mut original_segment_num_metric_points = if append_metric_point {
+        index.metadata.get_approx_max_metric_point_count_per_segment()
       } else {
         0
       };
@@ -621,10 +621,10 @@ mod tests {
         expected_log_messages.push(message);
       }
 
-      for _ in 0..original_segment_num_data_points {
-        let dp = DataPoint::new(Utc::now().timestamp_millis() as u64, 1.0);
-        index.append_data_point("some_name", &HashMap::new(), dp.get_time(), dp.get_value());
-        expected_data_points.push(dp);
+      for _ in 0..original_segment_num_metric_points {
+        let dp = MetricPoint::new(Utc::now().timestamp_millis() as u64, 1.0);
+        index.append_metric_point("some_name", &HashMap::new(), dp.get_time(), dp.get_value());
+        expected_metric_points.push(dp);
       }
 
       // Force commit and then refresh the index.
@@ -645,8 +645,8 @@ mod tests {
           original_segment_num_log_messages
         );
         assert_eq!(
-          current_segment.get_data_point_count(),
-          original_segment_num_data_points
+          current_segment.get_metric_point_count(),
+          original_segment_num_metric_points
         );
       }
 
@@ -659,14 +659,14 @@ mod tests {
         );
         original_segment_num_log_messages += 1;
       }
-      if append_data_point {
-        index.append_data_point(
+      if append_metric_point {
+        index.append_metric_point(
           "some_name",
           &HashMap::new(),
           Utc::now().timestamp_millis() as u64,
           1.0,
         );
-        original_segment_num_data_points += 1;
+        original_segment_num_metric_points += 1;
       }
 
       // Force a commit and refresh. This will now create a second empty segment, which would now be
@@ -682,7 +682,7 @@ mod tests {
         let current_segment_ref = index.get_current_segment_ref();
         let current_segment = current_segment_ref.value();
         assert_eq!(current_segment.get_log_message_count(), 0);
-        assert_eq!(current_segment.get_data_point_count(), 0);
+        assert_eq!(current_segment.get_metric_point_count(), 0);
       }
       assert_eq!(index.all_segments_map.len(), 2);
 
@@ -691,12 +691,12 @@ mod tests {
         original_segment_num_log_messages
       );
       assert_eq!(
-        original_segment.get_data_point_count(),
-        original_segment_num_data_points
+        original_segment.get_metric_point_count(),
+        original_segment_num_metric_points
       );
 
       let mut new_segment_num_log_messages = 0;
-      let mut new_segment_num_data_points = 0;
+      let mut new_segment_num_metric_points = 0;
 
       // Add one more log message and/or a data point. This will land in the empty current_segment.
       if append_log {
@@ -707,14 +707,14 @@ mod tests {
         );
         new_segment_num_log_messages += 1;
       }
-      if append_data_point {
-        index.append_data_point(
+      if append_metric_point {
+        index.append_metric_point(
           "some_name",
           &HashMap::new(),
           Utc::now().timestamp_millis() as u64,
           1.0,
         );
-        new_segment_num_data_points += 1;
+        new_segment_num_metric_points += 1;
       }
 
       // Force a commit and refresh.
@@ -723,7 +723,7 @@ mod tests {
       original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
 
       let current_segment_log_message_count;
-      let current_segment_data_point_count;
+      let current_segment_metric_point_count;
       {
         // Write these in a separate block so that reference of current_segment from all_segments_map
         // does not persist when commit() is called (and all_segments_map is updated).
@@ -736,12 +736,12 @@ mod tests {
           new_segment_num_log_messages
         );
         assert_eq!(
-          current_segment.get_data_point_count(),
-          new_segment_num_data_points
+          current_segment.get_metric_point_count(),
+          new_segment_num_metric_points
         );
 
         current_segment_log_message_count = current_segment.get_log_message_count();
-        current_segment_data_point_count = current_segment.get_data_point_count();
+        current_segment_metric_point_count = current_segment.get_metric_point_count();
       }
 
       assert_eq!(index.all_segments_map.len(), 2);
@@ -750,8 +750,8 @@ mod tests {
         original_segment_num_log_messages
       );
       assert_eq!(
-        original_segment.get_data_point_count(),
-        original_segment_num_data_points
+        original_segment.get_metric_point_count(),
+        original_segment_num_metric_points
       );
 
       // Commit and refresh a few times. The index should not change.
@@ -774,8 +774,8 @@ mod tests {
         index_final_current_segment.get_log_message_count()
       );
       assert_eq!(
-        current_segment_data_point_count,
-        index_final_current_segment.get_data_point_count()
+        current_segment_metric_point_count,
+        index_final_current_segment.get_metric_point_count()
       );
     }
   }
@@ -887,25 +887,25 @@ mod tests {
   }
 
   #[test]
-  fn test_multiple_segments_data_points() {
+  fn test_multiple_segments_metric_points() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
       index_dir.path().to_str().unwrap(),
-      "test_multiple_segments_data_points"
+      "test_multiple_segments_metric_points"
     );
 
     let mut index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
     let num_segments = 100;
-    let num_data_points =
-      num_segments * (index.metadata.get_approx_max_data_point_count_per_segment() + 1);
+    let num_metric_points =
+      num_segments * (index.metadata.get_approx_max_metric_point_count_per_segment() + 1);
 
-    let mut num_data_points_from_last_commit = 0;
+    let mut num_metric_points_from_last_commit = 0;
     let start_time = Utc::now().timestamp_millis() as u64;
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
-    for _ in 1..=num_data_points {
-      index.append_data_point(
+    for _ in 1..=num_metric_points {
+      index.append_metric_point(
         "some_name",
         &label_map,
         Utc::now().timestamp_millis() as u64,
@@ -913,12 +913,12 @@ mod tests {
       );
 
       // Commit immediately after we have indexed more than APPROX_MAX_DATA_POINT_COUNT_PER_SEGMENT messages.
-      num_data_points_from_last_commit += 1;
-      if num_data_points_from_last_commit
-        > index.metadata.get_approx_max_data_point_count_per_segment()
+      num_metric_points_from_last_commit += 1;
+      if num_metric_points_from_last_commit
+        > index.metadata.get_approx_max_metric_point_count_per_segment()
       {
         index.commit(false);
-        num_data_points_from_last_commit = 0;
+        num_metric_points_from_last_commit = 0;
       }
     }
 
@@ -933,17 +933,17 @@ mod tests {
 
     // The current segment in the index will be empty (i.e. will have 0 data points.)
     // Rest of the segments should have APPROX_MAX_DATA_POINT_COUNT_PER_SEGMENT+1 data points.
-    assert_eq!(current_segment.get_data_point_count(), 0);
+    assert_eq!(current_segment.get_metric_point_count(), 0);
 
     for item in &index.all_segments_map {
       let segment_id = item.key();
       let segment = item.value();
       if *segment_id == index.metadata.get_current_segment_number() {
-        assert_eq!(segment.get_data_point_count(), 0);
+        assert_eq!(segment.get_metric_point_count(), 0);
       } else {
         assert_eq!(
-          segment.get_data_point_count(),
-          index.metadata.get_approx_max_data_point_count_per_segment() + 1
+          segment.get_metric_point_count(),
+          index.metadata.get_approx_max_metric_point_count_per_segment() + 1
         );
       }
     }
@@ -954,7 +954,7 @@ mod tests {
       start_time - 100,
       end_time + 100,
     );
-    assert_eq!(num_data_points, ts.len() as u32)
+    assert_eq!(num_metric_points, ts.len() as u32)
   }
 
   #[test]
@@ -1086,7 +1086,7 @@ mod tests {
         for j in 0..num_appends_per_thread {
           let time = start + j;
           arc_index_clone.append_log_message(time as u64, &HashMap::new(), "message");
-          arc_index_clone.append_data_point("some_name", &label_map, time as u64, 1.0);
+          arc_index_clone.append_metric_point("some_name", &label_map, time as u64, 1.0);
         }
       });
       handles.push(handle);
@@ -1106,10 +1106,10 @@ mod tests {
     let received_logs_len = results.len();
 
     let results = index.get_time_series("label1", "value1", 0, expected_len as u64);
-    let received_data_points_len = results.len();
+    let received_metric_points_len = results.len();
 
     assert_eq!(expected_len, received_logs_len);
-    assert_eq!(expected_len, received_data_points_len);
+    assert_eq!(expected_len, received_metric_points_len);
   }
 
   #[test]

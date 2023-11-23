@@ -9,7 +9,7 @@ use crate::log::log_message::LogMessage;
 use crate::log::postings_block::PostingsBlock;
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
 use crate::log::postings_list::PostingsList;
-use crate::ts::data_point::DataPoint;
+use crate::ts::metric_point::MetricPoint;
 use crate::ts::time_series::TimeSeries;
 use crate::utils::error::TsldbError;
 use crate::utils::range::is_overlap;
@@ -95,8 +95,8 @@ impl Segment {
   }
 
   /// Get the number of data points in this segment.
-  pub fn get_data_point_count(&self) -> u32 {
-    self.metadata.get_data_point_count()
+  pub fn get_metric_point_count(&self) -> u32 {
+    self.metadata.get_metric_point_count()
   }
 
   #[allow(dead_code)]
@@ -167,7 +167,7 @@ impl Segment {
   }
 
   /// Add a time-series data point with specified time and value.
-  pub fn append_data_point(
+  pub fn append_metric_point(
     &self,
     metric_name: &str,
     name_value_labels: &HashMap<String, String>,
@@ -175,7 +175,7 @@ impl Segment {
     value: f64,
   ) -> Result<(), TsldbError> {
     // Increment the number of data points appended so far.
-    self.metadata.fetch_increment_data_point_count();
+    self.metadata.fetch_increment_metric_point_count();
 
     let mut my_labels = Vec::new();
 
@@ -582,7 +582,7 @@ impl Segment {
     label_value: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<DataPoint> {
+  ) -> Vec<MetricPoint> {
     let label = TimeSeries::get_label(label_name, label_value);
     let label_id = self.labels.get(&label);
     let retval = match label_id {
@@ -775,7 +775,7 @@ mod tests {
     let mut label_map: HashMap<String, String> = HashMap::new();
     label_map.insert(other_label_name.to_owned(), other_label_value.to_owned());
     original_segment
-      .append_data_point(
+      .append_metric_point(
         metric_name,
         &label_map,
         Utc::now().timestamp_millis() as u64,
@@ -794,14 +794,14 @@ mod tests {
       original_segment.get_log_message_count()
     );
     assert_eq!(
-      from_disk_segment.get_data_point_count(),
-      original_segment.get_data_point_count()
+      from_disk_segment.get_metric_point_count(),
+      original_segment.get_metric_point_count()
     );
 
     // Test metadata.
     assert!(from_disk_segment.metadata.get_log_message_count() == 1);
     assert!(from_disk_segment.metadata.get_label_count() == 2);
-    assert!(from_disk_segment.metadata.get_data_point_count() == 1);
+    assert!(from_disk_segment.metadata.get_metric_point_count() == 1);
 
     // 6 terms corresponding to each word in the sentence "this is my 1st log message"
     assert!(from_disk_segment.metadata.get_term_count() == 6);
@@ -816,7 +816,7 @@ mod tests {
     from_disk_segment.labels.contains_key(&other_label_key);
 
     // Test time series.
-    assert_eq!(from_disk_segment.metadata.get_data_point_count(), 1);
+    assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 1);
     let result = from_disk_segment.labels.get(&metric_name_key).unwrap();
     let metric_name_id = result.value();
     let other_result = from_disk_segment.labels.get(&other_label_key).unwrap();
@@ -831,7 +831,7 @@ mod tests {
       ts.get_last_block()
         .read()
         .unwrap()
-        .get_time_series_data_points()
+        .get_time_series_metric_points()
         .read()
         .unwrap()
         .get(0)
@@ -869,13 +869,13 @@ mod tests {
   }
 
   #[test]
-  fn test_one_data_point() {
+  fn test_one_metric_point() {
     let segment = Segment::new();
     let time = Utc::now().timestamp_millis() as u64;
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     segment
-      .append_data_point("metric_name_1", &label_map, time, 100.0)
+      .append_metric_point("metric_name_1", &label_map, time, 100.0)
       .unwrap();
 
     assert_eq!(segment.metadata.get_start_time(), time);
@@ -911,9 +911,9 @@ mod tests {
   }
 
   #[test]
-  fn test_concurrent_append_data_points() {
+  fn test_concurrent_append_metric_points() {
     let num_threads = 20;
-    let num_data_points_per_thread = 5000;
+    let num_metric_points_per_thread = 5000;
     let segment = Arc::new(Segment::new());
     let start_time = Utc::now().timestamp_millis() as u64;
     let expected = Arc::new(RwLock::new(Vec::new()));
@@ -925,10 +925,10 @@ mod tests {
       let mut label_map = HashMap::new();
       label_map.insert("label1".to_owned(), "value1".to_owned());
       let handle = thread::spawn(move || {
-        for _ in 0..num_data_points_per_thread {
-          let dp = DataPoint::new(Utc::now().timestamp_millis() as u64, 1.0);
+        for _ in 0..num_metric_points_per_thread {
+          let dp = MetricPoint::new(Utc::now().timestamp_millis() as u64, 1.0);
           segment_arc
-            .append_data_point("metric_name", &label_map, dp.get_time(), dp.get_value())
+            .append_metric_point("metric_name", &label_map, dp.get_time(), dp.get_value())
             .unwrap();
           expected_arc.write().unwrap().push(dp);
         }

@@ -11,7 +11,7 @@ use dashmap::DashMap;
 
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
-use crate::ts::data_point::DataPoint;
+use crate::ts::metric_point::MetricPoint;
 use crate::utils::config::Settings;
 use crate::utils::error::TsldbError;
 
@@ -33,7 +33,7 @@ impl Tsldb {
         let index_dir_path = tsldb_settings.get_index_dir_path();
         let default_index_name = tsldb_settings.get_default_index_name();
         let num_log_messages_threshold = tsldb_settings.get_num_log_messages_threshold();
-        let num_data_points_threshold = tsldb_settings.get_num_data_points_threshold();
+        let num_metric_points_threshold = tsldb_settings.get_num_metric_points_threshold();
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
@@ -56,7 +56,7 @@ impl Tsldb {
               let index = Index::new_with_threshold_params(
                 &default_index_dir_path,
                 num_log_messages_threshold,
-                num_data_points_threshold,
+                num_metric_points_threshold,
               )?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
@@ -78,7 +78,7 @@ impl Tsldb {
             let index = Index::new_with_threshold_params(
               &default_index_dir_path,
               num_log_messages_threshold,
-              num_data_points_threshold,
+              num_metric_points_threshold,
             )?;
             index_map.insert(default_index_name.to_string(), index);
           }
@@ -112,7 +112,7 @@ impl Tsldb {
   }
 
   /// Append a data point.
-  pub fn append_data_point(
+  pub fn append_metric_point(
     &self,
     metric_name: &str,
     labels: &HashMap<String, String>,
@@ -124,7 +124,7 @@ impl Tsldb {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .append_data_point(metric_name, labels, time, value);
+      .append_metric_point(metric_name, labels, time, value);
   }
 
   /// Search log messages for given query and range.
@@ -144,7 +144,7 @@ impl Tsldb {
     label_value: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<DataPoint> {
+  ) -> Vec<MetricPoint> {
     self
       .index_map
       .get(self.get_default_index_name())
@@ -208,16 +208,16 @@ impl Tsldb {
       .settings
       .get_tsldb_settings()
       .get_num_log_messages_threshold();
-    let num_data_points_threshold = self
+    let num_metric_points_threshold = self
       .settings
       .get_tsldb_settings()
-      .get_num_data_points_threshold();
+      .get_num_metric_points_threshold();
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
     let index = Index::new_with_threshold_params(
       &index_dir_path,
       num_log_messages_threshold,
-      num_data_points_threshold,
+      num_metric_points_threshold,
     )?;
 
     self.index_map.insert(index_name.to_string(), index);
@@ -277,7 +277,7 @@ mod tests {
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();
       file
-        .write_all(b"num_data_points_threshold = 10000\n")
+        .write_all(b"num_metric_points_threshold = 10000\n")
         .unwrap();
     }
   }
@@ -309,13 +309,13 @@ mod tests {
     );
 
     // Add a few data points.
-    tsldb.append_data_point(
+    tsldb.append_metric_point(
       "some_metric",
       &HashMap::new(),
       Utc::now().timestamp_millis() as u64,
       1.0,
     );
-    tsldb.append_data_point(
+    tsldb.append_metric_point(
       "some_metric",
       &HashMap::new(),
       Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.

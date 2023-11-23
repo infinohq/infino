@@ -10,7 +10,7 @@ pub struct TsldbSettings {
   index_dir_path: String,
   default_index_name: String,
   num_log_messages_threshold: u32,
-  num_data_points_threshold: u32,
+  num_metric_points_threshold: u32,
 }
 
 impl TsldbSettings {
@@ -34,8 +34,8 @@ impl TsldbSettings {
   /// Get the setting for the threshold number of data points per segment.
   /// That is, if a commit is called on a segment and it has more than the specified number of data points,
   /// a new segment will be created.
-  pub fn get_num_data_points_threshold(&self) -> u32 {
-    self.num_data_points_threshold
+  pub fn get_num_metric_points_threshold(&self) -> u32 {
+    self.num_metric_points_threshold
   }
 
   pub fn get_default_config_file_name() -> &'static str {
@@ -112,7 +112,7 @@ mod tests {
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();
       file
-        .write_all(b"num_data_points_threshold = 10000\n")
+        .write_all(b"num_metric_points_threshold = 10000\n")
         .unwrap();
     }
 
@@ -120,7 +120,7 @@ mod tests {
     let tsldb_settings = settings.get_tsldb_settings();
     assert_eq!(tsldb_settings.get_index_dir_path(), "/var/index");
     assert_eq!(tsldb_settings.get_num_log_messages_threshold(), 1000);
-    assert_eq!(tsldb_settings.get_num_data_points_threshold(), 10000);
+    assert_eq!(tsldb_settings.get_num_metric_points_threshold(), 10000);
 
     // Check settings override using RUN_MODE environment variable.
     env::set_var("RUN_MODE", "SETTINGSTEST");
@@ -134,6 +134,6 @@ mod tests {
     let tsldb_settings = settings.get_tsldb_settings();
     assert_eq!(tsldb_settings.get_index_dir_path(), "/var/index");
     assert_eq!(tsldb_settings.get_num_log_messages_threshold(), 1);
-    assert_eq!(tsldb_settings.get_num_data_points_threshold(), 10000);
+    assert_eq!(tsldb_settings.get_num_metric_points_threshold(), 10000);
   }
 }

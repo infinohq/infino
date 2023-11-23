@@ -2,7 +2,7 @@ use std::collections::BinaryHeap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ts::data_point::DataPoint;
+use crate::ts::metric_point::MetricPoint;
 use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::TsldbError;
 use crate::utils::range::is_overlap;
@@ -93,12 +93,12 @@ impl TimeSeries {
   }
 
   /// Get the time series between give start and end time (both inclusive).
-  pub fn get_time_series(&self, range_start_time: u64, range_end_time: u64) -> Vec<DataPoint> {
+  pub fn get_time_series(&self, range_start_time: u64, range_end_time: u64) -> Vec<MetricPoint> {
     // While each TimeSeriesBlock as well as TimeSeriesBlockCompressed has data points sorted by time, in a
     // multithreaded environment, they might not be sorted across blocks. Hence, we collect all the datapoints in a heap,
     // and return a vector created from the heap, so that the return value is a sorted vector of data points.
 
-    let mut retval: BinaryHeap<DataPoint> = BinaryHeap::new();
+    let mut retval: BinaryHeap<MetricPoint> = BinaryHeap::new();
 
     let initial_times = self.initial_times.read().unwrap();
     let compressed_blocks = self.compressed_blocks.read().unwrap();
@@ -115,9 +115,9 @@ impl TimeSeries {
         if is_overlap(block_start, block_end, range_start_time, range_end_time) {
           let compressed_block = compressed_blocks.get(i).unwrap();
           let block = TimeSeriesBlock::try_from(compressed_block).unwrap();
-          let data_points_in_range =
-            block.get_data_points_in_range(range_start_time, range_end_time);
-          for dp in data_points_in_range {
+          let metric_points_in_range =
+            block.get_metric_points_in_range(range_start_time, range_end_time);
+          for dp in metric_points_in_range {
             retval.push(dp);
           }
         }
@@ -126,9 +126,9 @@ impl TimeSeries {
 
     // Get overlapping data points from the last block.
     if initial_times.last().is_some() {
-      let data_points_in_range =
-        last_block.get_data_points_in_range(range_start_time, range_end_time);
-      for dp in data_points_in_range {
+      let metric_points_in_range =
+        last_block.get_metric_points_in_range(range_start_time, range_end_time);
+      for dp in metric_points_in_range {
         retval.push(dp);
       }
     }
@@ -230,13 +230,13 @@ mod tests {
 
     assert_eq!(ts.last_block.read().unwrap().len(), 1);
     let last_block_lock = ts.last_block.read().unwrap();
-    let time_series_data_points = &*last_block_lock
-      .get_time_series_data_points()
+    let time_series_metric_points = &*last_block_lock
+      .get_time_series_metric_points()
       .read()
       .unwrap();
-    let data_point = time_series_data_points.get(0).unwrap();
-    assert_eq!(data_point.get_time(), 100);
-    assert_eq!(data_point.get_value(), 200.0);
+    let metric_point = time_series_metric_points.get(0).unwrap();
+    assert_eq!(metric_point.get_time(), 100);
+    assert_eq!(metric_point.get_value(), 200.0);
 
     assert_eq!(ts.initial_times.read().unwrap().len(), 1);
     assert_eq!(ts.initial_times.read().unwrap().get(0).unwrap(), &100);
@@ -260,13 +260,13 @@ mod tests {
 
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
       let last_block_lock = ts.last_block.read().unwrap();
-      let time_series_data_points = &*last_block_lock
-        .get_time_series_data_points()
+      let time_series_metric_points = &*last_block_lock
+        .get_time_series_metric_points()
         .read()
         .unwrap();
-      let data_point = time_series_data_points.get(i).unwrap();
-      assert_eq!(data_point.get_time(), i as u64);
-      assert_eq!(data_point.get_value(), i as f64);
+      let metric_point = time_series_metric_points.get(i).unwrap();
+      assert_eq!(metric_point.get_time(), i as u64);
+      assert_eq!(metric_point.get_value(), i as f64);
     }
   }
 
@@ -295,30 +295,30 @@ mod tests {
     let uncompressed =
       TimeSeriesBlock::try_from(ts.compressed_blocks.read().unwrap().get(0).unwrap()).unwrap();
     assert_eq!(uncompressed.len(), BLOCK_SIZE_FOR_TIME_SERIES);
-    let data_points_lock = uncompressed.get_time_series_data_points().read().unwrap();
+    let metric_points_lock = uncompressed.get_time_series_metric_points().read().unwrap();
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
-      let data_point = data_points_lock.get(i).unwrap();
-      assert_eq!(data_point.get_time(), i as u64);
-      assert_eq!(data_point.get_value(), i as f64);
+      let metric_point = metric_points_lock.get(i).unwrap();
+      assert_eq!(metric_point.get_time(), i as u64);
+      assert_eq!(metric_point.get_value(), i as f64);
     }
   }
 
   #[test]
-  fn test_data_points_in_range() {
+  fn test_metric_points_in_range() {
     let num_blocks = 4;
     let ts = TimeSeries::new();
-    let num_data_points = num_blocks * BLOCK_SIZE_FOR_TIME_SERIES as u64;
-    for i in 0..num_data_points {
+    let num_metric_points = num_blocks * BLOCK_SIZE_FOR_TIME_SERIES as u64;
+    for i in 0..num_metric_points {
       ts.append(i as u64, i as f64);
     }
 
     assert_eq!(
-      ts.get_time_series(0, num_data_points - 1).len() as u64,
-      num_data_points
+      ts.get_time_series(0, num_metric_points - 1).len() as u64,
+      num_metric_points
     );
     assert_eq!(
-      ts.get_time_series(0, num_data_points + 1000).len() as u64,
-      num_data_points
+      ts.get_time_series(0, num_metric_points + 1000).len() as u64,
+      num_metric_points
     );
 
     assert_eq!(
@@ -341,7 +341,7 @@ mod tests {
   fn test_concurrent_append() {
     let num_blocks: usize = 10;
     let num_threads = 16;
-    let num_data_points_per_thread = num_blocks * BLOCK_SIZE_FOR_TIME_SERIES / num_threads;
+    let num_metric_points_per_thread = num_blocks * BLOCK_SIZE_FOR_TIME_SERIES / num_threads;
     let ts = Arc::new(TimeSeries::new());
 
     let mut handles = Vec::new();
@@ -351,9 +351,9 @@ mod tests {
       let expected_arc = expected.clone();
       let handle = thread::spawn(move || {
         let mut rng = rand::thread_rng();
-        for _ in 0..num_data_points_per_thread {
+        for _ in 0..num_metric_points_per_thread {
           let time = rng.gen_range(0..10000);
-          let dp = DataPoint::new(time, 1.0);
+          let dp = MetricPoint::new(time, 1.0);
           ts_arc.append(time, 1.0);
           expected_arc.write().unwrap().push(dp);
         }

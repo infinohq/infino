@@ -411,7 +411,7 @@ async fn append_ts(
 
         state
           .tsldb
-          .append_data_point(key, &labels, timestamp, value_f64);
+          .append_metric_point(key, &labels, timestamp, value_f64);
       }
     }
   }
@@ -571,7 +571,7 @@ mod tests {
   use urlencoding::encode;
 
   use tsldb::log::log_message::LogMessage;
-  use tsldb::ts::data_point::DataPoint;
+  use tsldb::ts::metric_point::MetricPoint;
   use tsldb::utils::io::get_joined_path;
   use tsldb::utils::tokenize::FIELD_DELIMITER;
 
@@ -628,7 +628,7 @@ mod tests {
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();
       file
-        .write_all(b"num_data_points_threshold = 10000\n")
+        .write_all(b"num_metric_points_threshold = 10000\n")
         .unwrap();
 
       // Write server section.
@@ -706,7 +706,7 @@ mod tests {
     assert_eq!(log_messages_expected, log_messages_received);
   }
 
-  fn check_data_point_vectors(expected: &Vec<DataPoint>, received: &Vec<DataPoint>) {
+  fn check_metric_point_vectors(expected: &Vec<MetricPoint>, received: &Vec<MetricPoint>) {
     assert_eq!(expected.len(), received.len());
 
     // The time series is sorted by time - and in tests we may insert multiple values at the same time instant.
@@ -726,7 +726,7 @@ mod tests {
     app: &mut Router,
     config_dir_path: &str,
     query: TimeSeriesQuery,
-    data_points_expected: Vec<DataPoint>,
+    metric_points_expected: Vec<MetricPoint>,
   ) {
     let query_start_time = query
       .start_time
@@ -762,9 +762,9 @@ mod tests {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-    let mut data_points_received: Vec<DataPoint> = serde_json::from_slice(&body).unwrap();
+    let mut metric_points_received: Vec<MetricPoint> = serde_json::from_slice(&body).unwrap();
 
-    check_data_point_vectors(&data_points_expected, &data_points_received);
+    check_metric_point_vectors(&metric_points_expected, &metric_points_received);
 
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
@@ -774,10 +774,10 @@ mod tests {
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    data_points_received =
+    metric_points_received =
       refreshed_tsldb.get_time_series(&query.label_name, &query.label_value, start_time, end_time);
 
-    check_data_point_vectors(&data_points_expected, &data_points_received);
+    check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }
 
   // Only run the tests withour rabbitmq, as that is the use-case we are targeting.
@@ -885,18 +885,18 @@ mod tests {
     .await;
 
     // **Part 2**: Test insertion and search of time series data points.
-    let num_data_points = 100;
-    let mut data_points_expected = Vec::new();
+    let num_metric_points = 100;
+    let mut metric_points_expected = Vec::new();
     let name_for_metric_name_label = "__name__";
     let metric_name = "some_metric_name";
 
-    for i in 0..num_data_points {
+    for i in 0..num_metric_points {
       let time = Utc::now().timestamp_millis() as u64;
       let value = i as f64;
-      let data_point = DataPoint::new(time, i as f64);
+      let metric_point = MetricPoint::new(time, i as f64);
 
       let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, metric_name, value);
-      data_points_expected.push(data_point);
+      metric_points_expected.push(metric_point);
 
       // Insert the time series.
       let response = app
@@ -921,7 +921,7 @@ mod tests {
       start_time: None,
       end_time: None,
     };
-    check_time_series(&mut app, config_dir_path, query, data_points_expected).await;
+    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = TimeSeriesQuery {

@@ -25,7 +25,7 @@ pub struct Metadata {
   /// Maximum number of data points per segment. This is only approximate and a segment can
   /// contain more data points than this number depending on the frequecy at which commit() is called.
   #[serde(with = "atomic_cell_serde")]
-  approx_max_data_point_count_per_segment: AtomicCell<u32>,
+  approx_max_metric_point_count_per_segment: AtomicCell<u32>,
 }
 
 impl Metadata {
@@ -34,13 +34,13 @@ impl Metadata {
     segment_count: u32,
     current_segment_number: u32,
     max_log_messges: u32,
-    max_data_points: u32,
+    max_metric_points: u32,
   ) -> Metadata {
     Metadata {
       segment_count: AtomicCell::new(segment_count),
       current_segment_number: AtomicCell::new(current_segment_number),
       approx_max_log_message_count_per_segment: AtomicCell::new(max_log_messges),
-      approx_max_data_point_count_per_segment: AtomicCell::new(max_data_points),
+      approx_max_metric_point_count_per_segment: AtomicCell::new(max_metric_points),
     }
   }
 
@@ -71,8 +71,8 @@ impl Metadata {
   }
 
   /// Get the (approx) max data point count per segment.
-  pub fn get_approx_max_data_point_count_per_segment(&self) -> u32 {
-    self.approx_max_data_point_count_per_segment.load()
+  pub fn get_approx_max_metric_point_count_per_segment(&self) -> u32 {
+    self.approx_max_metric_point_count_per_segment.load()
   }
 
   /// Update the current segment number to the given value.
@@ -81,8 +81,8 @@ impl Metadata {
   }
 
   /// Update the current segment number to the given value.
-  pub fn update_max_data_point_count_per_segment(&self, value: u32) {
-    self.approx_max_data_point_count_per_segment.store(value);
+  pub fn update_max_metric_point_count_per_segment(&self, value: u32) {
+    self.approx_max_metric_point_count_per_segment.store(value);
   }
 }
 
@@ -102,7 +102,7 @@ mod tests {
     assert_eq!(m.get_segment_count(), 10);
     assert_eq!(m.get_current_segment_number(), 5);
     assert_eq!(m.get_approx_max_log_message_count_per_segment(), 1000);
-    assert_eq!(m.get_approx_max_data_point_count_per_segment(), 2000);
+    assert_eq!(m.get_approx_max_metric_point_count_per_segment(), 2000);
   }
 
   #[test]
