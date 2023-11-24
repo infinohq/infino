@@ -42,16 +42,15 @@ def search_logs(infino_server_url, user_query):
     response = client.summarize(text=user_query)
     if response.status_code != 200:
         st.error("Could not execute summarization query")
-        return None, None
+        return None, None, None
 
     # Convert the response to json, and extract summary and dataframe of log results
     results = response.json()
+    summary = results["summary"]
 
     df = pd.DataFrame(results["results"])
     if df.empty:
-        return df, df
-
-    summary = results["summary"]
+        return summary, df, df
 
     # Create a dataframe of error counts by date
     df["date_isoformat"] = df["fields"].apply(lambda x: x.get("date_isoformat"))
@@ -117,7 +116,8 @@ if __name__ == "__main__":
         summary, error_count_df, results_df = search_logs(infino_server_url, user_query)
 
         # Display the summary
-        st.markdown("**Summary**: " + summary)
+        if summary is not None:
+            st.markdown("**Summary** " + summary)
 
         if error_count_df is not None:
             # Display the error graph
