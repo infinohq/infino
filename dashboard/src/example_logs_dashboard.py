@@ -26,29 +26,44 @@ def get_user_query():
     user_query = st.text_input(
         "Enter search text below and hit Enter:", "directory index forbidden"
     )
+    show_summary = st.checkbox("Show Summary", value=False)
 
-    return user_query
+    return user_query, show_summary
 
 
-def search_logs(infino_server_url, user_query):
+def search_logs(infino_server_url, user_query, show_summary):
     """
-    Search infino logs and returns two dataframes:
+    Search infino logs and returns a summary (if show_summary is set) and two dataframes:
     - A datafrme with counts of error logs, grouped by date,
     - A dataframe of results returned by Infino
     """
 
     # Search Infino for the given query
     client = InfinoClient(infino_server_url)
-    response = client.summarize(text=user_query)
-    if response.status_code != 200:
-        st.error("Could not execute summarization query")
-        return None, None, None
+    if show_summary:
+        # show_summary is set, execute the summarization query
+        response = client.summarize(text=user_query)
+        if response.status_code != 200:
+            st.error("Could not execute summarization query")
+            return None, None, None
 
-    # Convert the response to json, and extract summary and dataframe of log results
-    results = response.json()
-    summary = results["summary"]
+        # Convert the response to json, and extract summary and dataframe of log results
+        results = response.json()
+        summary = results["summary"]
 
-    df = pd.DataFrame(results["results"])
+        df = pd.DataFrame(results["results"])
+    else:
+        # show_summary is set, execute the search_logs query
+        response = client.search_log(text=user_query)
+        if response.status_code != 200:
+            st.error("Could not execute search_log query")
+            return None, None, None
+
+        # Convert the response to json, and extract summary and dataframe of log results
+        results = response.json()
+        summary = None
+        df = pd.DataFrame(results)
+
     if df.empty:
         return summary, df, df
 
@@ -106,14 +121,16 @@ if __name__ == "__main__":
     toml_file_path = os.path.join("config", "default.toml")
     infino_server_url = get_server_url(toml_file_path)
 
-    # Get the user search query
-    user_query = get_user_query()
+    # Get the user search query and the flag whether to show summary
+    user_query, show_summary = get_user_query()
 
     if not user_query:
         st.text("Please enter your search query")
     else:
         # Query Infino to create a dataframe to be plotted
-        summary, error_count_df, results_df = search_logs(infino_server_url, user_query)
+        summary, error_count_df, results_df = search_logs(
+            infino_server_url, user_query, show_summary
+        )
 
         # Display the summary
         if summary is not None:
