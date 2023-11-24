@@ -15,9 +15,9 @@ metrics-dashboard:
 
 run-driver: build
 	@ if [ "${OPENAI_API_KEY}" = "" ]; then \
-        echo "Please set OPENAI_API_KEY environment variable"; \
-        exit 1; \
-    fi
+		echo "Please set OPENAI_API_KEY environment variable"; \
+		exit 1; \
+	fi
 	. venv/bin/activate; python src/driver.py
 
 run-driver-do-not-start-infino: build
