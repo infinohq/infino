@@ -25,8 +25,10 @@ def start_infino():
     # Start the Infino server container
     container = docker_client.containers.run(
         "infinohq/infino:latest",
+        name="infino-server-for-dashboard",
         detach=True,
         ports={"3000/tcp": 3000},
+        environment={"OPENAI_API_KEY": os.environ["OPENAI_API_KEY"]},
     )
 
     # Wait for the server to start
