@@ -22,7 +22,7 @@ pub struct Metadata {
   #[serde(with = "atomic_cell_serde")]
   label_count: AtomicCell<u32>,
 
-  /// Number of data points.
+  /// Number of metric points.
   #[serde(with = "atomic_cell_serde")]
   metric_point_count: AtomicCell<u32>,
 
@@ -72,7 +72,7 @@ impl Metadata {
     self.label_count.load()
   }
 
-  /// Get number of data points in this segment.
+  /// Get number of metric points in this segment.
   pub fn get_metric_point_count(&self) -> u32 {
     self.metric_point_count.load()
   }
@@ -102,7 +102,7 @@ impl Metadata {
     self.label_count.fetch_add(1)
   }
 
-  /// Get the current count of data points in this segement and increment it by 1.
+  /// Get the current count of metric points in this segement and increment it by 1.
   pub fn fetch_increment_metric_point_count(&self) -> u32 {
     self.metric_point_count.fetch_add(1)
   }

@@ -1,8 +1,8 @@
 use log::error;
 use serde::{Deserialize, Serialize};
 
-use crate::metric::time_series_block::TimeSeriesBlock;
 use crate::metric::metricutils::compress_metric_point_vector;
+use crate::metric::time_series_block::TimeSeriesBlock;
 use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;
@@ -23,14 +23,14 @@ impl TimeSeriesBlockCompressed {
     }
   }
 
-  /// Create a block from given compressed data points vector.
+  /// Create a block from given compressed metric points vector.
   pub fn new_with_metric_points_compressed_vec(metric_points_compressed_vec: Vec<u8>) -> Self {
     TimeSeriesBlockCompressed {
       metric_points_compressed: RwLock::new(metric_points_compressed_vec),
     }
   }
 
-  /// Get the compressed vector of data points, wrapped in RwLock.
+  /// Get the compressed vector of metric points, wrapped in RwLock.
   pub fn get_metric_points_compressed(&self) -> &RwLock<Vec<u8>> {
     &self.metric_points_compressed
   }
@@ -53,7 +53,7 @@ impl TryFrom<&TimeSeriesBlock> for TimeSeriesBlockCompressed {
   /// Compress the given time series block.
   fn try_from(time_series_block: &TimeSeriesBlock) -> Result<Self, Self::Error> {
     let time_series_metric_points = &*time_series_block
-      .get_time_series_metric_points()
+      .get_metrics_metric_points()
       .read()
       .unwrap();
 
@@ -160,8 +160,8 @@ mod tests {
     let received = TimeSeriesBlock::try_from(&compressed).unwrap();
     assert_eq!(expected, received);
 
-    // Each data points takes 16 bytes, so the memory requirement would be BLOCK_SIZE_FOR_TIME_SERIES*16.
-    let received_metric_points = received.get_time_series_metric_points().read().unwrap();
+    // Each metric points takes 16 bytes, so the memory requirement would be BLOCK_SIZE_FOR_TIME_SERIES*16.
+    let received_metric_points = received.get_metrics_metric_points().read().unwrap();
     let mem_decompressed = size_of_val(&*received_metric_points.as_slice());
     assert_eq!(mem_decompressed, BLOCK_SIZE_FOR_TIME_SERIES * 16);
 

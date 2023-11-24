@@ -1,7 +1,7 @@
-use crate::engine::clickhouse::ClickhouseEngine;
-use crate::engine::es::ElasticsearchEngine;
-use crate::engine::infino::InfinoEngine;
-use crate::engine::infino_rest::InfinoApiClient;
+use crate::logs::clickhouse::ClickhouseEngine;
+use crate::logs::es::ElasticsearchEngine;
+use crate::logs::infino::InfinoEngine;
+use crate::logs::infino_rest::InfinoApiClient;
 use crate::utils::io::get_directory_size;
 
 use std::{
@@ -12,8 +12,8 @@ use structopt::StructOpt;
 use timeseries::{infino::InfinoTsClient, prometheus::PrometheusClient};
 use uuid::Uuid;
 
-mod engine;
-mod timeseries;
+mod logs;
+mod metrics;
 mod utils;
 
 static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
@@ -168,7 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   thread::sleep(time::Duration::from_millis(10000));
   let mut cell_infino_ts_search_time = 0;
   for _ in 1..10 {
-    cell_infino_ts_search_time += infino_ts_client.search().await;
+    cell_infino_ts_search_time += infino_ts_client.search_logs().await;
   }
   cell_infino_ts_search_time = cell_infino_ts_search_time / 10;
   println!(
@@ -190,7 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   thread::sleep(time::Duration::from_millis(10000));
   let mut cell_prometheus_search_time = 0;
   for _ in 1..10 {
-    cell_prometheus_search_time += prometheus_client.search().await;
+    cell_prometheus_search_time += prometheus_client.search_logs().await;
   }
   cell_prometheus_search_time = cell_prometheus_search_time / 10;
   println!(
@@ -257,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   println!("\n\n### Timeseries search latency");
   println!("\nAverage over 10 queries on time series.\n");
-  println!("| Data points | Prometheus | Infino |");
+  println!("| Metric points | Prometheus | Infino |");
   println!("| ----------- | ---------- | ---------- |");
   println!(
     "| Search Latency | {} microseconds | {} microseconds |\n",

@@ -1,7 +1,7 @@
 pub(crate) mod index_manager;
 pub mod log;
-pub(crate) mod segment_manager;
 pub mod metric;
+pub(crate) mod segment_manager;
 pub mod utils;
 
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ use crate::metric::metric_point::MetricPoint;
 use crate::utils::config::Settings;
 use crate::utils::error::CoreDBError;
 
-/// Database for storing time series (ts) and logs (l).
+/// Database for storing telemetry data.
 pub struct CoreDB {
   index_map: DashMap<String, Index>,
   settings: Settings,
@@ -111,7 +111,7 @@ impl CoreDB {
       .append_log_message(time, fields, text);
   }
 
-  /// Append a data point.
+  /// Append a metric point.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
@@ -127,18 +127,23 @@ impl CoreDB {
       .append_metric_point(metric_name, labels, time, value);
   }
 
-  /// Search log messages for given query and range.
-  pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> Vec<LogMessage> {
+  /// Get the log messages for given query and range.
+  pub fn get_logs(
+    &self,
+    query: &str,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Vec<LogMessage> {
     self
       .index_map
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .search(query, range_start_time, range_end_time)
+      .search_logs(query, range_start_time, range_end_time)
   }
 
-  /// Get the time series for given label and range.
-  pub fn get_time_series(
+  /// Get the metric points for given label and range.
+  pub fn get_metrics(
     &self,
     label_name: &str,
     label_value: &str,
@@ -150,7 +155,7 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .get_time_series(label_name, label_value, range_start_time, range_end_time)
+      .get_metrics(label_name, label_value, range_start_time, range_end_time)
   }
 
   /// Commit the index.
@@ -252,7 +257,7 @@ mod tests {
   use chrono::Utc;
   use tempdir::TempDir;
 
-  use crate::utils::config::TsldbSettings;
+  use crate::utils::config::CoreDBSettings;
   use crate::utils::io::get_joined_path;
 
   use super::*;
@@ -262,7 +267,7 @@ mod tests {
     // Create a test config in the directory config_dir_path.
     let config_file_path = get_joined_path(
       config_dir_path,
-      TsldbSettings::get_default_config_file_name(),
+      CoreDBSettings::get_default_config_file_name(),
     );
 
     {
@@ -292,7 +297,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create a new coredb instance.
-    let coredb = Tsldb::new(config_dir_path).expect("Could not create coredb");
+    let coredb = CoreDB::new(config_dir_path).expect("Could not create coredb");
 
     let start = Utc::now().timestamp_millis() as u64;
 
@@ -308,7 +313,7 @@ mod tests {
       "log message 2",
     );
 
-    // Add a few data points.
+    // Add a few metric points.
     coredb.append_metric_point(
       "some_metric",
       &HashMap::new(),
@@ -323,17 +328,17 @@ mod tests {
     );
 
     coredb.commit(true);
-    let coredb = Tsldb::refresh(config_dir_path);
+    let coredb = CoreDB::refresh(config_dir_path);
 
     let end = Utc::now().timestamp_millis() as u64;
 
     // Search for log messages. The order of results should be reverse chronological order.
-    let results = coredb.search("message", start, end);
+    let results = coredb.get_logs("message", start, end);
     assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
     assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
 
-    // Search for data points.
-    let results = coredb.get_time_series(&"__name__", &"some_metric", start, end);
+    // Search for metric points.
+    let results = coredb.get_metrics(&"__name__", &"some_metric", start, end);
     assert_eq!(results.get(0).unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
   }

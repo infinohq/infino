@@ -34,6 +34,9 @@ To run only the logs dashboard (after starting Infino and populating data) - run
 
 To run only the metrics dashboard (after starting Infino and populating data) - run `make metrics-dashboard`
 
+### MacOS Notes
+Ensure you have dependencies virtualenv, pip, pip-tools, pyarrow, liblz4, liblzf, and cmake installed correctly.
+
 ## How does it look?
 
 ![Logs Dashboard](https://media.giphy.com/media/k5inTNm7tVY9MBhG2n/giphy.gif)

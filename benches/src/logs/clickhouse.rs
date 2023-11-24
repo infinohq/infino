@@ -83,7 +83,7 @@ impl ClickhouseEngine {
   }
 
   /// Searches the given term and returns the time required in microseconds
-  pub async fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
+  pub async fn search_logs(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let words: Vec<_> = query.split_whitespace().collect();
 
     // There is no inverted index in Clickhouse, so we need to use the `like` operator for free-text search.
@@ -122,7 +122,7 @@ impl ClickhouseEngine {
   pub async fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
     let mut time = 0;
     for query in queries {
-      time += self.search(query, 0, u64::MAX).await;
+      time += self.search_logs(query, 0, u64::MAX).await;
     }
     return time;
   }

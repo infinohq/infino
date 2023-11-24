@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::metric::constants::BLOCK_SIZE_FOR_TIME_SERIES;
 use crate::metric::metric_point::MetricPoint;
-use crate::metric::time_series_block_compressed::TimeSeriesBlockCompressed;
 use crate::metric::metricutils::decompress_numeric_vector;
+use crate::metric::time_series_block_compressed::TimeSeriesBlockCompressed;
 use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::CoreDBError;
 use crate::utils::sync::RwLock;
@@ -13,7 +13,7 @@ use crate::utils::sync::RwLock;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TimeSeriesBlock {
   #[serde(with = "rwlock_serde")]
-  /// Vector of data points, wrapped in a RwLock.
+  /// Vector of metric points, wrapped in a RwLock.
   metric_points: RwLock<Vec<MetricPoint>>,
 }
 
@@ -29,7 +29,7 @@ impl TimeSeriesBlock {
     }
   }
 
-  /// Create a time series block from the given vector of data points.
+  /// Create a time series block from the given vector of metric points.
   pub fn new_with_metric_points(metric_points_vec: Vec<MetricPoint>) -> Self {
     let metric_points_lock = RwLock::new(metric_points_vec);
 
@@ -43,12 +43,12 @@ impl TimeSeriesBlock {
     self.metric_points.read().unwrap().is_empty()
   }
 
-  /// Get the vector of data points, wrapped in RwLock.
-  pub fn get_time_series_metric_points(&self) -> &RwLock<Vec<MetricPoint>> {
+  /// Get the vector of metric points, wrapped in RwLock.
+  pub fn get_metrics_metric_points(&self) -> &RwLock<Vec<MetricPoint>> {
     &self.metric_points
   }
 
-  /// Append a new data point with given time and value.
+  /// Append a new metric point with given time and value.
   pub fn append(&self, time: u64, value: f64) -> Result<(), CoreDBError> {
     let mut metric_points_lock = self.metric_points.write().unwrap();
 
@@ -71,7 +71,7 @@ impl TimeSeriesBlock {
     Ok(())
   }
 
-  /// Get the data points in the specified range (both range_start_time and range_end_time inclusive).
+  /// Get the metric points in the specified range (both range_start_time and range_end_time inclusive).
   pub fn get_metric_points_in_range(
     &self,
     range_start_time: u64,
@@ -91,7 +91,7 @@ impl TimeSeriesBlock {
     retval
   }
 
-  /// Get the number of data points in this time series block.
+  /// Get the number of metric points in this time series block.
   #[cfg(test)]
   pub fn len(&self) -> usize {
     let metric_points_lock = self.metric_points.read().unwrap();
@@ -173,7 +173,13 @@ mod tests {
       1000
     );
     assert_eq!(
-      tsb.metric_points.read().unwrap().get(0).unwrap().get_value(),
+      tsb
+        .metric_points
+        .read()
+        .unwrap()
+        .get(0)
+        .unwrap()
+        .get_value(),
       1.0
     );
   }
@@ -206,8 +212,8 @@ mod tests {
 
   #[test]
   fn test_concurrent_appends() {
-    // Append BLOCK_SIZE_FOR_TIME_SERIES data points in multiple threads.
-    // Check that all the data points are appended in sorted order.
+    // Append BLOCK_SIZE_FOR_TIME_SERIES metric points in multiple threads.
+    // Check that all the metric points are appended in sorted order.
 
     let num_threads = 16;
     let num_metric_points_per_thread = BLOCK_SIZE_FOR_TIME_SERIES / 16;
@@ -234,10 +240,13 @@ mod tests {
       handle.join().unwrap();
     }
 
-    // Sort the expected values, as the data points should be appended in sorted order.
+    // Sort the expected values, as the metric points should be appended in sorted order.
     (*expected.write().unwrap()).sort();
 
-    assert_eq!(*expected.read().unwrap(), *tsb.metric_points.read().unwrap());
+    assert_eq!(
+      *expected.read().unwrap(),
+      *tsb.metric_points.read().unwrap()
+    );
 
     // If we append more than BLOCK_SIZE, it should result in an error.
     let retval = tsb.append(1000, 1000.0);

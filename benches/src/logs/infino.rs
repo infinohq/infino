@@ -61,9 +61,11 @@ impl InfinoEngine {
   }
 
   /// Searches the given term and returns the time required in microseconds
-  pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
+  pub fn search_logs(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let now = Instant::now();
-    let result = self.coredb.search(query, range_start_time, range_end_time);
+    let result = self
+      .coredb
+      .search_logs(query, range_start_time, range_end_time);
     let elapsed = now.elapsed().as_micros();
     println!(
       "Infino time required for searching query {} is : {} microseconds. Num of results {}",
@@ -82,7 +84,7 @@ impl InfinoEngine {
   pub fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
     queries
       .iter()
-      .map(|query| self.search(query, 0, u64::MAX))
+      .map(|query| self.search_logs(query, 0, u64::MAX))
       .map(|time| time)
       .sum()
   }

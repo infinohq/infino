@@ -15,11 +15,11 @@ class InfinoClientTestCase(unittest.TestCase):
         self.container = self.docker_client.containers.run(
             "infinohq/infino:latest",
             detach=True,
-            ports={"3000/tcp": 3000},
+            ports={"3001/tcp": 3000},
         )
 
         # Wait for the server to start
-        time.sleep(10)
+        time.sleep(20)
 
         # Set the base URL for the client
         os.environ["INFINO_BASE_URL"] = "http://localhost:3000"
@@ -75,20 +75,20 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
         # Test the summarize api.
-        # We haven't set OPENAU_API_KEY while starting the container, so this should fail.
+        # We haven't set OPENAI_API_KEY while starting the container, so this should fail.
         response = self.client.summarize(text="my message")
         self.assert_((400 <= response.status_code) and (response.status_code < 500))
 
-    def test_ts(self):
+    def test_metric(self):
         current_time = int(time.time())
 
-        # Test the append_ts method.
+        # Test the append_metric method.
         payload = {"date": current_time, "some_metric_name": 1.0}
-        response = self.client.append_ts(payload)
+        response = self.client.append_metric(payload)
         self.assertEqual(response.status_code, 200)
 
         payload = {"date": current_time + 1, "some_metric_name": 0.0}
-        response = self.client.append_ts(payload)
+        response = self.client.append_metric(payload)
         self.assertEqual(response.status_code, 200)
 
         # Test the search_metrics method.

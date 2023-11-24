@@ -37,7 +37,12 @@ To address **complexity**, Infino focuses on AI and automation:
 - **Dashboards:** OSS dashboard support + SQL support for BI interfaces like Tableau or Sigma.
 - **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
 
+As you look through the code, it might be useful to consider the below architecture diagram.
+
 ![Architecture](docs/Infino_architecture.png)
+
+Telemetry is stored thusly: *Logs* consist of *log messages* stored in compressed *posting blocks*, *Metrics* consist of *metric points* in compressed *time series blocks*, and *Traces* consist of *trace spans* in compressed *posting blocks*.
+
 
 ## Features
 Note that we are still very much an alpha product but we have lots on the roadmap. Our development at the moment is focused on increasing the performance of the core engine to address **cost** but we are starting to add features to address **complexity**. 
@@ -67,7 +72,7 @@ For now, you need to build the repo. You will first need to:
 
 ### Examples
 
-* [Integration with Fluentbit](examples/fluentbit/README.md) - Learn how to publish logs and metrics to Infino using FluentBit.
+* [Integration with Fluentbit](examples/fluentbit/README.md) - Learn how to publish telemetry to Infino using FluentBit.
 * [LLM monitoring with Langchain](examples/llm-monitoring-langchain/llm-monitoring-langchain.ipynb) - Discover how Infino's callback in Langchain can be used for monitoring requests in real-time. Also checkout the [Langchain <> Infino docs](https://python.langchain.com/docs/ecosystem/integrations/infino).
 * [LLM monitoring with OpenAI](examples/llm-monitoring-openai/llm-monitoring-openai.ipynb) - See an example of monitoring OpenAI's services.
 * [Using Infino's Python client](https://pyup.io/packages/pypi/infinopy/) - Get started with the Python client for Infino and explore its functionalities.

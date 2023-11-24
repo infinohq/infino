@@ -126,7 +126,7 @@ Average across different query types. See the detailed output for granular info.
 
 Average over 10 queries on time series.
 
-| Data points | Prometheus | Infino |
+| Metric points | Prometheus | Infino |
 | ----------- | ---------- | ---------- |
 | Search Latency | 1770 microseconds | 459 microseconds |
 

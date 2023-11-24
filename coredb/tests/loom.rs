@@ -8,9 +8,9 @@ mod loom_tests {
   use loom::sync::Arc;
   use loom::thread;
 
-  use tempdir::TempDir;
   use coredb::utils::io::get_joined_path;
   use coredb::CoreDB;
+  use tempdir::TempDir;
 
   /// Helper function to create a test configuration.
   fn create_test_config(config_dir_path: &str, index_dir_path: &str) {
@@ -25,7 +25,9 @@ mod loom_tests {
       file
         .write_all(b"num_log_messages_threshold = 20\n")
         .unwrap();
-      file.write_all(b"num_metric_points_threshold = 40\n").unwrap();
+      file
+        .write_all(b"num_metric_points_threshold = 40\n")
+        .unwrap();
     }
   }
 
@@ -71,17 +73,17 @@ mod loom_tests {
 
       // Commit and refresh.
       arc_index.commit(true);
-      let coredb = Tsldb::refresh(config_dir_path);
+      let coredb = CoreDB::refresh(config_dir_path);
 
       let expected_len = num_threads * num_appends_per_thread;
 
       // Check whether the number of log messages is as expected.
-      let results = coredb.search("message", 0, expected_len as u64);
+      let results = coredb.get_logs("message", 0, expected_len as u64);
       let received_logs_len = results.len();
       assert_eq!(expected_len, received_logs_len);
 
-      // Check whether the number of data points is as expected.
-      let results = coredb.get_time_series("label1", "value1", 0, expected_len as u64);
+      // Check whether the number of metric points is as expected.
+      let results = coredb.get_metrics("label1", "value1", 0, expected_len as u64);
       let received_metric_points_len = results.len();
       assert_eq!(expected_len, received_metric_points_len);
     })

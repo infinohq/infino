@@ -7,8 +7,8 @@ use log::{debug, error, info};
 
 use crate::index_manager::metadata::Metadata;
 use crate::log::log_message::LogMessage;
-use crate::segment_manager::segment::Segment;
 use crate::metric::metric_point::MetricPoint;
+use crate::segment_manager::segment::Segment;
 use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;
@@ -25,12 +25,12 @@ const METADATA_FILE_NAME: &str = "metadata.bin";
 /// this number will be approximate.
 const DEFAULT_NUM_LOG_MESSAGES_THRESHOLD: u32 = 100_000;
 
-/// Default threshold for the number of max data points per segment. Note that since we create new segments only on commit,
+/// Default threshold for the number of max metric points per segment. Note that since we create new segments only on commit,
 /// this number will be approximate.
-const DEFAULT_NUM_DATA_POINTS_THRESHOLD: u32 = 100_000;
+const DEFAULT_NUM_METRIC_POINTS_THRESHOLD: u32 = 100_000;
 
 #[derive(Debug)]
-/// Index for storing log messages and time series data points.
+/// Index for storing log messages and time series metric points.
 pub struct Index {
   /// Metadata for this index.
   metadata: Metadata,
@@ -47,7 +47,7 @@ pub struct Index {
 }
 
 impl Index {
-  /// Create a new index with default threshold log messages / threshold data points parameters.
+  /// Create a new index with default threshold log messages / threshold metric points parameters.
   /// However, if a directory with the same path already exists and has a metadata file in it,
   /// the function will refresh the existing index instead of creating a new one.
   /// If the refresh process fails, an error will be thrown to indicate the issue.
@@ -55,12 +55,12 @@ impl Index {
     Index::new_with_threshold_params(
       index_dir_path,
       DEFAULT_NUM_LOG_MESSAGES_THRESHOLD,
-      DEFAULT_NUM_DATA_POINTS_THRESHOLD,
+      DEFAULT_NUM_METRIC_POINTS_THRESHOLD,
     )
   }
 
   /// Creates a new index at the specified directory(index_dir_path) path with customizable parameters for
-  /// threshold log messages and data points.
+  /// threshold log messages and metric points.
   /// However, if a directory with the same path already exists and has a metadata file in it,
   /// the function will refresh the existing index instead of creating a new one.
   /// If the refresh process fails, an error will be thrown to indicate the issue.
@@ -69,7 +69,7 @@ impl Index {
     num_log_messages_threshold: u32,
     num_metric_points_threshold: u32,
   ) -> Result<Self, CoreDBError> {
-    info!("Creating index - dir {}, max log messages per segment (approx): {}, max data points per segment {}",
+    info!("Creating index - dir {}, max log messages per segment (approx): {}, max metric points per segment {}",
           index_dir, num_log_messages_threshold, num_metric_points_threshold);
 
     let index_dir_path = Path::new(index_dir);
@@ -80,7 +80,7 @@ impl Index {
       // index_dir_path has metadata file, refresh the index instead of creating new one
       match Self::refresh(index_dir) {
         Ok(index) => {
-          // Update metadata with max log message and data points
+          // Update metadata with max log message and metric points
           index
             .metadata
             .update_max_log_message_count_per_segment(num_log_messages_threshold);
@@ -112,7 +112,12 @@ impl Index {
 
     // Create an initial segment.
     let segment = Segment::new();
-    let metadata = Metadata::new(0, 0, num_log_messages_threshold, num_metric_points_threshold);
+    let metadata = Metadata::new(
+      0,
+      0,
+      num_log_messages_threshold,
+      num_metric_points_threshold,
+    );
 
     // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
@@ -161,7 +166,7 @@ impl Index {
       .unwrap();
   }
 
-  /// Append a data point to this index.
+  /// Append a metric point to this index.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
@@ -170,7 +175,7 @@ impl Index {
     value: f64,
   ) {
     debug!(
-      "Appending data point: metric name: {}, labels: {:?}, time: {}, value: {}",
+      "Appending metric point: metric name: {}, labels: {:?}, time: {}, value: {}",
       metric_name, labels, time, value
     );
 
@@ -178,14 +183,19 @@ impl Index {
     let current_segment_ref = self.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
-    // Append the data point to the current segment.
+    // Append the metric point to the current segment.
     current_segment
       .append_metric_point(metric_name, labels, time, value)
       .unwrap();
   }
 
   /// Search for given query in the given time range.
-  pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> Vec<LogMessage> {
+  pub fn search_logs(
+    &self,
+    query: &str,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Vec<LogMessage> {
     debug!(
       "Search logs for query: {}, range_start_time: {}, range_end_time: {}",
       query, range_start_time, range_end_time
@@ -200,7 +210,7 @@ impl Index {
     for segment_number in segment_numbers {
       let segment = self.all_segments_map.get(&segment_number).unwrap();
 
-      let mut results = segment.search(query, range_start_time, range_end_time);
+      let mut results = segment.search_logs(query, range_start_time, range_end_time);
       retval.append(&mut results);
     }
     retval.sort();
@@ -222,7 +232,7 @@ impl Index {
   }
 
   /// Helper function to check if the given segment is 'too big'. In other words, it returns 'true' if the
-  /// number of log messages or the number of data points in this segment exceeded the corresponding max values.
+  /// number of log messages or the number of metric points in this segment exceeded the corresponding max values.
   fn is_too_big(&self, segment_number: u32) -> bool {
     // Get the segment corresponding to the segment_number.
     let segment_ref = self.all_segments_map.get(&segment_number).unwrap();
@@ -231,7 +241,9 @@ impl Index {
     // Check if this segment is 'too big', and return a boolean indicating the same.
     segment.get_log_message_count() > self.metadata.get_approx_max_log_message_count_per_segment()
       || segment.get_metric_point_count()
-        > self.metadata.get_approx_max_metric_point_count_per_segment()
+        > self
+          .metadata
+          .get_approx_max_metric_point_count_per_segment()
   }
 
   /// Commit the segment to disk.
@@ -369,7 +381,7 @@ impl Index {
 
   /// Get time series corresponding to given label name and value, within the given range (inclusive of
   /// both start and end time).
-  pub fn get_time_series(
+  pub fn get_metrics(
     &self,
     label_name: &str,
     label_value: &str,
@@ -382,7 +394,7 @@ impl Index {
     for segment_number in segment_numbers {
       let segment = self.all_segments_map.get(&segment_number).unwrap();
       let mut metric_points =
-        segment.get_time_series(label_name, label_value, range_start_time, range_end_time);
+        segment.get_metrics(label_name, label_value, range_start_time, range_end_time);
       retval.append(&mut metric_points);
     }
     retval
@@ -505,7 +517,7 @@ mod tests {
   }
 
   #[test]
-  fn test_basic_search() {
+  fn test_basic_search_logs() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -536,7 +548,7 @@ mod tests {
 
     // For the query "message", we should expect num_log_messages-1 results.
     // We collect each message in received_log_messages and then compare it with expected_log_messages.
-    let mut results = index.search("message", 0, u64::MAX);
+    let mut results = index.search_logs("message", 0, u64::MAX);
     assert_eq!(results.len(), num_log_messages - 1);
     let mut received_log_messages: Vec<String> = Vec::new();
     for i in 1..num_log_messages {
@@ -545,7 +557,7 @@ mod tests {
     assert_eq!(expected_log_messages.sort(), received_log_messages.sort());
 
     // For the query "thisisunique", we should expect only 1 result.
-    results = index.search("thisisunique", 0, u64::MAX);
+    results = index.search_logs("thisisunique", 0, u64::MAX);
     assert_eq!(results.len(), 1);
     assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
   }
@@ -571,14 +583,14 @@ mod tests {
 
     let metric_name_label = "__name__";
     println!("{}", metric_name_label);
-    let received_metric_points = index.get_time_series(metric_name_label, "some_name", 0, u64::MAX);
+    let received_metric_points = index.get_metrics(metric_name_label, "some_name", 0, u64::MAX);
 
     assert_eq!(expected_metric_points, received_metric_points);
   }
 
   #[test_case(true, false; "when only logs are appended")]
-  #[test_case(false, true; "when only data points are appended")]
-  #[test_case(true, true; "when both logs and data points are appended")]
+  #[test_case(false, true; "when only metric points are appended")]
+  #[test_case(true, true; "when both logs and metric points are appended")]
   fn test_two_segments(append_log: bool, append_metric_point: bool) {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
     for _ in 0..100 {
@@ -606,7 +618,9 @@ mod tests {
         0
       };
       let mut original_segment_num_metric_points = if append_metric_point {
-        index.metadata.get_approx_max_metric_point_count_per_segment()
+        index
+          .metadata
+          .get_approx_max_metric_point_count_per_segment()
       } else {
         0
       };
@@ -650,7 +664,7 @@ mod tests {
         );
       }
 
-      // Now add a log message and/or a data point. This will still land in the one and only segment in the index.
+      // Now add a log message and/or a metric point. This will still land in the one and only segment in the index.
       if append_log {
         index.append_log_message(
           Utc::now().timestamp_millis() as u64,
@@ -698,7 +712,7 @@ mod tests {
       let mut new_segment_num_log_messages = 0;
       let mut new_segment_num_metric_points = 0;
 
-      // Add one more log message and/or a data point. This will land in the empty current_segment.
+      // Add one more log message and/or a metric point. This will land in the empty current_segment.
       if append_log {
         index.append_log_message(
           Utc::now().timestamp_millis() as u64,
@@ -881,7 +895,7 @@ mod tests {
     for i in 1..num_message_suffixes {
       let message = &format!("{}{}", message_prefix, i);
       let expected_count = 2u32.pow(i);
-      let results = index.search(message, 0, Utc::now().timestamp_millis() as u64);
+      let results = index.search_logs(message, 0, Utc::now().timestamp_millis() as u64);
       assert_eq!(expected_count, results.len() as u32);
     }
   }
@@ -897,8 +911,11 @@ mod tests {
 
     let mut index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
     let num_segments = 100;
-    let num_metric_points =
-      num_segments * (index.metadata.get_approx_max_metric_point_count_per_segment() + 1);
+    let num_metric_points = num_segments
+      * (index
+        .metadata
+        .get_approx_max_metric_point_count_per_segment()
+        + 1);
 
     let mut num_metric_points_from_last_commit = 0;
     let start_time = Utc::now().timestamp_millis() as u64;
@@ -912,10 +929,12 @@ mod tests {
         100.0,
       );
 
-      // Commit immediately after we have indexed more than APPROX_MAX_DATA_POINT_COUNT_PER_SEGMENT messages.
+      // Commit immediately after we have indexed more than APPROX_MAX_METRIC_POINT_COUNT_PER_SEGMENT messages.
       num_metric_points_from_last_commit += 1;
       if num_metric_points_from_last_commit
-        > index.metadata.get_approx_max_metric_point_count_per_segment()
+        > index
+          .metadata
+          .get_approx_max_metric_point_count_per_segment()
       {
         index.commit(false);
         num_metric_points_from_last_commit = 0;
@@ -931,8 +950,8 @@ mod tests {
     // The last commit will create an empty segment, so we will have number of segments to be 1 plus num_segments.
     assert_eq!(index.all_segments_map.len() as u32, num_segments + 1);
 
-    // The current segment in the index will be empty (i.e. will have 0 data points.)
-    // Rest of the segments should have APPROX_MAX_DATA_POINT_COUNT_PER_SEGMENT+1 data points.
+    // The current segment in the index will be empty (i.e. will have 0 metric points.)
+    // Rest of the segments should have APPROX_MAX_METRIC_POINT_COUNT_PER_SEGMENT+1 metric points.
     assert_eq!(current_segment.get_metric_point_count(), 0);
 
     for item in &index.all_segments_map {
@@ -943,12 +962,15 @@ mod tests {
       } else {
         assert_eq!(
           segment.get_metric_point_count(),
-          index.metadata.get_approx_max_metric_point_count_per_segment() + 1
+          index
+            .metadata
+            .get_approx_max_metric_point_count_per_segment()
+            + 1
         );
       }
     }
 
-    let ts = index.get_time_series(
+    let ts = index.get_metrics(
       "label_name_1",
       "label_value_1",
       start_time - 100,
@@ -1102,10 +1124,10 @@ mod tests {
     let index = Index::refresh(&index_dir_path).unwrap();
     let expected_len = num_threads * num_appends_per_thread;
 
-    let results = index.search("message", 0, expected_len as u64);
+    let results = index.search_logs("message", 0, expected_len as u64);
     let received_logs_len = results.len();
 
-    let results = index.get_time_series("label1", "value1", 0, expected_len as u64);
+    let results = index.get_metrics("label1", "value1", 0, expected_len as u64);
     let received_metric_points_len = results.len();
 
     assert_eq!(expected_len, received_logs_len);
@@ -1129,7 +1151,7 @@ mod tests {
 
     // Create one more new index using same dir location
     let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
-    let search_result = index.search(
+    let search_result = index.search_logs(
       "some_message_1",
       start_time as u64,
       Utc::now().timestamp_millis() as u64,

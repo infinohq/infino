@@ -33,6 +33,7 @@ def start_infino():
 
     # Wait for the server to start
     time.sleep(10)
+    print("waiting")
 
     # Set the base URL for the client
     os.environ["INFINO_BASE_URL"] = "http://localhost:3000"
@@ -114,7 +115,7 @@ def publish_metrics(client):
         data.append({"date": date, "disk_usage": disk_usage})
         time.sleep(0.1)
 
-    client.append_ts(data)
+    client.append_metric(data)
 
 
 def run_command(command):

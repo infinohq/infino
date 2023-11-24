@@ -31,8 +31,8 @@ impl CoreDBSettings {
     self.num_log_messages_threshold
   }
 
-  /// Get the setting for the threshold number of data points per segment.
-  /// That is, if a commit is called on a segment and it has more than the specified number of data points,
+  /// Get the setting for the threshold number of metric points per segment.
+  /// That is, if a commit is called on a segment and it has more than the specified number of metric points,
   /// a new segment will be created.
   pub fn get_num_metric_points_threshold(&self) -> u32 {
     self.num_metric_points_threshold

@@ -23,7 +23,7 @@ const LABEL_SEPARATOR: &str = "~";
 const METRIC_NAME_PREFIX: &str = "__name__";
 
 /// Represents a time series. The time series consists of time series blocks, each containing BLOCK_SIZE_FOR_TIME_SERIES
-/// data points. All but the last block are compressed. In order to quickly get to the right block, a vector of
+/// metric points. All but the last block are compressed. In order to quickly get to the right block, a vector of
 /// initial values in each block is also stored (also called 'skip pointer' in literature).
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TimeSeries {
@@ -93,10 +93,10 @@ impl TimeSeries {
   }
 
   /// Get the time series between give start and end time (both inclusive).
-  pub fn get_time_series(&self, range_start_time: u64, range_end_time: u64) -> Vec<MetricPoint> {
-    // While each TimeSeriesBlock as well as TimeSeriesBlockCompressed has data points sorted by time, in a
+  pub fn get_metrics(&self, range_start_time: u64, range_end_time: u64) -> Vec<MetricPoint> {
+    // While each TimeSeriesBlock as well as TimeSeriesBlockCompressed has metric points sorted by time, in a
     // multithreaded environment, they might not be sorted across blocks. Hence, we collect all the datapoints in a heap,
-    // and return a vector created from the heap, so that the return value is a sorted vector of data points.
+    // and return a vector created from the heap, so that the return value is a sorted vector of metric points.
 
     let mut retval: BinaryHeap<MetricPoint> = BinaryHeap::new();
 
@@ -104,7 +104,7 @@ impl TimeSeries {
     let compressed_blocks = self.compressed_blocks.read().unwrap();
     let last_block = self.last_block.read().unwrap();
 
-    // Get overlapping data points from the compressed blocks.
+    // Get overlapping metric points from the compressed blocks.
     if initial_times.len() > 1 {
       for i in 0..initial_times.len() - 1 {
         let block_start = *initial_times.get(i).unwrap();
@@ -124,7 +124,7 @@ impl TimeSeries {
       }
     }
 
-    // Get overlapping data points from the last block.
+    // Get overlapping metric points from the last block.
     if initial_times.last().is_some() {
       let metric_points_in_range =
         last_block.get_metric_points_in_range(range_start_time, range_end_time);
@@ -230,10 +230,7 @@ mod tests {
 
     assert_eq!(ts.last_block.read().unwrap().len(), 1);
     let last_block_lock = ts.last_block.read().unwrap();
-    let time_series_metric_points = &*last_block_lock
-      .get_time_series_metric_points()
-      .read()
-      .unwrap();
+    let time_series_metric_points = &*last_block_lock.get_metrics_metric_points().read().unwrap();
     let metric_point = time_series_metric_points.get(0).unwrap();
     assert_eq!(metric_point.get_time(), 100);
     assert_eq!(metric_point.get_value(), 200.0);
@@ -260,10 +257,7 @@ mod tests {
 
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
       let last_block_lock = ts.last_block.read().unwrap();
-      let time_series_metric_points = &*last_block_lock
-        .get_time_series_metric_points()
-        .read()
-        .unwrap();
+      let time_series_metric_points = &*last_block_lock.get_metrics_metric_points().read().unwrap();
       let metric_point = time_series_metric_points.get(i).unwrap();
       assert_eq!(metric_point.get_time(), i as u64);
       assert_eq!(metric_point.get_value(), i as f64);
@@ -295,7 +289,7 @@ mod tests {
     let uncompressed =
       TimeSeriesBlock::try_from(ts.compressed_blocks.read().unwrap().get(0).unwrap()).unwrap();
     assert_eq!(uncompressed.len(), BLOCK_SIZE_FOR_TIME_SERIES);
-    let metric_points_lock = uncompressed.get_time_series_metric_points().read().unwrap();
+    let metric_points_lock = uncompressed.get_metrics_metric_points().read().unwrap();
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
       let metric_point = metric_points_lock.get(i).unwrap();
       assert_eq!(metric_point.get_time(), i as u64);
@@ -313,22 +307,21 @@ mod tests {
     }
 
     assert_eq!(
-      ts.get_time_series(0, num_metric_points - 1).len() as u64,
+      ts.get_metrics(0, num_metric_points - 1).len() as u64,
       num_metric_points
     );
     assert_eq!(
-      ts.get_time_series(0, num_metric_points + 1000).len() as u64,
+      ts.get_metrics(0, num_metric_points + 1000).len() as u64,
       num_metric_points
     );
 
     assert_eq!(
-      ts.get_time_series(0, BLOCK_SIZE_FOR_TIME_SERIES as u64)
-        .len(),
+      ts.get_metrics(0, BLOCK_SIZE_FOR_TIME_SERIES as u64).len(),
       BLOCK_SIZE_FOR_TIME_SERIES + 1
     );
 
     assert_eq!(
-      ts.get_time_series(
+      ts.get_metrics(
         BLOCK_SIZE_FOR_TIME_SERIES as u64,
         BLOCK_SIZE_FOR_TIME_SERIES as u64 + 10
       )
@@ -373,7 +366,7 @@ mod tests {
     assert_eq!(last_block.len(), BLOCK_SIZE_FOR_TIME_SERIES);
     assert_eq!(initial_times.len(), num_blocks);
 
-    let received = ts.get_time_series(0, u64::MAX);
+    let received = ts.get_metrics(0, u64::MAX);
     (*expected.write().unwrap()).sort();
     assert_eq!(*expected.read().unwrap(), received);
   }

@@ -113,7 +113,7 @@ impl PrometheusClient {
     server_task.abort();
   }
 
-  pub async fn search(&self) -> u128 {
+  pub async fn search_logs(&self) -> u128 {
     let query_url = "http://localhost:9090/api/v1/query?query=cpu_usage";
     let now = Instant::now();
     let response = reqwest::get(query_url).await;

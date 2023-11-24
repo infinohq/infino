@@ -45,14 +45,14 @@ impl InfinoTsClient {
     InfinoTsClient {}
   }
 
-  pub async fn search(&self) -> u128 {
+  pub async fn search_logs(&self) -> u128 {
     let query_url =
       "http://localhost:3000/search_metrics?label_name=__name__&&label_value=cpu_usage&start_time=0";
     let now = Instant::now();
     let response = reqwest::get(query_url).await;
     let elapsed = now.elapsed();
     println!(
-      "Infino Time series time required for searching {:.2?}",
+      "Infino metrics - time required for searching {:.2?}",
       elapsed
     );
 

@@ -222,10 +222,10 @@ impl ElasticsearchEngine {
   }
 
   /// Searches the given term and returns the time required in microseconds
-  pub async fn search(&self, query: &str) -> u128 {
+  pub async fn search_logs(&self, query: &str) -> u128 {
     let response = self
       .client
-      .search(SearchParts::Index(&[INDEX_NAME]))
+      .search_logs(SearchParts::Index(&[INDEX_NAME]))
       .from(0)
       // FIXME: ES not returning more than 10k results, if there are more than 10k results it panics
       .size(10000)
@@ -258,7 +258,7 @@ impl ElasticsearchEngine {
   pub async fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
     let mut time = 0;
     for query in queries {
-      time += self.search(query).await;
+      time += self.search_logs(query).await;
     }
     return time;
   }

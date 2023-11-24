@@ -2,13 +2,13 @@ use std::cmp::Ordering;
 
 use serde::{Deserialize, Serialize};
 
-/// Represents a data point in time series.
+/// Represents a metric point in time series.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MetricPoint {
   /// Timestamp from epoch.
   time: u64,
 
-  /// Value for this data point.
+  /// Value for this metric point.
   value: f64,
 }
 
@@ -54,7 +54,7 @@ impl Clone for MetricPoint {
 impl PartialEq for MetricPoint {
   #[inline]
   fn eq(&self, other: &MetricPoint) -> bool {
-    // Two data points are equal if their times are equal, and their values are either equal or are NaN.
+    // Two metric points are equal if their times are equal, and their values are either equal or are NaN.
 
     if self.time == other.time {
       if self.value.is_nan() {

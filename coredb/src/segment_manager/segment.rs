@@ -94,7 +94,7 @@ impl Segment {
     self.metadata.get_label_count()
   }
 
-  /// Get the number of data points in this segment.
+  /// Get the number of metric points in this segment.
   pub fn get_metric_point_count(&self) -> u32 {
     self.metadata.get_metric_point_count()
   }
@@ -166,7 +166,7 @@ impl Segment {
     Ok(())
   }
 
-  /// Add a time-series data point with specified time and value.
+  /// Add a time-series metric point with specified time and value.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
@@ -174,7 +174,7 @@ impl Segment {
     time: u64,
     value: f64,
   ) -> Result<(), CoreDBError> {
-    // Increment the number of data points appended so far.
+    // Increment the number of metric points appended so far.
     self.metadata.fetch_increment_metric_point_count();
 
     let mut my_labels = Vec::new();
@@ -297,7 +297,12 @@ impl Segment {
 
   /// Search the segment for the given query. If a query has multiple terms, it is by default taken as AND.
   /// Boolean queries are not yet supported.
-  pub fn search(&self, query: &str, range_start_time: u64, range_end_time: u64) -> Vec<LogMessage> {
+  pub fn search_logs(
+    &self,
+    query: &str,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Vec<LogMessage> {
     // TODO: make the implementation below more performant by not decompressing every block in every postings list.
     let query_lowercase = query.to_lowercase();
     let terms = tokenize(&query_lowercase);
@@ -576,7 +581,7 @@ impl Segment {
 
   // TODO: This api needs to be made richer (filter on multiple tags, metric name, prefix/regex, etc)
   /// Get the time series for the given label name/value, within the given (inclusive) time range.
-  pub fn get_time_series(
+  pub fn get_metrics(
     &self,
     label_name: &str,
     label_value: &str,
@@ -588,7 +593,7 @@ impl Segment {
     let retval = match label_id {
       Some(label_id) => {
         let ts = self.time_series.get(&label_id).unwrap();
-        ts.get_time_series(range_start_time, range_end_time)
+        ts.get_metrics(range_start_time, range_end_time)
       }
       None => Vec::new(),
     };
@@ -633,14 +638,14 @@ mod tests {
 
     let segment = Segment::new();
     assert!(segment.is_empty());
-    assert!(segment.search("doesnotexist", 0, u64::MAX).is_empty());
+    assert!(segment.search_logs("doesnotexist", 0, u64::MAX).is_empty());
   }
 
   #[test]
   fn test_default_segment() {
     let segment = Segment::default();
     assert!(segment.is_empty());
-    assert!(segment.search("doesnotexist", 0, u64::MAX).is_empty());
+    assert!(segment.search_logs("doesnotexist", 0, u64::MAX).is_empty());
   }
 
   #[test]
@@ -678,7 +683,7 @@ mod tests {
       .contains_key(&format!("key1{}val1", FIELD_DELIMITER)));
 
     // Test search.
-    let mut results = segment.search("this", 0, u64::MAX);
+    let mut results = segment.search_logs("this", 0, u64::MAX);
     assert!(results.len() == 2);
 
     assert!(
@@ -690,42 +695,42 @@ mod tests {
         || results.get(1).unwrap().get_text() == "this is my 2nd log message"
     );
 
-    results = segment.search("blah", start, end);
+    results = segment.search_logs("blah", start, end);
     assert!(results.len() == 1);
     assert_eq!(results.get(0).unwrap().get_text(), "blah");
 
-    results = segment.search(&format!("key1{}val1", FIELD_DELIMITER), start, end);
+    results = segment.search_logs(&format!("key1{}val1", FIELD_DELIMITER), start, end);
     assert!(results.len() == 1);
     assert_eq!(results.get(0).unwrap().get_text(), "blah");
 
     // Test search for a term that does not exist in the segment.
-    results = segment.search("__doesnotexist__", start, end);
+    results = segment.search_logs("__doesnotexist__", start, end);
     assert!(results.is_empty());
 
     // Test multi-term queries, which are implicit AND.
-    results = segment.search("blah message", start, end);
+    results = segment.search_logs("blah message", start, end);
     assert!(results.is_empty());
 
-    results = segment.search("log message", 0, u64::MAX);
+    results = segment.search_logs("log message", 0, u64::MAX);
     assert_eq!(results.len(), 2);
 
-    results = segment.search("log message this", 0, u64::MAX);
+    results = segment.search_logs("log message this", 0, u64::MAX);
     assert_eq!(results.len(), 2);
 
-    results = segment.search("1st message", start, end);
+    results = segment.search_logs("1st message", start, end);
     assert_eq!(results.len(), 1);
 
-    results = segment.search("1st log message", start, end);
+    results = segment.search_logs("1st log message", start, end);
     assert_eq!(results.len(), 1);
 
-    results = segment.search(&format!("blah key1{}val1", FIELD_DELIMITER), start, end);
+    results = segment.search_logs(&format!("blah key1{}val1", FIELD_DELIMITER), start, end);
     assert_eq!(results.len(), 1);
 
     // Test with ranges that do not exist in the index.
-    results = segment.search("log message", start - 1000, start - 100);
+    results = segment.search_logs("log message", start - 1000, start - 100);
     assert_eq!(results.len(), 0);
 
-    results = segment.search("log message", end + 100, end + 1000);
+    results = segment.search_logs("log message", end + 100, end + 1000);
     assert_eq!(results.len(), 0);
   }
 
@@ -747,7 +752,7 @@ mod tests {
     assert!(segment.terms.contains_key("test"));
 
     // Test search.
-    let results = segment.search("test:", 0, u64::MAX);
+    let results = segment.search_logs("test:", 0, u64::MAX);
     assert!(results.len() == 1);
     assert_eq!(
       results.get(0).unwrap().get_text(),
@@ -831,7 +836,7 @@ mod tests {
       ts.get_last_block()
         .read()
         .unwrap()
-        .get_time_series_metric_points()
+        .get_metrics_metric_points()
         .read()
         .unwrap()
         .get(0)
@@ -841,14 +846,14 @@ mod tests {
     );
 
     // Test search.
-    let mut results = from_disk_segment.search("this", 0, u64::MAX);
+    let mut results = from_disk_segment.search_logs("this", 0, u64::MAX);
     assert_eq!(results.len(), 1);
     assert_eq!(
       results.get(0).unwrap().get_text(),
       "this is my 1st log message"
     );
 
-    results = from_disk_segment.search("blah", 0, u64::MAX);
+    results = from_disk_segment.search_logs("blah", 0, u64::MAX);
     assert!(results.is_empty());
 
     // Test metadata for labels.
@@ -883,7 +888,7 @@ mod tests {
 
     assert_eq!(
       segment
-        .get_time_series("label_name_1", "label_value_1", time - 100, time + 100)
+        .get_metrics("label_name_1", "label_value_1", time - 100, time + 100)
         .len(),
       1
     )
@@ -946,7 +951,7 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
 
     let mut expected = (*expected.read().unwrap()).clone();
-    let received = segment.get_time_series("label1", "value1", start_time - 100, end_time + 100);
+    let received = segment.get_metrics("label1", "value1", start_time - 100, end_time + 100);
 
     expected.sort();
     assert_eq!(expected, received);
@@ -1007,7 +1012,7 @@ mod tests {
     assert!(segment.terms.contains_key("message"));
 
     // Test search.
-    let results = segment.search("hello", 0, u64::MAX);
+    let results = segment.search_logs("hello", 0, u64::MAX);
     assert_eq!(results.len(), 2);
     assert_eq!(
       results.get(0).unwrap().get_text(),

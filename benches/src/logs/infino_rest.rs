@@ -62,14 +62,14 @@ impl InfinoApiClient {
 
     let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino REST time required for insertion: {} microseconds",
+      "Infino REST time required for log insertions: {} microseconds",
       elapsed
     );
     return elapsed;
   }
 
   /// Searches the given term and returns the time required in microseconds
-  pub async fn search(&self, text: &str, range_start_time: u64, range_end_time: u64) -> u128 {
+  pub async fn search_logs(&self, text: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let query_url = &format!(
       "http://localhost:3000/search_logs?text={}&start_time={}&end_time={}",
       text, range_start_time, range_end_time
@@ -79,7 +79,7 @@ impl InfinoApiClient {
     let response = reqwest::get(query_url).await;
     let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino REST time required for searching query {} is : {} microseconds",
+      "Infino REST time required for logs search query {} is : {} microseconds",
       text, elapsed
     );
 
@@ -101,7 +101,7 @@ impl InfinoApiClient {
   pub async fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
     let mut time = 0;
     for query in queries {
-      time += self.search(query, 0, u64::MAX).await;
+      time += self.search_logs(query, 0, u64::MAX).await;
     }
     return time;
   }

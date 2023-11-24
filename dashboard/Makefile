@@ -2,7 +2,7 @@ venv:
 	python3 -m venv venv
 
 build:
-	. venv/bin/activate; pip-compile -o requirements.txt; pip install -r requirements.txt
+	. venv/bin/activate; cd venv; pip-compile -o ../requirements.txt; pip install -r ../requirements.txt; cd ..
 
 check:
 	black src tests

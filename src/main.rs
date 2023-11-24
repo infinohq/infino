@@ -334,7 +334,17 @@ async fn append_log(
   Ok(())
 }
 
-/// Append metrics to coredb.
+/// Deprecated function for backwards-compatibility to append metric data to coredb.
+#[allow(dead_code)]
+#[deprecated(note = "Use append_metric instead")]
+async fn append_ts(
+  State(state): State<Arc<AppState>>,
+  Json(ts_json): Json<serde_json::Value>,
+) -> Result<(), (StatusCode, String)> {
+  append_metric(axum::extract::State(state), axum::Json(ts_json)).await
+}
+
+/// Append metric data to coredb.
 async fn append_metric(
   State(state): State<Arc<AppState>>,
   Json(ts_json): Json<serde_json::Value>,
@@ -391,7 +401,7 @@ async fn append_metric(
       }
     }
 
-    // Find individual data points in this time series entry and insert in coredb.
+    // Find individual metric points in this time series entry and insert in coredb.
     for (key, value) in obj.iter() {
       if key != timestamp_key && key != labels_key {
         let value_f64: f64;
@@ -419,6 +429,20 @@ async fn append_metric(
   Ok(())
 }
 
+/// Deprecated function for backwards-compatibility to search log data in coredb.
+#[allow(dead_code)]
+#[deprecated(note = "Use search_logs instead")]
+async fn search_log(
+  State(state): State<Arc<AppState>>,
+  Query(logs_query): Query<LogsQuery>,
+) -> String {
+  search_logs(
+    axum::extract::State(state),
+    axum::extract::Query(logs_query),
+  )
+  .await
+}
+
 /// Search logs in coredb.
 async fn search_logs(
   State(state): State<Arc<AppState>>,
@@ -426,7 +450,7 @@ async fn search_logs(
 ) -> String {
   debug!("Searching logs: {:?}", logs_query);
 
-  let results = state.coredb.search(
+  let results = state.coredb.get_logs(
     &logs_query.text,
     // The default for range start time is 0.
     logs_query.start_time.unwrap_or(0),
@@ -449,7 +473,7 @@ async fn summarize(
   // Number of log message to summarize.
   let k = summarize_query.k.unwrap_or(100);
 
-  let results = state.coredb.search(
+  let results = state.coredb.get_logs(
     &summarize_query.text,
     // The default for range start time is 0.
     summarize_query.start_time.unwrap_or(0),
@@ -472,12 +496,26 @@ async fn summarize(
       let mut msg: String = "Could not summarize logs.".to_owned();
       let is_var_set = std::env::var_os("OPENAI_API_KEY").is_some();
       if !is_var_set {
-        msg = format!("{} Pl check if OPENAU_API_KEY is set.", msg);
+        msg = format!("{} Pl check if OPENAI_API_KEY is set.", msg);
       }
 
       Err((StatusCode::FAILED_DEPENDENCY, msg))
     }
   }
+}
+
+/// Deprecated function for backwards-compatibility to search metric data in coredb.
+#[allow(dead_code)]
+#[deprecated(note = "Use search_metrics instead")]
+async fn search_ts(
+  State(state): State<Arc<AppState>>,
+  Query(metrics_query): Query<MetricsQuery>,
+) -> String {
+  search_metrics(
+    axum::extract::State(state),
+    axum::extract::Query(metrics_query),
+  )
+  .await
 }
 
 /// Search metrics in coredb.
@@ -487,7 +525,7 @@ async fn search_metrics(
 ) -> String {
   debug!("Searching metrics: {:?}", metrics_query);
 
-  let results = state.coredb.get_time_series(
+  let results = state.coredb.get_metrics(
     &metrics_query.label_name,
     &metrics_query.label_value,
     // The default for range start time is 0.
@@ -700,7 +738,7 @@ mod tests {
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    log_messages_received = refreshed_coredb.search(search_text, start_time, end_time);
+    log_messages_received = refreshed_coredb.get_logs(search_text, start_time, end_time);
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);
@@ -775,7 +813,7 @@ mod tests {
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
     metric_points_received =
-      refreshed_coredb.get_time_series(&query.label_name, &query.label_value, start_time, end_time);
+      refreshed_coredb.get_metrics(&query.label_name, &query.label_value, start_time, end_time);
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }
@@ -913,7 +951,7 @@ mod tests {
       assert_eq!(response.status(), StatusCode::OK);
     }
 
-    // Check whether we get all the data points back when the start and end_times are not specified
+    // Check whether we get all the metric points back when the start and end_times are not specified
     // (i.e., they will default to 0 and to current time respectively).
     let query = MetricsQuery {
       label_name: name_for_metric_name_label.to_owned(),

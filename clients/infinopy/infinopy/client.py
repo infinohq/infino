@@ -1,7 +1,6 @@
 import os
 import requests
 
-
 class InfinoClient:
     def __init__(self, base_url=None):
         if base_url:
@@ -22,8 +21,8 @@ class InfinoClient:
         path = "/append_log"
         return self._request("POST", path, json=payload)
 
-    def append_ts(self, payload):
-        path = "/append_ts"
+    def append_metric(self, payload):
+        path = "/append_metric"
         return self._request("POST", path, json=payload)
 
     def search_logs(self, text, start_time=None, end_time=None):
