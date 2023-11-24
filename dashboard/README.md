@@ -36,6 +36,6 @@ To run only the metrics dashboard (after starting Infino and populating data) - 
 
 ## How does it look?
 
-![Logs Dashboard](https://media.giphy.com/media/uLRbCWdEBQn1OPj8CV/giphy.gif)
+![Logs Dashboard](https://media.giphy.com/media/k5inTNm7tVY9MBhG2n/giphy.gif)
 
 ![Metrics Dashboard](https://media.giphy.com/media/uslUuVC1eBlG0UL6yi/giphy.gif)
