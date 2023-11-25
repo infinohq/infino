@@ -18,14 +18,14 @@ def get_user_query():
     # Enable one of the inputs below, based on whether search-as-you-type is needed.
 
     # Display text input that auto-refereshes, enabling search-as-you-type
-    # user_query = st_keyup(
-    #    "Enter search text:", value="directory index forbidden", debounce=500, key="0"
-    # )
+    user_query = st_keyup(
+        "Enter search text:", value="directory index forbidden", debounce=500, key="0"
+    )
 
     # If search-as-you-type functionality is not needed, use a regular text input (instead of st_keyup above)
-    user_query = st.text_input(
-        "Enter search text below and hit Enter:", "directory index forbidden"
-    )
+    #user_query = st.text_input(
+    #    "Enter search text below and hit Enter:", "directory index forbidden"
+    #)
     show_summary = st.checkbox("Show Summary", value=False)
 
     return user_query, show_summary
@@ -54,9 +54,9 @@ def search_logs(infino_server_url, user_query, show_summary):
         df = pd.DataFrame(results["results"])
     else:
         # show_summary is set, execute the search_logs query
-        response = client.search_log(text=user_query)
+        response = client.search_logs(text=user_query)
         if response.status_code != 200:
-            st.error("Could not execute search_log query")
+            st.error("Could not execute search_logs query")
             return None, None, None
 
         # Convert the response to json, and extract summary and dataframe of log results

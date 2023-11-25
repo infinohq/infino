@@ -21,8 +21,8 @@ use tokio::time::{sleep, Duration};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use tsldb::log::log_message::LogMessage;
-use tsldb::Tsldb;
+use coredb::log::log_message::LogMessage;
+use coredb::CoreDB;
 use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
@@ -34,15 +34,24 @@ use crate::utils::shutdown::shutdown_signal;
 struct AppState {
   // The queue will be created only if use_rabbitmq = yes is specified in server config.
   queue: Option<RabbitMQ>,
-  tsldb: Tsldb,
+  coredb: CoreDB,
   settings: Settings,
   openai_helper: OpenAIHelper,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-/// Represents search query.
-struct SearchQuery {
+/// Represents a logs query.
+struct LogsQuery {
   text: String,
+  start_time: Option<u64>,
+  end_time: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+/// Represents a metrics query.
+struct MetricsQuery {
+  label_name: String,
+  label_value: String,
   start_time: Option<u64>,
   end_time: Option<u64>,
 }
@@ -63,23 +72,14 @@ struct SummarizeQueryResponse {
   results: Vec<LogMessage>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-/// Represents a query to time series db.
-struct TimeSeriesQuery {
-  label_name: String,
-  label_value: String,
-  start_time: Option<u64>,
-  end_time: Option<u64>,
-}
-
-/// Periodically commits tsldb (typically called in a thread, so that tsldb can be asyncronously committed).
+/// Periodically commits coredb (typically called in a thread, so that coredb can be asyncronously committed).
 async fn commit_in_loop(
   state: Arc<AppState>,
   commit_interval_in_seconds: u32,
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
   loop {
-    state.tsldb.commit(true);
+    state.coredb.commit(true);
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
@@ -99,10 +99,10 @@ async fn app(
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
-  // Create a new tsldb.
-  let tsldb = match Tsldb::new(config_dir_path) {
-    Ok(tsldb) => tsldb,
-    Err(err) => panic!("Unable to initialize tsldb with err {}", err),
+  // Create a new coredb.
+  let coredb = match CoreDB::new(config_dir_path) {
+    Ok(coredb) => coredb,
+    Err(err) => panic!("Unable to initialize coredb with err {}", err),
   };
 
   // Create RabbitMQ to store incoming requests.
@@ -130,7 +130,7 @@ async fn app(
 
   let shared_state = Arc::new(AppState {
     queue,
-    tsldb,
+    coredb,
     settings,
     openai_helper,
   });
@@ -138,7 +138,7 @@ async fn app(
   let server_settings = shared_state.settings.get_server_settings();
   let commit_interval_in_seconds = server_settings.get_commit_interval_in_seconds();
 
-  // Start a thread to periodically commit tsldb.
+  // Start a thread to periodically commit coredb.
   info!("Spawning new thread to periodically commit");
   let commit_thread_shutdown_flag = Arc::new(Mutex::new(false));
   let commit_thread_handle = tokio::spawn(commit_in_loop(
@@ -152,14 +152,14 @@ async fn app(
     // GET methods
     .route("/get_index_dir", get(get_index_dir))
     .route("/ping", get(ping))
-    .route("/search_log", get(search_log))
-    .route("/search_ts", get(search_ts))
+    .route("/search_logs", get(search_logs))
+    .route("/search_metrics", get(search_metrics))
     .route("/summarize", get(summarize))
     //---
     // POST methods
     // TODO: all the APIs should have index name
     .route("/append_log", post(append_log))
-    .route("/append_ts", post(append_ts))
+    .route("/append_metric", post(append_metric))
     .route("/flush", post(flush))
     // POST methods to create and delete index
     .route("/:index_name", put(create_index))
@@ -273,7 +273,7 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
   Ok(timestamp)
 }
 
-/// Append log data to tsldb.
+/// Append log data to coredb.
 async fn append_log(
   State(state): State<Arc<AppState>>,
   Json(log_json): Json<serde_json::Value>,
@@ -328,18 +328,29 @@ async fn append_log(
       }
     }
 
-    state.tsldb.append_log_message(timestamp, &fields, &text);
+    state.coredb.append_log_message(timestamp, &fields, &text);
   }
 
   Ok(())
 }
 
-/// Append time series data to tsldb.
+/// Deprecated function for backwards-compatibility to append metric data to coredb.
+/// TODO: Remove this function by Jan 2024.
+#[allow(dead_code)]
+#[deprecated(note = "Use append_metric instead")]
 async fn append_ts(
   State(state): State<Arc<AppState>>,
   Json(ts_json): Json<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
-  debug!("Appending time series entry: {:?}", ts_json);
+  append_metric(axum::extract::State(state), axum::Json(ts_json)).await
+}
+
+/// Append metric data to coredb.
+async fn append_metric(
+  State(state): State<Arc<AppState>>,
+  Json(ts_json): Json<serde_json::Value>,
+) -> Result<(), (StatusCode, String)> {
+  debug!("Appending metric entry: {:?}", ts_json);
 
   let is_queue = state.queue.is_some();
 
@@ -391,7 +402,7 @@ async fn append_ts(
       }
     }
 
-    // Find individual data points in this time series entry and insert in tsldb.
+    // Find individual metric points in this time series entry and insert in coredb.
     for (key, value) in obj.iter() {
       if key != timestamp_key && key != labels_key {
         let value_f64: f64;
@@ -410,8 +421,8 @@ async fn append_ts(
         }
 
         state
-          .tsldb
-          .append_data_point(key, &labels, timestamp, value_f64);
+          .coredb
+          .append_metric_point(key, &labels, timestamp, value_f64);
       }
     }
   }
@@ -419,19 +430,34 @@ async fn append_ts(
   Ok(())
 }
 
-/// Search logs in tsldb.
+/// Deprecated function for backwards-compatibility to search log data in coredb.
+/// TODO: Remove this function by Jan 2024.
+#[allow(dead_code)]
+#[deprecated(note = "Use search_logs instead")]
 async fn search_log(
   State(state): State<Arc<AppState>>,
-  Query(search_query): Query<SearchQuery>,
+  Query(logs_query): Query<LogsQuery>,
 ) -> String {
-  debug!("Searching log: {:?}", search_query);
+  search_logs(
+    axum::extract::State(state),
+    axum::extract::Query(logs_query),
+  )
+  .await
+}
 
-  let results = state.tsldb.search(
-    &search_query.text,
+/// Search logs in coredb.
+async fn search_logs(
+  State(state): State<Arc<AppState>>,
+  Query(logs_query): Query<LogsQuery>,
+) -> String {
+  debug!("Searching logs: {:?}", logs_query);
+
+  let results = state.coredb.get_logs(
+    &logs_query.text,
     // The default for range start time is 0.
-    search_query.start_time.unwrap_or(0),
+    logs_query.start_time.unwrap_or(0),
     // The default for range end time is the current time.
-    search_query
+    logs_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
@@ -439,7 +465,7 @@ async fn search_log(
   serde_json::to_string(&results).expect("Could not convert search results to json")
 }
 
-/// Search and summarize logs in tsldb.
+/// Search and summarize logs in coredb.
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
@@ -449,7 +475,7 @@ async fn summarize(
   // Number of log message to summarize.
   let k = summarize_query.k.unwrap_or(100);
 
-  let results = state.tsldb.search(
+  let results = state.coredb.get_logs(
     &summarize_query.text,
     // The default for range start time is 0.
     summarize_query.start_time.unwrap_or(0),
@@ -472,7 +498,7 @@ async fn summarize(
       let mut msg: String = "Could not summarize logs.".to_owned();
       let is_var_set = std::env::var_os("OPENAI_API_KEY").is_some();
       if !is_var_set {
-        msg = format!("{} Pl check if OPENAU_API_KEY is set.", msg);
+        msg = format!("{} Pl check if OPENAI_API_KEY is set.", msg);
       }
 
       Err((StatusCode::FAILED_DEPENDENCY, msg))
@@ -480,20 +506,35 @@ async fn summarize(
   }
 }
 
-/// Search time series.
+/// Deprecated function for backwards-compatibility to search metric data in coredb.
+/// TODO: Remove this function by Jan 2024.
+#[allow(dead_code)]
+#[deprecated(note = "Use search_metrics instead")]
 async fn search_ts(
   State(state): State<Arc<AppState>>,
-  Query(time_series_query): Query<TimeSeriesQuery>,
+  Query(metrics_query): Query<MetricsQuery>,
 ) -> String {
-  debug!("Searching time series: {:?}", time_series_query);
+  search_metrics(
+    axum::extract::State(state),
+    axum::extract::Query(metrics_query),
+  )
+  .await
+}
 
-  let results = state.tsldb.get_time_series(
-    &time_series_query.label_name,
-    &time_series_query.label_value,
+/// Search metrics in coredb.
+async fn search_metrics(
+  State(state): State<Arc<AppState>>,
+  Query(metrics_query): Query<MetricsQuery>,
+) -> String {
+  debug!("Searching metrics: {:?}", metrics_query);
+
+  let results = state.coredb.get_metrics(
+    &metrics_query.label_name,
+    &metrics_query.label_value,
     // The default for range start time is 0.
-    time_series_query.start_time.unwrap_or(0_u64),
+    metrics_query.start_time.unwrap_or(0_u64),
     // The default for range end time is the current time.
-    time_series_query
+    metrics_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
@@ -504,14 +545,14 @@ async fn search_ts(
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
   // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
-  state.tsldb.commit(true);
+  state.coredb.commit(true);
 
   Ok(())
 }
 
-/// Get index directory used by tsldb.
+/// Get index directory used by coredb.
 async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
-  state.tsldb.get_index_dir()
+  state.coredb.get_index_dir()
 }
 
 /// Ping to check if the server is up.
@@ -519,14 +560,14 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
   "OK".to_owned()
 }
 
-/// Create a new index in tsldb with given name.
+/// Create a new index in coredb with given name.
 async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,
 ) -> Result<(), (StatusCode, String)> {
   debug!("Creating index {}", index_name);
 
-  let result = state.tsldb.create_index(&index_name);
+  let result = state.coredb.create_index(&index_name);
 
   if result.is_err() {
     let msg = format!("Could not create index {}", index_name);
@@ -544,7 +585,7 @@ async fn delete_index(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Deleting index {}", index_name);
 
-  let result = state.tsldb.delete_index(&index_name);
+  let result = state.coredb.delete_index(&index_name);
   if result.is_err() {
     let msg = format!("Could not delete index {}", index_name);
     error!("{} with error: {}", msg, result.err().unwrap());
@@ -570,16 +611,16 @@ mod tests {
   use tower::Service;
   use urlencoding::encode;
 
-  use tsldb::log::log_message::LogMessage;
-  use tsldb::ts::data_point::DataPoint;
-  use tsldb::utils::io::get_joined_path;
-  use tsldb::utils::tokenize::FIELD_DELIMITER;
+  use coredb::log::log_message::LogMessage;
+  use coredb::metric::metric_point::MetricPoint;
+  use coredb::utils::io::get_joined_path;
+  use coredb::utils::tokenize::FIELD_DELIMITER;
 
   use super::*;
 
   #[derive(Debug, Deserialize, Serialize)]
-  /// Represents an entry in the time series append request.
-  struct TimeSeriesEntry {
+  /// Represents an entry in the metric append request.
+  struct Metric {
     time: u64,
     metric_name_value: HashMap<String, f64>,
     labels: HashMap<String, String>,
@@ -620,15 +661,15 @@ mod tests {
 
       let mut file = File::create(config_file_path).unwrap();
 
-      // Write tsldb section.
-      file.write_all(b"[tsldb]\n").unwrap();
+      // Write coredb section.
+      file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name.as_bytes()).unwrap();
       file
         .write_all(b"num_log_messages_threshold = 1000\n")
         .unwrap();
       file
-        .write_all(b"num_data_points_threshold = 10000\n")
+        .write_all(b"num_metric_points_threshold = 10000\n")
         .unwrap();
 
       // Write server section.
@@ -651,7 +692,7 @@ mod tests {
     app: &mut Router,
     config_dir_path: &str,
     search_text: &str,
-    query: SearchQuery,
+    query: LogsQuery,
     log_messages_expected: Vec<LogMessage>,
   ) {
     let query_start_time = query
@@ -668,7 +709,7 @@ mod tests {
       query_end_time
     );
 
-    let uri = format!("/search_log?{}", query_string);
+    let uri = format!("/search_logs?{}", query_string);
     info!("Checking for uri: {}", uri);
 
     // Now call search to get the documents.
@@ -695,18 +736,18 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
+    let refreshed_coredb = CoreDB::refresh(config_dir_path);
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    log_messages_received = refreshed_tsldb.search(search_text, start_time, end_time);
+    log_messages_received = refreshed_coredb.get_logs(search_text, start_time, end_time);
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);
   }
 
-  fn check_data_point_vectors(expected: &Vec<DataPoint>, received: &Vec<DataPoint>) {
+  fn check_metric_point_vectors(expected: &Vec<MetricPoint>, received: &Vec<MetricPoint>) {
     assert_eq!(expected.len(), received.len());
 
     // The time series is sorted by time - and in tests we may insert multiple values at the same time instant.
@@ -725,8 +766,8 @@ mod tests {
   async fn check_time_series(
     app: &mut Router,
     config_dir_path: &str,
-    query: TimeSeriesQuery,
-    data_points_expected: Vec<DataPoint>,
+    query: MetricsQuery,
+    metric_points_expected: Vec<MetricPoint>,
   ) {
     let query_start_time = query
       .start_time
@@ -742,7 +783,7 @@ mod tests {
       query_end_time
     );
 
-    let uri = format!("/search_ts?{}", query_string);
+    let uri = format!("/search_metrics?{}", query_string);
     info!("Checking for uri: {}", uri);
 
     // Now call search to get the documents.
@@ -762,22 +803,22 @@ mod tests {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-    let mut data_points_received: Vec<DataPoint> = serde_json::from_slice(&body).unwrap();
+    let mut metric_points_received: Vec<MetricPoint> = serde_json::from_slice(&body).unwrap();
 
-    check_data_point_vectors(&data_points_expected, &data_points_received);
+    check_metric_point_vectors(&metric_points_expected, &metric_points_received);
 
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_tsldb = Tsldb::refresh(config_dir_path);
+    let refreshed_coredb = CoreDB::refresh(config_dir_path);
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    data_points_received =
-      refreshed_tsldb.get_time_series(&query.label_name, &query.label_value, start_time, end_time);
+    metric_points_received =
+      refreshed_coredb.get_metrics(&query.label_name, &query.label_value, start_time, end_time);
 
-    check_data_point_vectors(&data_points_expected, &data_points_received);
+    check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }
 
   // Only run the tests withour rabbitmq, as that is the use-case we are targeting.
@@ -855,7 +896,7 @@ mod tests {
 
     let search_query = &format!("value1 field34{}value4", FIELD_DELIMITER);
 
-    let query = SearchQuery {
+    let query = LogsQuery {
       start_time: None,
       end_time: None,
       text: search_query.to_owned(),
@@ -870,7 +911,7 @@ mod tests {
     .await;
 
     // End time in this query is too old - this should yield 0 results.
-    let query_too_old = SearchQuery {
+    let query_too_old = LogsQuery {
       start_time: Some(1),
       end_time: Some(10000),
       text: search_query.to_owned(),
@@ -884,26 +925,26 @@ mod tests {
     )
     .await;
 
-    // **Part 2**: Test insertion and search of time series data points.
-    let num_data_points = 100;
-    let mut data_points_expected = Vec::new();
+    // **Part 2**: Test insertion and search of time series metric points.
+    let num_metric_points = 100;
+    let mut metric_points_expected = Vec::new();
     let name_for_metric_name_label = "__name__";
     let metric_name = "some_metric_name";
 
-    for i in 0..num_data_points {
+    for i in 0..num_metric_points {
       let time = Utc::now().timestamp_millis() as u64;
       let value = i as f64;
-      let data_point = DataPoint::new(time, i as f64);
+      let metric_point = MetricPoint::new(time, i as f64);
 
       let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, metric_name, value);
-      data_points_expected.push(data_point);
+      metric_points_expected.push(metric_point);
 
-      // Insert the time series.
+      // Insert the metric.
       let response = app
         .call(
           Request::builder()
             .method(http::Method::POST)
-            .uri("/append_ts")
+            .uri("/append_metric")
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
             .body(Body::from(json_str))
             .unwrap(),
@@ -913,18 +954,18 @@ mod tests {
       assert_eq!(response.status(), StatusCode::OK);
     }
 
-    // Check whether we get all the data points back when the start and end_times are not specified
+    // Check whether we get all the metric points back when the start and end_times are not specified
     // (i.e., they will default to 0 and to current time respectively).
-    let query = TimeSeriesQuery {
+    let query = MetricsQuery {
       label_name: name_for_metric_name_label.to_owned(),
       label_value: metric_name.to_owned(),
       start_time: None,
       end_time: None,
     };
-    check_time_series(&mut app, config_dir_path, query, data_points_expected).await;
+    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await;
 
     // End time in this query is too old - this should yield 0 results.
-    let query_too_old = TimeSeriesQuery {
+    let query_too_old = MetricsQuery {
       label_name: name_for_metric_name_label.to_owned(),
       label_value: metric_name.to_owned(),
       start_time: Some(1),

@@ -67,7 +67,7 @@ impl RabbitMQSettings {
 }
 
 #[derive(Debug, Deserialize)]
-/// Settings for Tsldb, read from config file.
+/// Settings for Core, read from config file.
 pub struct Settings {
   server: ServerSettings,
   rabbitmq: Option<RabbitMQSettings>,
@@ -100,7 +100,7 @@ impl Settings {
     &self.server
   }
 
-  /// Get tsldb settings.
+  /// Get coredb settings.
   pub fn get_rabbitmq_settings(&self) -> &RabbitMQSettings {
     let rabbitmq_settings = self
       .rabbitmq

@@ -1,24 +1,25 @@
 
 <h1 align="center">
-    InfinoPy - Infino Python Client
+   InfinoPy
 </h1>
 <p align="center">
-    InfinoPy - Python Client for Infino, a Fast and Scalable time service to store the time series and logs
+  Python Client for Infino, a scalable telemetry store. </br>
 </p>
 
-If you haven't explored Infino yet, please refer to:
- - [Infino git repo](https://github.com/infinohq/infino)
 
 ## Quick Start
 
-`infinopy` is a python client for Infino. Infino is a fast and scalable service to store the time series and logs data.
+`infinopy` is a python client for Infino. Infino is a scalable telemetry store to reduce the cost and complexity of observability. If you haven't explored Infino yet, please refer to the [Infino git repo](https://github.com/infinohq/infino).
 
-### Installation
 
+### Install InfinoPy Client
 ```bash
 pip install infinopy
 ```
 
+### Notes for testing
+You should ensure your environment is up-to-date if you want to edit/test the client: [OpenSSL3](https://ports.macports.org/port/openssl/), [Python3](https://www.python.org/downloads/macos/), Virtualenv, Setuptools. If you've changed any of the core Infino code you'll also need to run **make docker-build** to build the docker image that the infino server needs to run in for unit tests.
+
 ### Example
 
-The documentation is still in progress. In the meantime, the [this test](https://github.com/infinohq/infino/blob/python-client/clients/python/infino/tests/test_infino.py) illustrates how to use InfinoPy - the Python client for Infino.
+The documentation is still in progress. In the meantime, [this test](https://github.com/infinohq/infino/blob/python-client/clients/python/infino/tests/test_infino.py) illustrates how to use InfinoPy - the Python client for Infino.

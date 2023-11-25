@@ -114,7 +114,7 @@ def publish_metrics(client):
         data.append({"date": date, "disk_usage": disk_usage})
         time.sleep(0.1)
 
-    client.append_ts(data)
+    client.append_metric(data)
 
 
 def run_command(command):

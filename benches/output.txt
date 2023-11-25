@@ -3,7 +3,7 @@
      Running `target/release/benches`
 
 
-***Now running Infino via tsldb library***
+***Now running Infino via coredb library***
 Infino time required for insertion: 29839987 microseconds
 Checking size of directory: index
 Infino index size = 34354516 bytes
@@ -45,20 +45,6 @@ Clickhouse query is select * from test_logs.test_logs where text LIKE '%Jun%' AN
 Clickhouse time required for searching query Jun 09 06:07:05 2005] [notice] LDAP: is : 40041 microseconds
 Clickhouse query is select * from test_logs.test_logs where text LIKE '%unable%' AND text LIKE '%to%' AND text LIKE '%stat%' and time > 0 and time < 18446744073709551615 order by time desc
 Clickhouse time required for searching query unable to stat is : 23914 microseconds
-
-
-***Now running Tantivy***
-Tantivy time required for insertion: 2958619 microseconds
-Checking size of directory: /tmp/tantivy-index-stored-ca203834-5449-494d-b36a-3ee09bf9e86b
-Tantivy index size with STORED flag = 76919719 bytes
-Tantivy time required for searching 1 word query is : 20705 microseconds. Num of results 100000
-Tantivy time required for searching 2 word query is : 46 microseconds. Num of results 0
-Tantivy time required for searching 5 word query is : 11260 microseconds. Num of results 12579
-Tantivy time required for searching 7 word query is : 306 microseconds. Num of results 0
-Tantivy time required for searching 3 word query is : 29188 microseconds. Num of results 100000
-Tantivy time required for searching 6 word query is : 655 microseconds. Num of results 0
-Tantivy time required for searching 3 word query is : 43 microseconds. Num of results 0
-
 
 ***Now running Elasticsearch***
 Elasticsearch time required for insertion: 141224285 microseconds
@@ -140,7 +126,7 @@ Average across different query types. See the detailed output for granular info.
 
 Average over 10 queries on time series.
 
-| Data points | Prometheus | Infino |
+| Metric points | Prometheus | Infino |
 | ----------- | ---------- | ---------- |
 | Search Latency | 1770 microseconds | 459 microseconds |
 

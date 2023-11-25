@@ -40,7 +40,7 @@ jobs:
   #     - run: cargo clippy --all-targets --all-features -- -D warnings
 
 
-  # Skipping TSLDB tests till the config errors are solved
+  # Skipping COREDB tests till the config errors are solved
   cargo-tests:
     name: "Run Cargo Tests"
     runs-on: ubuntu-latest

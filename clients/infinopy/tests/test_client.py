@@ -2,8 +2,8 @@ import os
 import unittest
 import time
 import docker
-from infinopy import InfinoClient
 
+from infinopy import InfinoClient
 
 class InfinoClientTestCase(unittest.TestCase):
     @classmethod
@@ -19,7 +19,7 @@ class InfinoClientTestCase(unittest.TestCase):
         )
 
         # Wait for the server to start
-        time.sleep(10)
+        time.sleep(20)
 
         # Set the base URL for the client
         os.environ["INFINO_BASE_URL"] = "http://localhost:3000"
@@ -51,8 +51,16 @@ class InfinoClientTestCase(unittest.TestCase):
         response = self.client.append_log(payload)
         self.assertEqual(response.status_code, 200)
 
-        # Test the search_log method.
+        # Test the search_logs method.
         # Query for text that is present in both the payloads.
+        response = self.client.search_logs(
+            text="my message", start_time=current_time - 10, end_time=current_time + 10
+        )
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 2)
+
+        # Test backwards-compatibility
         response = self.client.search_log(
             text="my message", start_time=current_time - 10, end_time=current_time + 10
         )
@@ -61,7 +69,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
         # Query for text that is present in only one payload.
-        response = self.client.search_log(
+        response = self.client.search_logs(
             text="two", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
@@ -69,29 +77,58 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(len(results), 1)
 
         # Test that default values for start and end time work.
-        response = self.client.search_log(text="my message")
+        response = self.client.search_logs(text="my message")
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 2)
 
         # Test the summarize api.
-        # We haven't set OPENAU_API_KEY while starting the container, so this should fail.
-        response = self.client.summarize(text="my message")
-        self.assert_((400 <= response.status_code) and (response.status_code < 500))
+        # We haven't set OPENAI_API_KEY while starting the container, so this should fail.
+        response = self.client.summarize(
+          text="my message",
+          start_time=current_time - 10,
+          end_time=current_time + 10,
+        )
+        self.assertTrue((400 <= response.status_code) and (response.status_code < 500))
 
-    def test_ts(self):
+    def test_metric(self):
         current_time = int(time.time())
 
-        # Test the append_ts method.
+        # Test the append_metric method.
         payload = {"date": current_time, "some_metric_name": 1.0}
-        response = self.client.append_ts(payload)
+        response = self.client.append_metric(payload)
         self.assertEqual(response.status_code, 200)
 
         payload = {"date": current_time + 1, "some_metric_name": 0.0}
+        response = self.client.append_metric(payload)
+        self.assertEqual(response.status_code, 200)
+
+        # Test backwards-compatibility
+        payload = {"date": current_time, "some_metric_name": 2.0}
         response = self.client.append_ts(payload)
         self.assertEqual(response.status_code, 200)
 
-        # Test the search_ts method.
+        # Test the search_metrics method.
+        response = self.client.search_metrics(
+            label_name="__name__",
+            label_value="some_metric_name",
+            start_time=current_time - 10,
+            end_time=current_time + 10,
+        )
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 3)
+
+        # Test that default values for start and end time work.
+        response = self.client.search_metrics(
+            label_name="__name__",
+            label_value="some_metric_name",
+        )
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 3)
+
+        # Test backwards-compatibility
         response = self.client.search_ts(
             label_name="__name__",
             label_value="some_metric_name",
@@ -100,17 +137,8 @@ class InfinoClientTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
-        self.assertEqual(len(results), 2)
-
-        # Test that default values for start and end time work.
-        response = self.client.search_ts(
-            label_name="__name__",
-            label_value="some_metric_name",
-        )
-        self.assertEqual(response.status_code, 200)
-        results = response.json()
-        self.assertEqual(len(results), 2)
-
+        self.assertEqual(len(results), 3)
+    
     def test_get_index_dir(self):
         # Test the get_index_dir method.
         response = self.client.get_index_dir()

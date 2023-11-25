@@ -5,7 +5,7 @@ use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
 
-use tsldb::log::log_message::LogMessage;
+use coredb::log::log_message::LogMessage;
 
 pub struct OpenAIHelper {
   client: Option<Client>,
