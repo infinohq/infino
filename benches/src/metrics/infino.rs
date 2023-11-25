@@ -3,10 +3,10 @@ use reqwest::StatusCode;
 use std::time::Instant;
 use sysinfo::{ProcessorExt, System, SystemExt};
 
-pub struct InfinoTsClient {}
+pub struct InfinoMetricsClient {}
 
-impl InfinoTsClient {
-  pub fn new() -> InfinoTsClient {
+impl InfinoMetricsClient {
+  pub fn new() -> InfinoMetricsClient {
     // Start a background task to update the CPU usage gauge
     #[allow(unused)]
     let cpu_usage_task = Some(tokio::spawn(async move {
@@ -22,7 +22,7 @@ impl InfinoTsClient {
         let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, "cpu_usage", value);
         let client = reqwest::Client::new();
         let res = client
-          .post(&format!("http://localhost:3000/append_ts"))
+          .post(&format!("http://localhost:3000/append_metric"))
           .header("Content-Type", "application/json")
           .body(json_str)
           .send()
@@ -31,21 +31,21 @@ impl InfinoTsClient {
         match res {
           Ok(response) => {
             if response.status() != StatusCode::OK {
-              println!("Error while pushing ts to infino {:?}", response)
+              println!("Error while pushing metric to Infino {:?}", response)
             }
           }
           Err(e) => {
-            println!("Error while pushing ts to infino {:?}", e)
+            println!("Error while pushing metric to Infino {:?}", e)
           }
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
       }
     }));
 
-    InfinoTsClient {}
+    InfinoMetricsClient {}
   }
 
-  pub async fn search_logs(&self) -> u128 {
+  pub async fn search_metrics(&self) -> u128 {
     let query_url =
       "http://localhost:3000/search_metrics?label_name=__name__&&label_value=cpu_usage&start_time=0";
     let now = Instant::now();
@@ -65,7 +65,7 @@ impl InfinoTsClient {
         elapsed.as_micros()
       }
       Err(err) => {
-        println!("Error while fetching from prometheus: {}", err);
+        println!("Error while fetching metrics: {}", err);
         elapsed.as_micros()
       }
     }

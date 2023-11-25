@@ -1,42 +1,24 @@
 
 <h1 align="center">
-    InfinoPy - Infino Python Client
+   InfinoPy
 </h1>
 <p align="center">
-    InfinoPy - Python Client for Infino, a scalable telemetry store.
+  Python Client for Infino, a scalable telemetry store. </br>
 </p>
 
-If you haven't explored Infino yet, please refer to:
- - [Infino git repo](https://github.com/infinohq/infino)
 
 ## Quick Start
 
-`infinopy` is a python client for Infino. Infino is a scalable telemetry store to reduce the cost and complexity of observability. 
+`infinopy` is a python client for Infino. Infino is a scalable telemetry store to reduce the cost and complexity of observability. If you haven't explored Infino yet, please refer to the [Infino git repo](https://github.com/infinohq/infino).
 
 
-### Notes for MacOS 
-If you're on MacOS you might want to ensure your environment is up-to-date.
-
-**Install [OpenSSL3](https://ports.macports.org/port/openssl/)**
-**Install [Python3](https://www.python.org/downloads/macos/)**
-
-**install virtualenv and setuptools**
-```bash
-pip install virtualenv
-pip install setuptools
-```
-
-**Remove the public version of infinopy from virtual env**
-cd venv/lib/pythonXX/site-packages
-pip uninstall infinopy
-pip install -e /path/to/infino/clients/infinopy directory (allows for editing via links)
-
-
-### Installation
-Once you are sure you environment is up-to-date, do the following:
+### Install InfinoPy Client
 ```bash
 pip install infinopy
 ```
+
+### Notes for testing
+You should ensure your environment is up-to-date if you want to edit/test the client: [OpenSSL3](https://ports.macports.org/port/openssl/), [Python3](https://www.python.org/downloads/macos/), Virtualenv, Setuptools. If you've changed any of the core Infino code you'll also need to run **make docker-build** to build the docker image that the infino server needs to run in for unit tests.
 
 ### Example
 

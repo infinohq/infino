@@ -335,6 +335,7 @@ async fn append_log(
 }
 
 /// Deprecated function for backwards-compatibility to append metric data to coredb.
+/// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use append_metric instead")]
 async fn append_ts(
@@ -430,6 +431,7 @@ async fn append_metric(
 }
 
 /// Deprecated function for backwards-compatibility to search log data in coredb.
+/// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use search_logs instead")]
 async fn search_log(
@@ -505,6 +507,7 @@ async fn summarize(
 }
 
 /// Deprecated function for backwards-compatibility to search metric data in coredb.
+/// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use search_metrics instead")]
 async fn search_ts(

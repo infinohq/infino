@@ -20,7 +20,7 @@ impl InfinoApiClient {
     let mut num_docs = 0;
 
     // This is kept same as ClickHouse to so that equivalent API requests are made across
-    // Clickhouse and infino_rest.
+    // Clickhouse and Infino REST API.
     let num_docs_per_batch = 100;
     let mut num_docs_in_this_batch = 0;
     let mut logs_batch = Vec::new();
@@ -62,7 +62,7 @@ impl InfinoApiClient {
 
     let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino REST time required for log insertions: {} microseconds",
+      "Infino REST API - time required for log insertions: {} microseconds",
       elapsed
     );
     return elapsed;
@@ -79,7 +79,7 @@ impl InfinoApiClient {
     let response = reqwest::get(query_url).await;
     let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino REST time required for logs search query {} is : {} microseconds",
+      "Infino REST API - time required for logs search {} is : {} microseconds",
       text, elapsed
     );
 
@@ -91,7 +91,7 @@ impl InfinoApiClient {
         //println!("Result {}", text);
       }
       Err(err) => {
-        println!("Error while fetching from infino: {}", err);
+        println!("Error while fetching from Infino: {}", err);
       }
     }
     elapsed

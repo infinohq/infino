@@ -33,7 +33,6 @@ def start_infino():
 
     # Wait for the server to start
     time.sleep(10)
-    print("waiting")
 
     # Set the base URL for the client
     os.environ["INFINO_BASE_URL"] = "http://localhost:3000"

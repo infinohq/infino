@@ -65,10 +65,10 @@ impl InfinoEngine {
     let now = Instant::now();
     let result = self
       .coredb
-      .search_logs(query, range_start_time, range_end_time);
+      .get_logs(query, range_start_time, range_end_time);
     let elapsed = now.elapsed().as_micros();
     println!(
-      "Infino time required for searching query {} is : {} microseconds. Num of results {}",
+      "Infino time required for searching logs {} is : {} microseconds. Num of results {}",
       query,
       elapsed,
       result.len()

@@ -9,8 +9,7 @@ use std::{
   thread, time,
 };
 use structopt::StructOpt;
-use timeseries::{infino::InfinoTsClient, prometheus::PrometheusClient};
-use uuid::Uuid;
+use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
 
 mod logs;
 mod metrics;
@@ -68,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let max_docs = -1;
 
   // INFINO START
-  println!("\n\n***Now running Infino via coredb library***");
+  println!("\n\n***Now running Infino via CoreDB library***");
 
   // Index the data using infino and find the output size.
   let curr_dir = std::env::current_dir().unwrap();
@@ -93,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
 
   // INFINO REST START
-  println!("\n\n***Now running Infino via REST API client***");
+  println!("\n\n***Now running Infino via the REST API client***");
 
   // Index the data using infino and find the output size.
   let infino_rest = InfinoApiClient::new();
@@ -159,23 +158,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // ELASTICSEARCH END
 
-  // Time series related stats
-  // INFINO API FOR TIME SERIES START
+  // Metrics related stats
+  // INFINO API FOR METRICS START
   println!("\n\n***Now running Infino API client for time series***");
 
-  let infino_ts_client = InfinoTsClient::new();
+  let infino_metrics_client = InfinoMetricsClient::new();
   // Sleep for 5 seconds to let it collect some data
   thread::sleep(time::Duration::from_millis(10000));
-  let mut cell_infino_ts_search_time = 0;
+  let mut cell_infino_metrics_search_time = 0;
   for _ in 1..10 {
-    cell_infino_ts_search_time += infino_ts_client.search_logs().await;
+    cell_infino_metrics_search_time += infino_metrics_client.search_metrics().await;
   }
-  cell_infino_ts_search_time = cell_infino_ts_search_time / 10;
+  cell_infino_metrics_search_time = cell_infino_metrics_search_time / 10;
   println!(
-    "Infino timeseries search avg {} microseconds",
-    cell_infino_ts_search_time
+    "Infino metrics search avg {} microseconds",
+    cell_infino_metrics_search_time
   );
-  // INFINO API FOR TIME SERIES END
+  // INFINO API FOR METRICS END
 
   // PROMETHEUS START
   println!("\n\n***Now running Prometheus for time series***");
@@ -242,7 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cell_infino_rest_index_time
   );
 
-  println!("\n\n### Search latency\n");
+  println!("\n\n### Log Search Latency\n");
   println!("Average across different query types. See the detailed output for granular info.\n");
   println!("| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |");
   println!("| ----- | ----- | ----- | ---- | ---- |");
@@ -255,13 +254,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cell_infino_rest_search_time / INFINO_SEARCH_QUERIES.len() as u128
   );
 
-  println!("\n\n### Timeseries search latency");
-  println!("\nAverage over 10 queries on time series.\n");
+  println!("\n\n### Metrics Search Latency");
+  println!("\nAverage over 10 queries on metrics.\n");
   println!("| Metric points | Prometheus | Infino |");
   println!("| ----------- | ---------- | ---------- |");
   println!(
     "| Search Latency | {} microseconds | {} microseconds |\n",
-    cell_prometheus_search_time, cell_infino_ts_search_time
+    cell_prometheus_search_time, cell_infino_metrics_search_time
   );
 
   Ok(())

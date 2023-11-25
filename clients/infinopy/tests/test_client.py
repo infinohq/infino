@@ -2,8 +2,8 @@ import os
 import unittest
 import time
 import docker
-from infinopy import InfinoClient
 
+from infinopy import InfinoClient
 
 class InfinoClientTestCase(unittest.TestCase):
     @classmethod
@@ -15,7 +15,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.container = self.docker_client.containers.run(
             "infinohq/infino:latest",
             detach=True,
-            ports={"3001/tcp": 3000},
+            ports={"3000/tcp": 3000},
         )
 
         # Wait for the server to start
@@ -76,8 +76,12 @@ class InfinoClientTestCase(unittest.TestCase):
 
         # Test the summarize api.
         # We haven't set OPENAI_API_KEY while starting the container, so this should fail.
-        response = self.client.summarize(text="my message")
-        self.assert_((400 <= response.status_code) and (response.status_code < 500))
+        response = self.client.summarize(
+          text="my message",
+          start_time=current_time - 10,
+          end_time=current_time + 10,
+        )
+        self.assertTrue((400 <= response.status_code) and (response.status_code < 500))
 
     def test_metric(self):
         current_time = int(time.time())
@@ -110,7 +114,7 @@ class InfinoClientTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 2)
-
+    
     def test_get_index_dir(self):
         # Test the get_index_dir method.
         response = self.client.get_index_dir()
