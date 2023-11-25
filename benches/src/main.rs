@@ -4,12 +4,12 @@ use crate::logs::infino::InfinoEngine;
 use crate::logs::infino_rest::InfinoApiClient;
 use crate::utils::io::get_directory_size;
 
+use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
 use std::{
   fs::{self, create_dir},
   thread, time,
 };
 use structopt::StructOpt;
-use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
 
 mod logs;
 mod metrics;

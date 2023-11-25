@@ -1,7 +1,11 @@
-venv:
-	python3 -m venv venv
+env: venv/touchfile
 
-build:
+venv/touchfile:
+	test -d venv || virtualenv venv
+	. venv/bin/activate; pip install -Ur requirements.txt
+	touch venv/touchfile
+
+build: env
 	. venv/bin/activate; cd venv; pip-compile -o ../requirements.txt; pip install -r ../requirements.txt; cd ..
 
 check:
