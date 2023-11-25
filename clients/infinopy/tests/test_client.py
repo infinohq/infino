@@ -60,6 +60,14 @@ class InfinoClientTestCase(unittest.TestCase):
         results = response.json()
         self.assertEqual(len(results), 2)
 
+        # Test backwards-compatibility
+        response = self.client.search_log(
+            text="my message", start_time=current_time - 10, end_time=current_time + 10
+        )
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 2)
+
         # Query for text that is present in only one payload.
         response = self.client.search_logs(
             text="two", start_time=current_time - 10, end_time=current_time + 10
@@ -95,6 +103,11 @@ class InfinoClientTestCase(unittest.TestCase):
         response = self.client.append_metric(payload)
         self.assertEqual(response.status_code, 200)
 
+        # Test backwards-compatibility
+        payload = {"date": current_time, "some_metric_name": 2.0}
+        response = self.client.append_ts(payload)
+        self.assertEqual(response.status_code, 200)
+
         # Test the search_metrics method.
         response = self.client.search_metrics(
             label_name="__name__",
@@ -104,7 +117,7 @@ class InfinoClientTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results), 3)
 
         # Test that default values for start and end time work.
         response = self.client.search_metrics(
@@ -113,7 +126,18 @@ class InfinoClientTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results), 3)
+
+        # Test backwards-compatibility
+        response = self.client.search_ts(
+            label_name="__name__",
+            label_value="some_metric_name",
+            start_time=current_time - 10,
+            end_time=current_time + 10,
+        )
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual(len(results), 3)
     
     def test_get_index_dir(self):
         # Test the get_index_dir method.

@@ -23,7 +23,7 @@ class InfinoClient:
 
     # Deprecated. Kept here for backwards compatibility. TODO: Remove by Jan 2024.
     def append_ts(self, payload):
-        return self._append_metric(payload)
+        return self.append_metric(payload)
     
     def append_metric(self, payload):
         path = "/append_metric"
@@ -31,7 +31,7 @@ class InfinoClient:
     
     # Deprecated. Kept here for backwards compatibility. TODO: Remove by Jan 2024.
     def search_log(self, text, start_time=None, end_time=None):
-        return self._search_logs(text, start_time, end_time)
+        return self.search_logs(text, start_time, end_time)
     
     def search_logs(self, text, start_time=None, end_time=None):
         path = "/search_logs"
@@ -47,7 +47,7 @@ class InfinoClient:
 
     # Deprecated. Kept here for backwards compatibility. TODO: Remove by Jan 2024.
     def search_ts(self, label_name, label_value, start_time=None, end_time=None):
-        return self._search_metrics(label_name, label_value, start_time, end_time)
+        return self.search_metrics(label_name, label_value, start_time, end_time)
     
     def search_metrics(self, label_name, label_value, start_time=None, end_time=None):
         path = "/search_metrics"
