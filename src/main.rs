@@ -5,18 +5,12 @@
 //!
 //! See an Infino architecture overview [here](https://github.com/infinohq/infino).
 //! Infino is a 2-sided application, with data ingestion APIs for storing data in Infino and query APIs
-//! for retrieving data form Infino. The ingestion queue manager uses [RabbitMQ](https://github.com/rabbitmq)
-//! for persisting data append requests before they are indexed and stored. The queue manager can be run
-//! on a separate system to allow Infino to be restarted without losing data.
-//!
-//! As data is persisted in the queue, it is also forwarded to [CoreDB](docs/coredb/index.html), the core library
+//! for retrieving data form Infino. Ingested data persisted in a queue forwarded to the CoreDB database
 //! that stores and retrieves telemetry data in Infino.
 //!
 //! We also summarize logs using Generative AI models; we are currently using [OpenAI](https://platform.openai.com/)
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
-//!
-//! It is worth noting that RabbitMQ is not as robust as we like so we are considering alternatives.
 
 mod queue_manager;
 mod utils;
@@ -293,7 +287,7 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
   Ok(timestamp)
 }
 
-/// Append log data to coredb.
+/// Append log data to CoreDB.
 async fn append_log(
   State(state): State<Arc<AppState>>,
   Json(log_json): Json<serde_json::Value>,
@@ -365,7 +359,7 @@ async fn append_ts(
   append_metric(axum::extract::State(state), axum::Json(ts_json)).await
 }
 
-/// Append metric data to coredb.
+/// Append metric data to CoreDB.
 async fn append_metric(
   State(state): State<Arc<AppState>>,
   Json(ts_json): Json<serde_json::Value>,
@@ -485,7 +479,7 @@ async fn search_logs(
   serde_json::to_string(&results).expect("Could not convert search results to json")
 }
 
-/// Search and summarize logs in coredb.
+/// Search and summarize logs in CoreDB.
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
@@ -541,7 +535,7 @@ async fn search_ts(
   .await
 }
 
-/// Search metrics in coredb.
+/// Search metrics in CoreDB.
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
@@ -570,7 +564,7 @@ async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, St
   Ok(())
 }
 
-/// Get index directory used by coredb.
+/// Get index directory used by CoreDB.
 async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
   state.coredb.get_index_dir()
 }
@@ -580,7 +574,7 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
   "OK".to_owned()
 }
 
-/// Create a new index in coredb with given name.
+/// Create a new index in CoreDB with the given name.
 async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,
