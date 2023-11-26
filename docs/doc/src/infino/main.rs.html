@@ -1065,12 +1065,6 @@
 <a href="#1065" id="1065">1065</a>
 <a href="#1066" id="1066">1066</a>
 <a href="#1067" id="1067">1067</a>
-<a href="#1068" id="1068">1068</a>
-<a href="#1069" id="1069">1069</a>
-<a href="#1070" id="1070">1070</a>
-<a href="#1071" id="1071">1071</a>
-<a href="#1072" id="1072">1072</a>
-<a href="#1073" id="1073">1073</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! The Infino server application and interface.
 //!
 //! The Infino server is an [Axum](https://docs.rs/axum/latest/axum/) web application that handles all API
@@ -1078,18 +1072,12 @@
 //!
 //! See an Infino architecture overview [here](https://github.com/infinohq/infino).
 //! Infino is a 2-sided application, with data ingestion APIs for storing data in Infino and query APIs
-//! for retrieving data form Infino. The ingestion queue manager uses [RabbitMQ](https://github.com/rabbitmq)
-//! for persisting data append requests before they are indexed and stored. The queue manager can be run
-//! on a separate system to allow Infino to be restarted without losing data.
-//!
-//! As data is persisted in the queue, it is also forwarded to [CoreDB](docs/coredb/index.html), the core library
+//! for retrieving data form Infino. Ingested data persisted in a queue forwarded to the CoreDB database
 //! that stores and retrieves telemetry data in Infino.
 //!
 //! We also summarize logs using Generative AI models; we are currently using [OpenAI](https://platform.openai.com/)
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
-//!
-//! It is worth noting that RabbitMQ is not as robust as we like so we are considering alternatives.
 
 </span><span class="kw">mod </span>queue_manager;
 <span class="kw">mod </span>utils;
@@ -1366,7 +1354,7 @@
   <span class="prelude-val">Ok</span>(timestamp)
 }
 
-<span class="doccomment">/// Append log data to coredb.
+<span class="doccomment">/// Append log data to CoreDB.
 </span><span class="kw">async fn </span>append_log(
   State(state): State&lt;Arc&lt;AppState&gt;&gt;,
   Json(log_json): Json&lt;serde_json::Value&gt;,
@@ -1438,7 +1426,7 @@
   append_metric(axum::extract::State(state), axum::Json(ts_json)).<span class="kw">await
 </span>}
 
-<span class="doccomment">/// Append metric data to coredb.
+<span class="doccomment">/// Append metric data to CoreDB.
 </span><span class="kw">async fn </span>append_metric(
   State(state): State&lt;Arc&lt;AppState&gt;&gt;,
   Json(ts_json): Json&lt;serde_json::Value&gt;,
@@ -1545,7 +1533,7 @@
 ) -&gt; String {
   <span class="macro">debug!</span>(<span class="string">&quot;Searching logs: {:?}&quot;</span>, logs_query);
 
-  <span class="kw">let </span>results = state.coredb.get_logs(
+  <span class="kw">let </span>results = state.coredb.search_logs(
     <span class="kw-2">&amp;</span>logs_query.text,
     <span class="comment">// The default for range start time is 0.
     </span>logs_query.start_time.unwrap_or(<span class="number">0</span>),
@@ -1558,7 +1546,7 @@
   serde_json::to_string(<span class="kw-2">&amp;</span>results).expect(<span class="string">&quot;Could not convert search results to json&quot;</span>)
 }
 
-<span class="doccomment">/// Search and summarize logs in coredb.
+<span class="doccomment">/// Search and summarize logs in CoreDB.
 </span><span class="kw">async fn </span>summarize(
   State(state): State&lt;Arc&lt;AppState&gt;&gt;,
   Query(summarize_query): Query&lt;SummarizeQuery&gt;,
@@ -1568,7 +1556,7 @@
   <span class="comment">// Number of log message to summarize.
   </span><span class="kw">let </span>k = summarize_query.k.unwrap_or(<span class="number">100</span>);
 
-  <span class="kw">let </span>results = state.coredb.get_logs(
+  <span class="kw">let </span>results = state.coredb.search_logs(
     <span class="kw-2">&amp;</span>summarize_query.text,
     <span class="comment">// The default for range start time is 0.
     </span>summarize_query.start_time.unwrap_or(<span class="number">0</span>),
@@ -1614,7 +1602,7 @@
   .<span class="kw">await
 </span>}
 
-<span class="doccomment">/// Search metrics in coredb.
+<span class="doccomment">/// Search metrics in CoreDB.
 </span><span class="kw">async fn </span>search_metrics(
   State(state): State&lt;Arc&lt;AppState&gt;&gt;,
   Query(metrics_query): Query&lt;MetricsQuery&gt;,
@@ -1643,7 +1631,7 @@
   <span class="prelude-val">Ok</span>(())
 }
 
-<span class="doccomment">/// Get index directory used by coredb.
+<span class="doccomment">/// Get index directory used by CoreDB.
 </span><span class="kw">async fn </span>get_index_dir(State(state): State&lt;Arc&lt;AppState&gt;&gt;) -&gt; String {
   state.coredb.get_index_dir()
 }
@@ -1653,7 +1641,7 @@
   <span class="string">&quot;OK&quot;</span>.to_owned()
 }
 
-<span class="doccomment">/// Create a new index in coredb with given name.
+<span class="doccomment">/// Create a new index in CoreDB with the given name.
 </span><span class="kw">async fn </span>create_index(
   state: State&lt;Arc&lt;AppState&gt;&gt;,
   Path(index_name): Path&lt;String&gt;,
@@ -1834,7 +1822,7 @@
     <span class="kw">let </span>end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() <span class="kw">as </span>u64);
-    log_messages_received = refreshed_coredb.get_logs(search_text, start_time, end_time);
+    log_messages_received = refreshed_coredb.search_logs(search_text, start_time, end_time);
 
     <span class="macro">assert_eq!</span>(log_messages_expected.len(), log_messages_received.len());
     <span class="macro">assert_eq!</span>(log_messages_expected, log_messages_received);

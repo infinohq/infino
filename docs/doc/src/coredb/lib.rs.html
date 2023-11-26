@@ -696,7 +696,7 @@
     <span class="kw">let </span>end = Utc::now().timestamp_millis() <span class="kw">as </span>u64;
 
     <span class="comment">// Search for log messages. The order of results should be reverse chronological order.
-    </span><span class="kw">let </span>results = coredb.get_logs(<span class="string">&quot;message&quot;</span>, start, end);
+    </span><span class="kw">let </span>results = coredb.search_logs(<span class="string">&quot;message&quot;</span>, start, end);
     <span class="macro">assert_eq!</span>(results.get(<span class="number">0</span>).unwrap().get_text(), <span class="string">&quot;log message 2&quot;</span>);
     <span class="macro">assert_eq!</span>(results.get(<span class="number">1</span>).unwrap().get_text(), <span class="string">&quot;log message 1&quot;</span>);
 
