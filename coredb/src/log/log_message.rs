@@ -12,7 +12,7 @@ pub struct LogMessage {
   /// Timestamp for this log message.
   time: u64,
 
-  /// key-value pair content in log messages.
+  /// Key-value pair content in log messages.
   fields: HashMap<String, String>,
 
   /// Any content that should be searchable without specifying a field name.
@@ -20,7 +20,7 @@ pub struct LogMessage {
 }
 
 impl LogMessage {
-  /// Create a new LogMessage for given time and text.
+  /// Create a new LogMessage for a given time and text.
   pub fn new(time: u64, text: &str) -> Self {
     LogMessage {
       time,
@@ -29,7 +29,7 @@ impl LogMessage {
     }
   }
 
-  /// Create a new LogMessage for given time, fields and text.
+  /// Create a new LogMessage for a given time, fields and text.
   pub fn new_with_fields_and_text(time: u64, fields: &HashMap<String, String>, text: &str) -> Self {
     LogMessage {
       time,

@@ -23,3 +23,9 @@ benches/ch-tmp/
 
 # the index created by coredb if default config is used
 data
+
+# the documentation artifacts
+docs/.rustc_info.json
+docs/.rustdoc_fingerprint.json
+docs/.lock
+docs/release

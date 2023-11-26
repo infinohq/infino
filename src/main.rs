@@ -1,3 +1,23 @@
+//! The Infino server application and interface.
+//!
+//! The Infino server is an [Axum](https://docs.rs/axum/latest/axum/) web application that handles all API
+//! requests to Infino.
+//!
+//! See an Infino architecture overview [here](https://github.com/infinohq/infino).
+//! Infino is a 2-sided application, with data ingestion APIs for storing data in Infino and query APIs
+//! for retrieving data form Infino. The ingestion queue manager uses [RabbitMQ](https://github.com/rabbitmq)
+//! for persisting data append requests before they are indexed and stored. The queue manager can be run
+//! on a separate system to allow Infino to be restarted without losing data.
+//!
+//! As data is persisted in the queue, it is also forwarded to [CoreDB](docs/coredb/index.html), the core library
+//! that stores and retrieves telemetry data in Infino.
+//!
+//! We also summarize logs using Generative AI models; we are currently using [OpenAI](https://platform.openai.com/)
+//! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
+//! models. More to come.
+//!
+//! It is worth noting that RabbitMQ is not as robust as we like so we are considering alternatives.
+
 mod queue_manager;
 mod utils;
 
@@ -334,8 +354,8 @@ async fn append_log(
   Ok(())
 }
 
-/// Deprecated function for backwards-compatibility to append metric data to coredb.
-/// TODO: Remove this function by Jan 2024.
+/// Deprecated function for backwards-compatibility. Wraps append_metric().
+// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use append_metric instead")]
 async fn append_ts(
@@ -430,8 +450,8 @@ async fn append_metric(
   Ok(())
 }
 
-/// Deprecated function for backwards-compatibility to search log data in coredb.
-/// TODO: Remove this function by Jan 2024.
+/// Deprecated function for backwards-compatibility. Wraps search_logs().
+// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use search_logs instead")]
 async fn search_log(
@@ -445,14 +465,14 @@ async fn search_log(
   .await
 }
 
-/// Search logs in coredb.
+/// Search logs in CoreDB.
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
 ) -> String {
   debug!("Searching logs: {:?}", logs_query);
 
-  let results = state.coredb.get_logs(
+  let results = state.coredb.search_logs(
     &logs_query.text,
     // The default for range start time is 0.
     logs_query.start_time.unwrap_or(0),
@@ -475,7 +495,7 @@ async fn summarize(
   // Number of log message to summarize.
   let k = summarize_query.k.unwrap_or(100);
 
-  let results = state.coredb.get_logs(
+  let results = state.coredb.search_logs(
     &summarize_query.text,
     // The default for range start time is 0.
     summarize_query.start_time.unwrap_or(0),
@@ -506,8 +526,8 @@ async fn summarize(
   }
 }
 
-/// Deprecated function for backwards-compatibility to search metric data in coredb.
-/// TODO: Remove this function by Jan 2024.
+/// Deprecated function for backwards-compatibility. Wraps search_metrics().
+// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use search_metrics instead")]
 async fn search_ts(
@@ -741,7 +761,7 @@ mod tests {
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    log_messages_received = refreshed_coredb.get_logs(search_text, start_time, end_time);
+    log_messages_received = refreshed_coredb.search_logs(search_text, start_time, end_time);
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);

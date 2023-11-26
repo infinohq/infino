@@ -27,7 +27,8 @@ const FORWARD_MAP_FILE_NAME: &str = "forward_map.bin";
 const LABELS_FILE_NAME: &str = "labels.bin";
 const TIME_SERIES_FILE_NAME: &str = "time_series.bin";
 
-/// A segment with inverted map (term-ids to log-message-ids) as well as forward map (log-message-ids to log messages).
+/// A segment with inverted map (term-ids to log-message-ids) as well
+/// as forward map (log-message-ids to log messages).
 #[derive(Debug)]
 pub struct Segment {
   /// Metadata for this segment.
@@ -49,8 +50,8 @@ pub struct Segment {
   /// Applicable only for time series.
   labels: DashMap<String, u32>,
 
-  /// Time series map - label-id to corresponding time series.
-  /// Applicable only for log messages.
+  // Time series map - label-id to corresponding time series.
+  // Applicable only for log messages.
   time_series: DashMap<u32, TimeSeries>,
 
   // Mutex for only one thread to commit this segment at a time.
@@ -166,7 +167,7 @@ impl Segment {
     Ok(())
   }
 
-  /// Add a time-series metric point with specified time and value.
+  /// Append a metric point with specified time and value to the segment.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
@@ -295,8 +296,8 @@ impl Segment {
     }
   }
 
-  /// Search the segment for the given query. If a query has multiple terms, it is by default taken as AND.
-  /// Boolean queries are not yet supported.
+  /// Search the segment for the given query. If a query has multiple terms, it is by
+  /// default taken as AND. Boolean queries are not yet supported.
   pub fn search_logs(
     &self,
     query: &str,
@@ -336,8 +337,9 @@ impl Segment {
       let inital_values = postings_list.get_initial_values().read().unwrap().clone();
       initial_values_list.push(inital_values);
 
-      // Extract List of PostingBlockCompressed from posting list
-      // posting_block_compressed is Vec<PostingsBlockCompressed> which is extracted by cloning get_postings_list_compressed from postings_lists
+      // Extract list of compressed posting blocks from a posting list.
+      // posting_block_compressed is Vec<PostingsBlockCompressed> which is extracted by
+      // cloning get_postings_list_compressed from postings_lists
       let mut postings_block_compressed_vec: Vec<PostingsBlockCompressed> = Vec::new();
       for posting_block in postings_list
         .get_postings_list_compressed()
@@ -373,8 +375,9 @@ impl Segment {
 
     let mut accumulator = Vec::new();
 
-    // Create accumulator from shortest posting list from postings_lists. Which is flatten the shortest Vec<PostingsBlockCompressed> to Vec<u32>
-    // postings_lists.first() will give Vec<PostingsBlockCompressed> which needs to be iterated on to get Vec<u32>
+    // Create accumulator from shortest posting list from postings_lists. Which is flatten the shortest
+    // Vec<PostingsBlockCompressed> to Vec<u32> postings_lists.first() will give Vec<PostingsBlockCompressed>
+    // which needs to be iterated on to get Vec<u32>
     let first_posting_blocks = &postings_lists[shortest_list_index];
     for posting_block in first_posting_blocks {
       let posting_block = PostingsBlock::try_from(posting_block).unwrap();
@@ -458,7 +461,7 @@ impl Segment {
                 }
               }
 
-              // Try to see if we can skip remaining elements of posting_block
+              // Try to see if we can skip remaining elements of the postings block
               if initial_index + 1 < initial_values.len()
                 && acc_index < accumulator.len()
                 && accumulator[acc_index] >= initial_values[initial_index + 1]
@@ -473,7 +476,7 @@ impl Segment {
         }
 
         // If current accumulator and initial value are same, then add it to temporary accumulator
-        // and check remaining elements of posting block
+        // and check remaining elements of the postings block
         if acc_index < accumulator.len()
           && initial_index < initial_values.len()
           && accumulator[acc_index] == initial_values[initial_index]
@@ -581,7 +584,7 @@ impl Segment {
 
   // TODO: This api needs to be made richer (filter on multiple tags, metric name, prefix/regex, etc)
   /// Get the time series for the given label name/value, within the given (inclusive) time range.
-  pub fn get_metrics(
+  pub fn search_metrics(
     &self,
     label_name: &str,
     label_value: &str,
@@ -888,7 +891,7 @@ mod tests {
 
     assert_eq!(
       segment
-        .get_metrics("label_name_1", "label_value_1", time - 100, time + 100)
+        .search_metrics("label_name_1", "label_value_1", time - 100, time + 100)
         .len(),
       1
     )
@@ -951,7 +954,7 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
 
     let mut expected = (*expected.read().unwrap()).clone();
-    let received = segment.get_metrics("label1", "value1", start_time - 100, end_time + 100);
+    let received = segment.search_metrics("label1", "value1", start_time - 100, end_time + 100);
 
     expected.sort();
     assert_eq!(expected, received);

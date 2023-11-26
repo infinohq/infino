@@ -2,7 +2,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 pub const FIELD_DELIMITER: char = '~';
 
-// Tokenize a given string. Note that FIELD_DELIMITER is a special character that we use a field sepator in queries, and so we do not tokenize on "~".
+// Tokenize a given string. Note that FIELD_DELIMITER is a special character that we
+// use a field separator in queries, and so we do not tokenize on "~".
 pub fn tokenize(input: &str) -> Vec<String> {
   // First, create different segments based on FIELD_DELIMITER separator.
   let segments: Vec<&str> = input.split(FIELD_DELIMITER).collect();

@@ -1,9 +1,9 @@
-![Infino Logo (Light)](docs/Infino_logo_light.png#gh-light-mode-only)
-![Infino Logo (Dark)](docs/Infino_logo_dark.png#gh-dark-mode-only)
+![Infino Logo (Light)](docs/images/Infino_logo_light.png#gh-light-mode-only)
+![Infino Logo (Dark)](docs/images/Infino_logo_dark.png#gh-dark-mode-only)
 
 # Store, search, and analyze telemetry data at scale.
 
-![Elastic Logo](docs/ElasticLicenseLogo.svg)
+![Elastic Logo](docs/images/ElasticLicenseLogo.svg)
 [![Github Commits](https://img.shields.io/github/commit-activity/m/infinohq/infino)](https://github.com/infinohq/infino/commits)
 <a href="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml">
   <img src="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml/badge.svg?branch=main" alt="Status" >
@@ -37,12 +37,10 @@ To address **complexity**, Infino focuses on AI and automation:
 - **Dashboards:** OSS dashboard support + SQL support for BI interfaces like Tableau or Sigma.
 - **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
 
-As you look through the code, it might be useful to consider the below architecture diagram.
+![Architecture](docs/images/Infino_architecture.png)
 
-![Architecture](docs/Infino_architecture.png)
-
-Telemetry is stored thusly: *Logs* consist of *log messages* stored in compressed *posting blocks*, *Metrics* consist of *metric points* in compressed *time series blocks*, and *Traces* consist of *trace spans* in compressed *posting blocks*.
-
+## Developer Docs
+Read our repo documentation [here](http://username.github.io/infino/docs/doc/infino/index.html).
 
 ## Features
 Note that we are still very much an alpha product but we have lots on the roadmap. Our development at the moment is focused on increasing the performance of the core engine to address **cost** but we are starting to add features to address **complexity**. 
@@ -84,12 +82,12 @@ want to discuss your use-case over virtual coffee.
 
 ## Contributions
 
-Contributions are welcome and highly appreciated! To get started, check out the [contributing guidelines](CONTRIBUTING.md).
+Contributions are welcome and highly appreciated! To get started, check out our [repo docs](http://username.github.io/infino/docs/doc/infino/index.html) and the [contributing guidelines](CONTRIBUTING.md).
 
 ## Contact Us
 
-Ping us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email) or send us an email: ![Infino Logo (Light)](docs/Infino_email_light.svg#gh-light-mode-only)
-![Infino Logo (Dark)](docs/Infino_email_dark.svg#gh-dark-mode-only).
+Ping us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email) or send us an email: ![Infino Logo (Light)](docs/images/Infino_email_light.svg#gh-light-mode-only)
+![Infino Logo (Dark)](docs/images/Infino_email_dark.svg#gh-dark-mode-only).
 
 ## Contributors
 

@@ -67,35 +67,35 @@ Machine description: Macbook Pro 16 inch, M1, 16GB RAM
 
 Dataset: data/Apache.log
 
-Dataset size: 5135877 bytes
+Dataset size: 5.14 MB
 
-### Index size
+### Log index size
 
 | dataset         | Elasticsearch | Clickhouse     | Infino        | Infino-Rest    |
 | --------------- | ------------- | -------------- | ------------- | -------------- |
-| data/Apache.log | 2411725 bytes | 35488638 bytes | 1097279 bytes | Same as infino |
+| data/Apache.log | 2.41 MB | 35.49 MB | 1.10 MB | Same as infino |
 
-### Indexing latency
+### Log indexing latency
 
 | dataset         | Elasticsearch         | Clickhouse           | Infino              | Infino-Rest          |
 | --------------- | --------------------- | -------------------- | ------------------- | -------------------- |
-| data/Apache.log | 35378212 microseconds | 1364551 microseconds | 427316 microseconds | 1081403 microseconds |
+| data/Apache.log | 35.38 s | 1.36s | 0.43 s | 1.08 s |
 
-### Search latency
+### Log search latency
 
 Average across different query types. See the detailed output for granular info.
 
 | dataset         | Elasticsearch       | Clickhouse         | Infino           | Infino-Rest       |
 | --------------- | ------------------- | ------------------ | ---------------- | ----------------- |
-| data/Apache.log | 134571 microseconds | 18084 microseconds | 888 microseconds | 3804 microseconds |
+| data/Apache.log | 134.57 ms | 18.08 ms | 0.888 ms | 3.80 ms |
 
-### Timeseries search latency
+### Metric search latency
 
 Average over 10 queries on time series.
 
 | Metric points  | Prometheus        | Infino            |
 | -------------- | ----------------- | ----------------- |
-| Search Latency | 2678 nanoseconds  | 2864 nanoseconds |
+| Search Latency | 2.68 us  | 2.86 us |
 
 ## Results (Apache log - medium): 
 
@@ -107,37 +107,37 @@ Machine description: Macbook Pro 2023, 16 inch, M2 Max, 64 GB RAM
 
 Dataset: data/Apache.log
 
-Dataset size: 104,857,667 bytes
+Dataset size: 104.86 MB
 
 
 
-### Index size
-
-| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
-| ----- | ----- | ----- | ----- | ---- |
-| data/Apache.log | 46,241,201 bytes | 822,056,628 bytes | 34,354,516 bytes | Same as infino |
-
-
-### Indexing latency
+### Log index size
 
 | dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
 | ----- | ----- | ----- | ----- | ---- |
-| data/Apache.log | 141,224,285 microseconds  | 16,924,729 microseconds  | 29,839,987 microseconds  | 44,180,081 microseconds  |
+| data/Apache.log | 46.24 MB | 822.06 MB | 34.35 MB | Same as infino |
 
 
-### Search latency
+### Log indexing latency
+
+| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
+| ----- | ----- | ----- | ----- | ---- |
+| data/Apache.log | 141.22 s  | 16.92 s  | 29.84 s  | 44.18 s  |
+
+
+### Log search latency
 
 Average across different query types. See the detailed output for granular info.
 
 | dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |
 | ------- | ------------- | ---------- | ------ | ----------- |
-| data/Apache.log | 124,285 microseconds  | 34,469 microseconds  | 12,648 microseconds  | 32,689 microseconds  |
+| data/Apache.log | 124.29 ms  | 34.47 ms  | 12.65 ms  | 32.69 ms  |
 
 
-### Timeseries search latency
+### Metric search latency
 
 Average over 10 queries on time series.
 
 |  Metric points |     Prometheus     |      Infino      |
 | -------------- | ------------------ | ---------------- |
-| Search Latency | 1,770 microseconds | 459 microseconds |
+| Search Latency | 1.77 ms | 0.46 ms |
