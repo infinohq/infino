@@ -86,7 +86,8 @@ struct SummarizeQueryResponse {
   results: Vec<LogMessage>,
 }
 
-/// Periodically commits coredb (typically called in a thread, so that coredb can be asyncronously committed).
+/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
+/// can be asyncronously committed).
 async fn commit_in_loop(
   state: Arc<AppState>,
   commit_interval_in_seconds: u32,
