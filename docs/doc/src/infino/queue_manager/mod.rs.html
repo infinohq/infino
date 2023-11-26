@@ -10,13 +10,13 @@
 <a href="#10" id="10">10</a>
 <a href="#11" id="11">11</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! Manages the ingestion queue for Infino.
-//! 
+//!
 //! The ingestion queue manager uses [RabbitMQ](https://github.com/rabbitmq)
 //! for persisting data append requests before they are indexed and stored.
 //! The queue manager can be run on a separate system to allow Infino to be
 //! restarted without losing data.
 //!
-//! It is worth noting that RabbitMQ is not as robust as we like so we are 
+//! It is worth noting that RabbitMQ is not as robust as we like so we are
 //! considering alternatives.
 
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>queue;
