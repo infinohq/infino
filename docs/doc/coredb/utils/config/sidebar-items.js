@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_CONFIG_FILE_NAME"],"struct":["CoreDBSettings","Settings"]};

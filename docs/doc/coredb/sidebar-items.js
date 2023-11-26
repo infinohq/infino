@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["index_manager","log","metric","segment_manager","utils"],"struct":["CoreDB"]};

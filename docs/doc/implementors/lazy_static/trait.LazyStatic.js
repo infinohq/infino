@@ -1,0 +1,4 @@
+(function() {var implementors = {
+"coredb":[["impl <a class=\"trait\" href=\"https://docs.rs/lazy_static/1.4.0/lazy_static/trait.LazyStatic.html\" title=\"trait lazy_static::LazyStatic\">LazyStatic</a> for <a class=\"struct\" href=\"coredb/log/constants/struct.BITPACKER.html\" title=\"struct coredb::log::constants::BITPACKER\">BITPACKER</a>"]],
+"infino":[["impl <a class=\"trait\" href=\"https://docs.rs/lazy_static/1.4.0/lazy_static/trait.LazyStatic.html\" title=\"trait lazy_static::LazyStatic\">LazyStatic</a> for <a class=\"struct\" href=\"infino/utils/environment/struct.SERIAL_TEST.html\" title=\"struct infino::utils::environment::SERIAL_TEST\">SERIAL_TEST</a>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
