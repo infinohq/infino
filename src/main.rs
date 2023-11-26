@@ -5,7 +5,7 @@
 //!
 //! See an Infino architecture overview [here](https://github.com/infinohq/infino).
 //! Infino has data ingestion APIs for storing data in Infino and query APIs
-//! for retrieving data form Infino. Ingested data is persisted in a queue and forwarded to the 
+//! for retrieving data form Infino. Ingested data is persisted in a queue and forwarded to the
 //! CoreDB database that stores and retrieves telemetry data in Infino.
 //!
 //! We also summarize logs using Generative AI models; we are currently using [OpenAI](https://platform.openai.com/)
