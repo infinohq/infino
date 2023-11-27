@@ -162,7 +162,7 @@
 
   <span class="attr">#[test]
   </span><span class="kw">fn </span>test_summarize_no_openai_key() {
-    environment::with_env_vars(<span class="macro">vec!</span>[], || {
+    environment::with_env_vars(<span class="macro">vec!</span>[(<span class="string">&quot;OPENAI_API_KEY&quot;</span>, <span class="prelude-val">None</span>)], || {
       <span class="kw">let </span>openai_helper = OpenAIHelper::new();
       <span class="kw">let </span>logs = Vec::new();
       <span class="kw">let </span>result = openai_helper.summarize(<span class="kw-2">&amp;</span>logs, <span class="number">100</span>);
