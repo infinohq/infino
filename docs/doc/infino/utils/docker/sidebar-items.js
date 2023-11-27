@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["exec_command","remove_docker_container","start_docker_container","stop_docker_container"]};

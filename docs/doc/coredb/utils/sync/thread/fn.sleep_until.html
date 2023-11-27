@@ -1,0 +1,40 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Puts the current thread to sleep until the specified deadline has passed."><title>sleep_until in coredb::utils::sync::thread - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="coredb" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="logo-container" href="../../../../coredb/index.html"><img class="rust-logo" src="../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a></nav><nav class="sidebar"><a class="logo-container" href="../../../../coredb/index.html"><img class="rust-logo" src="../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><div class="sidebar-elems"><h2><a href="index.html">In coredb::utils::sync::thread</a></h2></div></nav><main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1>Function <a href="../../../index.html">coredb</a>::<wbr><a href="../../index.html">utils</a>::<wbr><a href="../index.html">sync</a>::<wbr><a href="index.html">thread</a>::<wbr><a class="fn" href="#">sleep_until</a><button id="copy-path" title="Copy item path to clipboard"><img src="../../../../static.files/clipboard-7571035ce49a181d.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="src" href="https://doc.rust-lang.org/1.74.0/src/std/thread/mod.rs.html#947">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><pre class="rust item-decl"><code>pub fn sleep_until(deadline: <a class="struct" href="https://doc.rust-lang.org/1.74.0/std/time/struct.Instant.html" title="struct std::time::Instant">Instant</a>)</code></pre><span class="item-info"><div class="stab unstable"><span class="emoji">🔬</span><span>This is a nightly-only experimental API. (<code>thread_sleep_until</code>)</span></div></span><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Puts the current thread to sleep until the specified deadline has passed.</p>
+<p>The thread may still be asleep after the deadline specified due to
+scheduling specifics or platform-dependent functionality. It will never
+wake before.</p>
+<p>This function is blocking, and should not be used in <code>async</code> functions.</p>
+<h2 id="platform-specific-behavior"><a href="#platform-specific-behavior">Platform-specific behavior</a></h2>
+<p>This function uses <a href="fn.sleep.html" title="fn coredb::utils::sync::thread::sleep"><code>sleep</code></a> internally, see its platform-specific behaviour.</p>
+<h2 id="examples"><a href="#examples">Examples</a></h2>
+<p>A simple game loop that limits the game to 60 frames per second.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#![feature(thread_sleep_until)]
+</span><span class="kw">let </span>max_fps = <span class="number">60.0</span>;
+<span class="kw">let </span>frame_time = Duration::from_secs_f32(<span class="number">1.0</span>/max_fps);
+<span class="kw">let </span><span class="kw-2">mut </span>next_frame = Instant::now();
+<span class="kw">loop </span>{
+    thread::sleep_until(next_frame);
+    next_frame += frame_time;
+    update();
+    render();
+}</code></pre></div>
+<p>A slow api we must not call too fast and which takes a few
+tries before succeeding. By using <code>sleep_until</code> the time the
+api call takes does not influence when we retry or when we give up</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#![feature(thread_sleep_until)]
+</span><span class="kw">let </span>deadline = Instant::now() + MAX_DURATION;
+<span class="kw">let </span>delay = Duration::from_millis(<span class="number">250</span>);
+<span class="kw">let </span><span class="kw-2">mut </span>next_attempt = Instant::now();
+<span class="kw">loop </span>{
+    <span class="kw">if </span>Instant::now() &gt; deadline {
+        <span class="kw">break </span><span class="prelude-val">Err</span>(());
+    }
+    <span class="kw">if let </span>Status::Ready(data) = slow_web_api_call() {
+        <span class="kw">break </span><span class="prelude-val">Ok</span>(data);
+    }
+
+    next_attempt = deadline.min(next_attempt + delay);
+    thread::sleep_until(next_attempt);
+}</code></pre></div>
+</div></details></section></div></main></body></html>

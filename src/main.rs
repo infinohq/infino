@@ -1,3 +1,17 @@
+//! The Infino server application and interface.
+//!
+//! The Infino server is an [Axum](https://docs.rs/axum/latest/axum/) web application that handles all API
+//! requests to Infino.
+//!
+//! See an Infino architecture overview [here](https://github.com/infinohq/infino).
+//! Infino has data ingestion APIs for storing data in Infino and query APIs
+//! for retrieving data form Infino. Ingested data is persisted in a queue and forwarded to the
+//! CoreDB database that stores and retrieves telemetry data in Infino.
+//!
+//! We also summarize logs using Generative AI models; we are currently using [OpenAI](https://platform.openai.com/)
+//! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
+//! models. More to come.
+
 mod queue_manager;
 mod utils;
 
@@ -72,7 +86,8 @@ struct SummarizeQueryResponse {
   results: Vec<LogMessage>,
 }
 
-/// Periodically commits coredb (typically called in a thread, so that coredb can be asyncronously committed).
+/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
+/// can be asyncronously committed).
 async fn commit_in_loop(
   state: Arc<AppState>,
   commit_interval_in_seconds: u32,
@@ -273,7 +288,7 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
   Ok(timestamp)
 }
 
-/// Append log data to coredb.
+/// Append log data to CoreDB.
 async fn append_log(
   State(state): State<Arc<AppState>>,
   Json(log_json): Json<serde_json::Value>,
@@ -334,8 +349,8 @@ async fn append_log(
   Ok(())
 }
 
-/// Deprecated function for backwards-compatibility to append metric data to coredb.
-/// TODO: Remove this function by Jan 2024.
+/// Deprecated function for backwards-compatibility. Wraps append_metric().
+// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use append_metric instead")]
 async fn append_ts(
@@ -345,7 +360,7 @@ async fn append_ts(
   append_metric(axum::extract::State(state), axum::Json(ts_json)).await
 }
 
-/// Append metric data to coredb.
+/// Append metric data to CoreDB.
 async fn append_metric(
   State(state): State<Arc<AppState>>,
   Json(ts_json): Json<serde_json::Value>,
@@ -430,8 +445,8 @@ async fn append_metric(
   Ok(())
 }
 
-/// Deprecated function for backwards-compatibility to search log data in coredb.
-/// TODO: Remove this function by Jan 2024.
+/// Deprecated function for backwards-compatibility. Wraps search_logs().
+// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use search_logs instead")]
 async fn search_log(
@@ -445,14 +460,14 @@ async fn search_log(
   .await
 }
 
-/// Search logs in coredb.
+/// Search logs in CoreDB.
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
 ) -> String {
   debug!("Searching logs: {:?}", logs_query);
 
-  let results = state.coredb.get_logs(
+  let results = state.coredb.search_logs(
     &logs_query.text,
     // The default for range start time is 0.
     logs_query.start_time.unwrap_or(0),
@@ -465,7 +480,7 @@ async fn search_logs(
   serde_json::to_string(&results).expect("Could not convert search results to json")
 }
 
-/// Search and summarize logs in coredb.
+/// Search and summarize logs in CoreDB.
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
@@ -475,7 +490,7 @@ async fn summarize(
   // Number of log message to summarize.
   let k = summarize_query.k.unwrap_or(100);
 
-  let results = state.coredb.get_logs(
+  let results = state.coredb.search_logs(
     &summarize_query.text,
     // The default for range start time is 0.
     summarize_query.start_time.unwrap_or(0),
@@ -506,8 +521,8 @@ async fn summarize(
   }
 }
 
-/// Deprecated function for backwards-compatibility to search metric data in coredb.
-/// TODO: Remove this function by Jan 2024.
+/// Deprecated function for backwards-compatibility. Wraps search_metrics().
+// TODO: Remove this function by Jan 2024.
 #[allow(dead_code)]
 #[deprecated(note = "Use search_metrics instead")]
 async fn search_ts(
@@ -521,7 +536,7 @@ async fn search_ts(
   .await
 }
 
-/// Search metrics in coredb.
+/// Search metrics in CoreDB.
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
@@ -550,7 +565,7 @@ async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, St
   Ok(())
 }
 
-/// Get index directory used by coredb.
+/// Get index directory used by CoreDB.
 async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
   state.coredb.get_index_dir()
 }
@@ -560,7 +575,7 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
   "OK".to_owned()
 }
 
-/// Create a new index in coredb with given name.
+/// Create a new index in CoreDB with the given name.
 async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,
@@ -741,7 +756,7 @@ mod tests {
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    log_messages_received = refreshed_coredb.get_logs(search_text, start_time, end_time);
+    log_messages_received = refreshed_coredb.search_logs(search_text, start_time, end_time);
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);

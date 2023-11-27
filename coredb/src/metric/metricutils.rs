@@ -36,7 +36,7 @@ pub fn decompress_numeric_vector(compressed: &[u8]) -> Result<Vec<MetricPoint>, 
   }
 
   // We need to convert to/from metric_point::MetricPoint/tsz::DataPoint to avoid tsz::DataPoint in
-  // coredb's public API. In future, to improve performance, we may implement the compression/decompression
+  // CoreDB's public API. In future, to improve performance, we may implement the compression/decompression
   // of metric_point::MetricPoint directly.
   let metric_points = tsz_metric_points
     .into_iter()
@@ -52,7 +52,7 @@ pub fn compress_metric_point_vector(metric_points: &[MetricPoint]) -> Vec<u8> {
   let start_time = start_metric_point.get_time();
 
   // We need to convert to/from metric_point::MetricPoint/tsz::DataPoint to avoid tsz::DataPoint in
-  // coredb's public API. In future, to improve performance, we may implement the compression/decompression
+  // CoreDB's public API. In future, to improve performance, we may implement the compression/decompression
   // of metric_point::MetricPoint directly.
   let tsz_metric_points: Vec<tsz::DataPoint> = metric_points
     .iter()

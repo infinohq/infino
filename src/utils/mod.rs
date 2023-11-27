@@ -1,3 +1,5 @@
+//! Utilities for managing the Infino application.
+
 pub(crate) mod docker;
 pub(crate) mod environment;
 pub(crate) mod error;

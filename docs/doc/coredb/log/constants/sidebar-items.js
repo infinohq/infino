@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":["BLOCK_SIZE_FOR_LOG_MESSAGES"],"struct":["BITPACKER"]};

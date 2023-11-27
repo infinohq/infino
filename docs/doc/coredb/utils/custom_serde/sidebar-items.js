@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["atomic_cell_serde","rwlock_serde"]};

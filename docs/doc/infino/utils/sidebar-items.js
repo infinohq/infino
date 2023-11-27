@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["docker","environment","error","openai_helper","settings","shutdown"]};

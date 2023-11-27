@@ -34,6 +34,14 @@ build:
 
 clean:
 	cargo clean
+	rm -rf docs/release
+
+.PHONY: docs
+
+docs:
+	echo "Generating documentation to docs/doc"
+	cargo doc --no-deps --workspace --document-private-items --target-dir docs --release
+	git add docs/doc
 
 docker-build:
 	echo "Running docker build..."

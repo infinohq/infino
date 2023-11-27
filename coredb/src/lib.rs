@@ -1,3 +1,8 @@
+//! CoreDB is a telemetry database.
+//!
+//! It uses time-sharded segments and compressed blocks for data storage
+//! and implements indexing for fast data retrieval.
+
 pub(crate) mod index_manager;
 pub mod log;
 pub mod metric;
@@ -15,15 +20,15 @@ use crate::metric::metric_point::MetricPoint;
 use crate::utils::config::Settings;
 use crate::utils::error::CoreDBError;
 
-/// Database for storing telemetry data.
+/// Database for storing telemetry data, mapping string keys to index objects.
 pub struct CoreDB {
   index_map: DashMap<String, Index>,
   settings: Settings,
 }
 
 impl CoreDB {
-  /// Create a new CoreDB at the directory path specified in the config.
-  /// Default index is always created with coredb
+  /// Create a new CoreDB at the directory path specified in the config,
+  /// creating a default index if none already exists.
   pub fn new(config_dir_path: &str) -> Result<Self, CoreDBError> {
     let result = Settings::new(config_dir_path);
 
@@ -119,6 +124,10 @@ impl CoreDB {
     time: u64,
     value: f64,
   ) {
+    debug!(
+      "Appending metric point in CoreDB: time {}, value {}, labels {:?}, name {}",
+      time, value, labels, metric_name
+    );
     self
       .index_map
       .get(self.get_default_index_name())
@@ -127,8 +136,8 @@ impl CoreDB {
       .append_metric_point(metric_name, labels, time, value);
   }
 
-  /// Get the log messages for given query and range.
-  pub fn get_logs(
+  /// Search the log messages for given query and range.
+  pub fn search_logs(
     &self,
     query: &str,
     range_start_time: u64,
@@ -158,8 +167,8 @@ impl CoreDB {
       .get_metrics(label_name, label_value, range_start_time, range_end_time)
   }
 
-  /// Commit the index.
-  /// If the flag sync_after_commit is set to true, the directory is sync-ed immediately instead of relying on the OS to do so,
+  /// Commit the index to disk. If the flag sync_after_commit is set to true,
+  /// the directory is sync'd immediately instead of relying on the OS to do so,
   /// hence this flag is usually set to true only in tests.
   pub fn commit(&self, sync_after_commit: bool) {
     self
@@ -171,7 +180,7 @@ impl CoreDB {
   }
 
   /// Refresh the default index from the given directory path.
-  /// TODO: what to do if there are multiple indices?
+  // TODO: what to do if there are multiple indices?
   pub fn refresh(config_dir_path: &str) -> Self {
     // Read the settings and the index directory path.
     let settings = Settings::new(config_dir_path).unwrap();
@@ -201,12 +210,12 @@ impl CoreDB {
       .get_index_dir()
   }
 
-  /// Get the settings for this coredb.
+  /// Get the settings for this CoreDB.
   pub fn get_settings(&self) -> &Settings {
     &self.settings
   }
 
-  /// Function to create new index with given name
+  /// Create a new index.
   pub fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let index_dir_path = self.settings.get_coredb_settings().get_index_dir_path();
     let num_log_messages_threshold = self
@@ -229,7 +238,7 @@ impl CoreDB {
     Ok(())
   }
 
-  /// Function to delete index with given name
+  /// Delete an index.
   pub fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let index = self.index_map.remove(index_name);
     match index {
@@ -333,7 +342,7 @@ mod tests {
     let end = Utc::now().timestamp_millis() as u64;
 
     // Search for log messages. The order of results should be reverse chronological order.
-    let results = coredb.get_logs("message", start, end);
+    let results = coredb.search_logs("message", start, end);
     assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
     assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
 

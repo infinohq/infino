@@ -30,7 +30,7 @@ const DEFAULT_NUM_LOG_MESSAGES_THRESHOLD: u32 = 100_000;
 const DEFAULT_NUM_METRIC_POINTS_THRESHOLD: u32 = 100_000;
 
 #[derive(Debug)]
-/// Index for storing log messages and time series metric points.
+/// Index for storing log messages and metric points.
 pub struct Index {
   /// Metadata for this index.
   metadata: Metadata,
@@ -59,11 +59,10 @@ impl Index {
     )
   }
 
-  /// Creates a new index at the specified directory(index_dir_path) path with customizable parameters for
-  /// threshold log messages and metric points.
-  /// However, if a directory with the same path already exists and has a metadata file in it,
-  /// the function will refresh the existing index instead of creating a new one.
-  /// If the refresh process fails, an error will be thrown to indicate the issue.
+  /// Creates a new index at a specified directory path with customizable parameters for log message
+  /// and metric point thresholds. If a directory with the same path already exists and has a metadata
+  /// file in it, the existing index will be refreshed instead of creating a new one. If the refresh
+  /// process fails, an error will be thrown to indicate the issue.
   pub fn new_with_threshold_params(
     index_dir: &str,
     num_log_messages_threshold: u32,
@@ -80,7 +79,7 @@ impl Index {
       // index_dir_path has metadata file, refresh the index instead of creating new one
       match Self::refresh(index_dir) {
         Ok(index) => {
-          // Update metadata with max log message and metric points
+          // Update metadata with max log messages and metric points
           index
             .metadata
             .update_max_log_message_count_per_segment(num_log_messages_threshold);
@@ -149,7 +148,7 @@ impl Index {
       .unwrap()
   }
 
-  /// Append a log message to this index.
+  /// Append a log message to the current segment of the index.
   pub fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, message: &str) {
     debug!(
       "Appending log message, time: {}, fields: {:?}, message: {}",
@@ -160,13 +159,12 @@ impl Index {
     let current_segment_ref = self.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
-    // Append the log message to the current segment.
     current_segment
       .append_log_message(time, fields, message)
       .unwrap();
   }
 
-  /// Append a metric point to this index.
+  /// Append a metric point to the current segment of the index.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
@@ -246,7 +244,7 @@ impl Index {
           .get_approx_max_metric_point_count_per_segment()
   }
 
-  /// Commit the segment to disk.
+  /// Commit a segment to disk.
   ///
   /// If sync_after_write is set to true, make sure that the OS buffers are flushed to
   /// disk before returning (typically sync_after_write should be set to true in tests that refresh the index
@@ -379,8 +377,8 @@ impl Index {
     segment_numbers
   }
 
-  /// Get time series corresponding to given label name and value, within the given range (inclusive of
-  /// both start and end time).
+  /// Get metric points corresponding to given label name and value, within the
+  /// given range (inclusive of both start and end time).
   pub fn get_metrics(
     &self,
     label_name: &str,
@@ -394,7 +392,7 @@ impl Index {
     for segment_number in segment_numbers {
       let segment = self.all_segments_map.get(&segment_number).unwrap();
       let mut metric_points =
-        segment.get_metrics(label_name, label_value, range_start_time, range_end_time);
+        segment.search_metrics(label_name, label_value, range_start_time, range_end_time);
       retval.append(&mut metric_points);
     }
     retval

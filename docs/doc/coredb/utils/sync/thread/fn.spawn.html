@@ -1,0 +1,85 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Spawns a new thread, returning a `JoinHandle` for it."><title>spawn in coredb::utils::sync::thread - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="coredb" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="logo-container" href="../../../../coredb/index.html"><img class="rust-logo" src="../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a></nav><nav class="sidebar"><a class="logo-container" href="../../../../coredb/index.html"><img class="rust-logo" src="../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><div class="sidebar-elems"><h2><a href="index.html">In coredb::utils::sync::thread</a></h2></div></nav><main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1>Function <a href="../../../index.html">coredb</a>::<wbr><a href="../../index.html">utils</a>::<wbr><a href="../index.html">sync</a>::<wbr><a href="index.html">thread</a>::<wbr><a class="fn" href="#">spawn</a><button id="copy-path" title="Copy item path to clipboard"><img src="../../../../static.files/clipboard-7571035ce49a181d.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><span class="since" title="Stable since Rust version 1.0.0">1.0.0</span> · <a class="src" href="https://doc.rust-lang.org/1.74.0/src/std/thread/mod.rs.html#680-684">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><pre class="rust item-decl"><code>pub fn spawn&lt;F, T&gt;(f: F) -&gt; <a class="struct" href="struct.JoinHandle.html" title="struct coredb::utils::sync::thread::JoinHandle">JoinHandle</a>&lt;T&gt;<span class="where fmt-newline">where
+    F: <a class="trait" href="https://doc.rust-lang.org/1.74.0/core/ops/function/trait.FnOnce.html" title="trait core::ops::function::FnOnce">FnOnce</a>() -&gt; T + <a class="trait" href="https://doc.rust-lang.org/1.74.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'static,
+    T: <a class="trait" href="https://doc.rust-lang.org/1.74.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'static,</span></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Spawns a new thread, returning a <a href="struct.JoinHandle.html" title="struct coredb::utils::sync::thread::JoinHandle"><code>JoinHandle</code></a> for it.</p>
+<p>The join handle provides a <a href="struct.JoinHandle.html#method.join" title="method coredb::utils::sync::thread::JoinHandle::join"><code>join</code></a> method that can be used to join the spawned
+thread. If the spawned thread panics, <a href="struct.JoinHandle.html#method.join" title="method coredb::utils::sync::thread::JoinHandle::join"><code>join</code></a> will return an <a href="https://doc.rust-lang.org/1.74.0/core/result/enum.Result.html#variant.Err" title="variant core::result::Result::Err"><code>Err</code></a> containing
+the argument given to <a href="https://doc.rust-lang.org/1.74.0/std/macro.panic.html" title="macro std::panic"><code>panic!</code></a>.</p>
+<p>If the join handle is dropped, the spawned thread will implicitly be <em>detached</em>.
+In this case, the spawned thread may no longer be joined.
+(It is the responsibility of the program to either eventually join threads it
+creates or detach them; otherwise, a resource leak will result.)</p>
+<p>This call will create a thread using default parameters of <a href="struct.Builder.html" title="struct coredb::utils::sync::thread::Builder"><code>Builder</code></a>, if you
+want to specify the stack size or the name of the thread, use this API
+instead.</p>
+<p>As you can see in the signature of <code>spawn</code> there are two constraints on
+both the closure given to <code>spawn</code> and its return value, let’s explain them:</p>
+<ul>
+<li>
+<p>The <code>'static</code> constraint means that the closure and its return value
+must have a lifetime of the whole program execution. The reason for this
+is that threads can outlive the lifetime they have been created in.</p>
+<p>Indeed if the thread, and by extension its return value, can outlive their
+caller, we need to make sure that they will be valid afterwards, and since
+we <em>can’t</em> know when it will return we need to have them valid as long as
+possible, that is until the end of the program, hence the <code>'static</code>
+lifetime.</p>
+</li>
+<li>
+<p>The <a href="https://doc.rust-lang.org/1.74.0/core/marker/trait.Send.html" title="trait core::marker::Send"><code>Send</code></a> constraint is because the closure will need to be passed
+<em>by value</em> from the thread where it is spawned to the new thread. Its
+return value will need to be passed from the new thread to the thread
+where it is <code>join</code>ed.
+As a reminder, the <a href="https://doc.rust-lang.org/1.74.0/core/marker/trait.Send.html" title="trait core::marker::Send"><code>Send</code></a> marker trait expresses that it is safe to be
+passed from thread to thread. <a href="https://doc.rust-lang.org/1.74.0/core/marker/trait.Sync.html" title="trait core::marker::Sync"><code>Sync</code></a> expresses that it is safe to have a
+reference be passed from thread to thread.</p>
+</li>
+</ul>
+<h2 id="panics"><a href="#panics">Panics</a></h2>
+<p>Panics if the OS fails to create a thread; use <a href="struct.Builder.html#method.spawn" title="method coredb::utils::sync::thread::Builder::spawn"><code>Builder::spawn</code></a>
+to recover from such errors.</p>
+<h2 id="examples"><a href="#examples">Examples</a></h2>
+<p>Creating a thread.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::thread;
+
+<span class="kw">let </span>handler = thread::spawn(|| {
+    <span class="comment">// thread code
+</span>});
+
+handler.join().unwrap();</code></pre></div>
+<p>As mentioned in the module documentation, threads are usually made to
+communicate using <a href="https://doc.rust-lang.org/1.74.0/std/sync/mpsc/index.html" title="mod std::sync::mpsc"><code>channels</code></a>, here is how it usually looks.</p>
+<p>This example also shows how to use <code>move</code>, in order to give ownership
+of values to a thread.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::thread;
+<span class="kw">use </span>std::sync::mpsc::channel;
+
+<span class="kw">let </span>(tx, rx) = channel();
+
+<span class="kw">let </span>sender = thread::spawn(<span class="kw">move </span>|| {
+    tx.send(<span class="string">&quot;Hello, thread&quot;</span>.to_owned())
+        .expect(<span class="string">&quot;Unable to send on channel&quot;</span>);
+});
+
+<span class="kw">let </span>receiver = thread::spawn(<span class="kw">move </span>|| {
+    <span class="kw">let </span>value = rx.recv().expect(<span class="string">&quot;Unable to receive from channel&quot;</span>);
+    <span class="macro">println!</span>(<span class="string">&quot;{value}&quot;</span>);
+});
+
+sender.join().expect(<span class="string">&quot;The sender thread has panicked&quot;</span>);
+receiver.join().expect(<span class="string">&quot;The receiver thread has panicked&quot;</span>);</code></pre></div>
+<p>A thread can also return a value through its <a href="struct.JoinHandle.html" title="struct coredb::utils::sync::thread::JoinHandle"><code>JoinHandle</code></a>, you can use
+this to make asynchronous computations (futures might be more appropriate
+though).</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::thread;
+
+<span class="kw">let </span>computation = thread::spawn(|| {
+    <span class="comment">// Some expensive computation.
+    </span><span class="number">42
+</span>});
+
+<span class="kw">let </span>result = computation.join().unwrap();
+<span class="macro">println!</span>(<span class="string">&quot;{result}&quot;</span>);</code></pre></div>
+</div></details></section></div></main></body></html>
