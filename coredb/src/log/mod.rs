@@ -1,4 +1,4 @@
-//! Store and retrieve log messages from CoreDB
+//! Store and retrieve log messages from CoreDB.
 //!
 //! Log messages are stored in time-sharded segments.
 //! Each segment is indexed as a [postings list](https://en.wikipedia.org/wiki/Inverted_index)

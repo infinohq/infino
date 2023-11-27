@@ -14,7 +14,7 @@ use crate::utils::{docker, error::InfinoError};
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-/// Represents rammitmq for storing append requests, before they are added to the index.
+/// Represents RabbitMQ for storing append requests, before they are added to the index.
 pub struct RabbitMQ {
   container_name: String,
   image_name: String,
