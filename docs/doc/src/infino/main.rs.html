@@ -1065,6 +1065,7 @@
 <a href="#1065" id="1065">1065</a>
 <a href="#1066" id="1066">1066</a>
 <a href="#1067" id="1067">1067</a>
+<a href="#1068" id="1068">1068</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! The Infino server application and interface.
 //!
 //! The Infino server is an [Axum](https://docs.rs/axum/latest/axum/) web application that handles all API
@@ -1153,7 +1154,8 @@
   results: Vec&lt;LogMessage&gt;,
 }
 
-<span class="doccomment">/// Periodically commits coredb (typically called in a thread, so that coredb can be asyncronously committed).
+<span class="doccomment">/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
+/// can be asyncronously committed).
 </span><span class="kw">async fn </span>commit_in_loop(
   state: Arc&lt;AppState&gt;,
   commit_interval_in_seconds: u32,

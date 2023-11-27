@@ -10,12 +10,14 @@
 <a href="#10" id="10">10</a>
 <a href="#11" id="11">11</a>
 <a href="#12" id="12">12</a>
+<a href="#13" id="13">13</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! Store and retrieve metric data from CoreDB.
 //!
 //! Metric points are stored in time-sharded segments.
 //! Each segment is indexed as a [time series](https://www.tableau.com/learn/articles/time-series-analysis)
 //! consisting of compressed time series blocks. Each time series block contains a vector of metric points
 //! and is wrapped in a read-write lock for thread safety.
+
 </span><span class="kw">mod </span>constants;
 <span class="kw">pub mod </span>metric_point;
 <span class="kw">mod </span>metricutils;
