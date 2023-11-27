@@ -29,3 +29,6 @@ docs/.rustc_info.json
 docs/.rustdoc_fingerprint.json
 docs/.lock
 docs/release
+
+# Mac OS breadcrumbs
+**/.DS_Store

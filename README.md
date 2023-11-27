@@ -37,7 +37,9 @@ To address **complexity**, Infino focuses on AI and automation:
 - **Dashboards:** OSS dashboard support + SQL support for BI interfaces like Tableau or Sigma.
 - **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
 
-![Architecture](docs/images/Infino_architecture.png)
+![Architecture (Light)](docs/images/Infino_architecture_light.png#gh-light-mode-only)
+![Architecture (Dark)](docs/images/Infino_architecture_dark.png#gh-dark-mode-only)
+
 
 ## Developer Docs
 Read our repo documentation [here](https://infinohq.github.io/infino/doc/infino/index.html).
@@ -77,8 +79,7 @@ For now, you need to build the repo. You will first need to:
 
 </br>
 
-Please file an issue if you face any problems or [contact us](#telephone_receiver-contact-us) if you
-want to discuss your use-case over virtual coffee.
+Please file an issue if you face any problems or contact us directly if you want to discuss your use-case over virtual coffee.
 
 ## Contributions
 

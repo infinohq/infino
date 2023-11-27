@@ -95,7 +95,7 @@ Average over 10 queries on time series.
 
 | Metric points  | Prometheus        | Infino            |
 | -------------- | ----------------- | ----------------- |
-| Search Latency | 2.68 us  | 2.86 us |
+| Search Latency | 2.68 μs  | 2.86 μs |
 
 ## Results (Apache log - medium): 
 

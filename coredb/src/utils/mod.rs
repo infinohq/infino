@@ -1,3 +1,5 @@
+//! Utilities for managing CoreDB.
+
 pub(crate) mod custom_serde;
 pub(crate) mod error;
 pub(crate) mod range;
