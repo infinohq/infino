@@ -70,7 +70,7 @@ mod tests {
 
   #[test]
   fn test_summarize_no_openai_key() {
-    environment::with_env_vars(vec![], || {
+    environment::with_env_vars(vec![("OPENAI_API_KEY", None)], || {
       let openai_helper = OpenAIHelper::new();
       let logs = Vec::new();
       let result = openai_helper.summarize(&logs, 100);
