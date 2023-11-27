@@ -40,7 +40,7 @@ To address **complexity**, Infino focuses on AI and automation:
 ![Architecture](docs/images/Infino_architecture.png)
 
 ## Developer Docs
-Read our repo documentation [here](http://username.github.io/infino/docs/doc/infino/index.html).
+Read our repo documentation [here](https://infinohq.github.io/infino/doc/infino/index.html).
 
 ## Features
 Note that we are still very much an alpha product but we have lots on the roadmap. Our development at the moment is focused on increasing the performance of the core engine to address **cost** but we are starting to add features to address **complexity**. 
@@ -82,7 +82,7 @@ want to discuss your use-case over virtual coffee.
 
 ## Contributions
 
-Contributions are welcome and highly appreciated! To get started, check out our [repo docs](http://username.github.io/infino/docs/doc/infino/index.html) and the [contributing guidelines](CONTRIBUTING.md).
+Contributions are welcome and highly appreciated! To get started, check out our [repo docs](http://infinohq.github.io/infino/doc/infino/index.html) and the [contributing guidelines](CONTRIBUTING.md).
 
 ## Contact Us
 
