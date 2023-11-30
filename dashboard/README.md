@@ -21,7 +21,7 @@ To get started quickly and experience how it looks like, see the driver script t
 To make it easy to experience Infino, the driver script sets up the Apache logs data in Infino and runs the dashboards. To run the driver script:
 
 * Set the `OPENAI_API_KEY` environment variable (and prepay for API credits with OPEN AI),
-* From the `dashboard` directort, run `make run-driver`
+* From the `dashboard` directory, run `make run-driver`
 * The script will open two browser tabs - one for the logs dashboard and one for the metrics dashboard.
 * When you are done, use `Ctrl-C` to stop the driver script, and close the browser tabs.
 
