@@ -10,6 +10,7 @@ import pytest
 def dashboard_file(request):
     return request.param
 
+
 def test_dashboard(dashboard_file):
     """
     This test only checks that the dashboard script runs without any errors. The actual output on the dashboard isn't checked.
