@@ -23,9 +23,9 @@ def get_user_query():
     )
 
     # If search-as-you-type functionality is not needed, use a regular text input (instead of st_keyup above)
-    #user_query = st.text_input(
+    # user_query = st.text_input(
     #    "Enter search text below and hit Enter:", "directory index forbidden"
-    #)
+    # )
     show_summary = st.checkbox("Show Summary", value=False)
 
     return user_query, show_summary
