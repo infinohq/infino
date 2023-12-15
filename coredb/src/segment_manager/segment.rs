@@ -219,8 +219,8 @@ impl Segment {
     Ok(())
   }
 
-  /// Serialize the segment to the specified directory.
-  pub fn commit(&self, dir: &str, sync_after_write: bool) {
+  /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
+  pub fn commit(&self, dir: &str, sync_after_write: bool) -> usize {
     let mut lock = self.commit_lock.lock().unwrap();
     *lock = thread::current().id();
 
@@ -238,32 +238,51 @@ impl Segment {
     let labels_path = dir_path.join(LABELS_FILE_NAME);
     let time_series_path = dir_path.join(TIME_SERIES_FILE_NAME);
 
-    serialize::write(
+    let num_bytes_metadata = serialize::write(
       &self.metadata,
       metadata_path.to_str().unwrap(),
       sync_after_write,
     );
-    serialize::write(&self.terms, terms_path.to_str().unwrap(), sync_after_write);
+    log::debug!("Serialized metadata to {} bytes", num_bytes_metadata);
+
+    let num_bytes_terms =
+      serialize::write(&self.terms, terms_path.to_str().unwrap(), sync_after_write);
     serialize::write(
       &self.inverted_map,
       inverted_map_path.to_str().unwrap(),
       sync_after_write,
     );
-    serialize::write(
+    log::debug!("Serialized terms to {} bytes", num_bytes_terms);
+
+    let num_bytes_forward_map = serialize::write(
       &self.forward_map,
       forward_map_path.to_str().unwrap(),
       sync_after_write,
     );
-    serialize::write(
+    log::debug!("Serialized forward map to {} bytes", num_bytes_forward_map);
+
+    let num_bytes_labels = serialize::write(
       &self.labels,
       labels_path.to_str().unwrap(),
       sync_after_write,
     );
-    serialize::write(
+    log::debug!("Serialized labels to {} bytes", num_bytes_labels);
+
+    let num_bytes_time_series = serialize::write(
       &self.time_series,
       time_series_path.to_str().unwrap(),
       sync_after_write,
     );
+    log::debug!("Serialized time series to {} bytes", num_bytes_time_series);
+
+    let num_bytes_total = num_bytes_metadata
+      + num_bytes_terms
+      + num_bytes_forward_map
+      + num_bytes_labels
+      + num_bytes_time_series;
+    log::debug!("Serialized segment to {} bytes", num_bytes_total);
+
+    num_bytes_total
   }
 
   /// Read the segment from the specified directory.
@@ -792,7 +811,8 @@ mod tests {
       .unwrap();
 
     // Commit so that the segment is serialized to disk, and refresh it from disk.
-    original_segment.commit(segment_dir_path, false);
+    let num_bytes = original_segment.commit(segment_dir_path, false);
+    assert!(num_bytes > 0);
 
     let from_disk_segment: Segment = Segment::refresh(segment_dir_path);
 
