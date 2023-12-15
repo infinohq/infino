@@ -8,8 +8,8 @@ use serde::Serialize;
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
 const COMPRESSION_LEVEL: i32 = 15;
 
-/// Compress and write the specified map to the given file.
-pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool) {
+/// Compress and write the specified map to the given file. Returns the number of bytes written.
+pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool) -> usize {
   let input = serde_json::to_string(&to_write).unwrap();
   let mut output = Vec::new();
 
@@ -24,7 +24,7 @@ pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool
 
   // Clippy generates a warning is we don't handle the return amount from file.write(). So,
   // assign it to _ to suppress the warning.
-  let _ = file.write(output.as_slice()).unwrap();
+  let num_bytes = file.write(output.as_slice()).unwrap();
 
   if sync_after_write {
     // Forcibly sync the file contents without relying on the OS to do so. This is usually
@@ -32,6 +32,8 @@ pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool
     // in production for performance reasons.
     file.sync_all().unwrap();
   }
+
+  num_bytes
 }
 
 /// Read the map from the given file.
@@ -62,7 +64,8 @@ mod tests {
       expected.insert(format!("{prefix}{i}"), i);
     }
 
-    write(&expected, file_path, false);
+    let num_bytes = write(&expected, file_path, false);
+    assert!(num_bytes > 0);
 
     let received: BTreeMap<String, u32> = read(file_path);
 
@@ -85,7 +88,8 @@ mod tests {
       expected.push(format!("{prefix}{i}"));
     }
 
-    write(&expected, file_path, false);
+    let num_bytes = write(&expected, file_path, false);
+    assert!(num_bytes > 0);
 
     let received: Vec<String> = read(file_path);
 
@@ -102,7 +106,8 @@ mod tests {
     let file_path = file.path().to_str().unwrap();
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
-    write(&expected, file_path, false);
+    let num_bytes = write(&expected, file_path, false);
+    assert!(num_bytes > 0);
 
     let received: BTreeMap<String, u32> = read(file_path);
     assert!(received.len() == 0);
