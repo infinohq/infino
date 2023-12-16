@@ -78,6 +78,7 @@ impl Segment {
     self.metadata.get_id()
   }
 
+  #[allow(dead_code)]
   /// Get log message count of this segment.
   pub fn get_log_message_count(&self) -> u32 {
     self.metadata.get_log_message_count()
@@ -95,6 +96,7 @@ impl Segment {
     self.metadata.get_label_count()
   }
 
+  #[allow(dead_code)]
   /// Get the number of metric points in this segment.
   pub fn get_metric_point_count(&self) -> u32 {
     self.metadata.get_metric_point_count()

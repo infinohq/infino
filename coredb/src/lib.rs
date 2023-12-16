@@ -37,8 +37,8 @@ impl CoreDB {
         let coredb_settings = settings.get_coredb_settings();
         let index_dir_path = coredb_settings.get_index_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
-        let num_log_messages_threshold = coredb_settings.get_num_log_messages_threshold();
-        let num_metric_points_threshold = coredb_settings.get_num_metric_points_threshold();
+        let segment_size_threshold_megabytes =
+          coredb_settings.get_segment_size_threshold_megabytes();
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
@@ -60,8 +60,7 @@ impl CoreDB {
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
               let index = Index::new_with_threshold_params(
                 &default_index_dir_path,
-                num_log_messages_threshold,
-                num_metric_points_threshold,
+                segment_size_threshold_megabytes,
               )?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
@@ -82,8 +81,7 @@ impl CoreDB {
             let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
             let index = Index::new_with_threshold_params(
               &default_index_dir_path,
-              num_log_messages_threshold,
-              num_metric_points_threshold,
+              segment_size_threshold_megabytes,
             )?;
             index_map.insert(default_index_name.to_string(), index);
           }
@@ -218,21 +216,14 @@ impl CoreDB {
   /// Create a new index.
   pub fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let index_dir_path = self.settings.get_coredb_settings().get_index_dir_path();
-    let num_log_messages_threshold = self
+    let segment_size_threshold_megabytes = self
       .settings
       .get_coredb_settings()
-      .get_num_log_messages_threshold();
-    let num_metric_points_threshold = self
-      .settings
-      .get_coredb_settings()
-      .get_num_metric_points_threshold();
+      .get_segment_size_threshold_megabytes();
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
-    let index = Index::new_with_threshold_params(
-      &index_dir_path,
-      num_log_messages_threshold,
-      num_metric_points_threshold,
-    )?;
+    let index =
+      Index::new_with_threshold_params(&index_dir_path, segment_size_threshold_megabytes)?;
 
     self.index_map.insert(index_name.to_string(), index);
     Ok(())
@@ -288,10 +279,7 @@ mod tests {
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name_line.as_bytes()).unwrap();
       file
-        .write_all(b"num_log_messages_threshold = 1000\n")
-        .unwrap();
-      file
-        .write_all(b"num_metric_points_threshold = 10000\n")
+        .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
     }
   }

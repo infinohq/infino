@@ -1,8 +1,7 @@
 [coredb]
 index_dir_path = "data"
 default_index_name = ".default"
-num_log_messages_threshold = 100000
-num_metric_points_threshold = 100000
+segment_size_threshold_megabytes = 256
 
 [server]
 port = 3000

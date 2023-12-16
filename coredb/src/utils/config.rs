@@ -9,8 +9,7 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 pub struct CoreDBSettings {
   index_dir_path: String,
   default_index_name: String,
-  num_log_messages_threshold: u32,
-  num_metric_points_threshold: u32,
+  segment_size_threshold_megabytes: f32,
 }
 
 impl CoreDBSettings {
@@ -24,22 +23,12 @@ impl CoreDBSettings {
     self.default_index_name.as_str()
   }
 
-  /// Get the setting for the threshold number of log messages per segment.
-  /// That is, if a commit is called on a segment and it has more than the specified number of log messages,
-  /// a new segment will be created.
-  pub fn get_num_log_messages_threshold(&self) -> u32 {
-    self.num_log_messages_threshold
-  }
-
-  /// Get the setting for the threshold number of metric points per segment.
-  /// That is, if a commit is called on a segment and it has more than the specified number of metric points,
-  /// a new segment will be created.
-  pub fn get_num_metric_points_threshold(&self) -> u32 {
-    self.num_metric_points_threshold
-  }
-
   pub fn get_default_config_file_name() -> &'static str {
     DEFAULT_CONFIG_FILE_NAME
+  }
+
+  pub fn get_segment_size_threshold_megabytes(&self) -> f32 {
+    self.segment_size_threshold_megabytes
   }
 }
 
@@ -109,18 +98,18 @@ mod tests {
         .write_all(b"default_index_name = \".default\"\n")
         .unwrap();
       file
-        .write_all(b"num_log_messages_threshold = 1000\n")
-        .unwrap();
-      file
-        .write_all(b"num_metric_points_threshold = 10000\n")
+        .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
     }
 
     let settings = Settings::new(&config_dir_path).unwrap();
     let coredb_settings = settings.get_coredb_settings();
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
-    assert_eq!(coredb_settings.get_num_log_messages_threshold(), 1000);
-    assert_eq!(coredb_settings.get_num_metric_points_threshold(), 10000);
+    assert_eq!(coredb_settings.get_default_index_name(), ".default");
+    assert_eq!(
+      coredb_settings.get_segment_size_threshold_megabytes(),
+      1024 as f32
+    );
 
     // Check settings override using RUN_MODE environment variable.
     env::set_var("RUN_MODE", "SETTINGSTEST");
@@ -128,12 +117,17 @@ mod tests {
     {
       let mut file = File::create(&config_file_path).unwrap();
       file.write_all(b"[coredb]\n").unwrap();
-      file.write_all(b"num_log_messages_threshold=1\n").unwrap();
+      file
+        .write_all(b"segment_size_threshold_megabytes=1\n")
+        .unwrap();
     }
     let settings = Settings::new(&config_dir_path).unwrap();
     let coredb_settings = settings.get_coredb_settings();
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
-    assert_eq!(coredb_settings.get_num_log_messages_threshold(), 1);
-    assert_eq!(coredb_settings.get_num_metric_points_threshold(), 10000);
+    assert_eq!(
+      coredb_settings.get_segment_size_threshold_megabytes(),
+      1 as f32
+    );
+    assert_eq!(coredb_settings.get_default_index_name(), ".default");
   }
 }
