@@ -312,19 +312,19 @@ impl Index {
       ));
     }
 
-    let all_segment_ids: Vec<u32> = serialize::read(all_segments_list_path.as_str());
+    let (all_segment_ids, _): (Vec<u32>, _) = serialize::read(all_segments_list_path.as_str());
     if all_segment_ids.is_empty() {
       // No all_segments_map present - so this may not be an index directory. Return an empty index.
       return Ok(Index::new(index_dir_path).unwrap());
     }
 
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
-    let metadata: Metadata = serialize::read(metadata_path.as_str());
+    let (metadata, _): (Metadata, _) = serialize::read(metadata_path.as_str());
 
     let all_segments_map: DashMap<u32, Segment> = DashMap::new();
     for id in all_segment_ids {
       let segment_dir_path = io::get_joined_path(index_dir_path, id.to_string().as_str());
-      let segment = Segment::refresh(&segment_dir_path);
+      let (segment, _) = Segment::refresh(&segment_dir_path);
       all_segments_map.insert(id, segment);
     }
 
@@ -608,7 +608,8 @@ mod tests {
 
       // Read the index from disk and see that it has expected number of log messages and metric points.
       let index = Index::refresh(&index_dir_path).unwrap();
-      let original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
+      let (original_segment, original_segment_size) =
+        Segment::refresh(&original_segment_path.to_str().unwrap());
       assert_eq!(
         original_segment.get_log_message_count(),
         original_segment_num_log_messages
@@ -617,6 +618,7 @@ mod tests {
         original_segment.get_metric_point_count(),
         original_segment_num_metric_points
       );
+      assert!(original_segment_size > 0);
 
       {
         // Write these in a separate block so that reference of current_segment from all_segments_map
@@ -654,7 +656,8 @@ mod tests {
       // Force a commit and refresh. The index should still have only 2 segments.
       index.commit(true);
       let index = Index::refresh(&index_dir_path).unwrap();
-      let mut original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
+      let (mut original_segment, original_segment_size) =
+        Segment::refresh(&original_segment_path.to_str().unwrap());
       assert_eq!(index.all_segments_map.len(), 2);
 
       assert_eq!(
@@ -665,6 +668,7 @@ mod tests {
         original_segment.get_metric_point_count(),
         original_segment_num_metric_points
       );
+      assert!(original_segment_size > 0);
 
       {
         // Write these in a separate block so that reference of current_segment from all_segments_map
@@ -705,7 +709,7 @@ mod tests {
       // Force a commit and refresh.
       index.commit(false);
       let index = Index::refresh(&index_dir_path).unwrap();
-      original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
+      (original_segment, _) = Segment::refresh(&original_segment_path.to_str().unwrap());
 
       let current_segment_log_message_count;
       let current_segment_metric_point_count;

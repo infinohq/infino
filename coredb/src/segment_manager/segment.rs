@@ -288,7 +288,7 @@ impl Segment {
   }
 
   /// Read the segment from the specified directory.
-  pub fn refresh(dir: &str) -> Segment {
+  pub fn refresh(dir: &str) -> (Segment, usize) {
     let dir_path = Path::new(dir);
     let metadata_path = dir_path.join(METADATA_FILE_NAME);
     let terms_path = dir_path.join(TERMS_FILE_NAME);
@@ -297,16 +297,27 @@ impl Segment {
     let labels_path = dir_path.join(LABELS_FILE_NAME);
     let time_series_path = dir_path.join(TIME_SERIES_FILE_NAME);
 
-    let metadata: Metadata = serialize::read(metadata_path.to_str().unwrap());
-    let terms: DashMap<String, u32> = serialize::read(terms_path.to_str().unwrap());
-    let inverted_map: DashMap<u32, PostingsList> =
+    let (metadata, metadata_size): (Metadata, _) = serialize::read(metadata_path.to_str().unwrap());
+    let (terms, terms_size): (DashMap<String, u32>, _) =
+      serialize::read(terms_path.to_str().unwrap());
+    let (inverted_map, inverted_map_size): (DashMap<u32, PostingsList>, _) =
       serialize::read(inverted_map_path.to_str().unwrap());
-    let forward_map: DashMap<u32, LogMessage> = serialize::read(forward_map_path.to_str().unwrap());
-    let labels: DashMap<String, u32> = serialize::read(labels_path.to_str().unwrap());
-    let time_series: DashMap<u32, TimeSeries> = serialize::read(time_series_path.to_str().unwrap());
+    let (forward_map, forward_map_size): (DashMap<u32, LogMessage>, _) =
+      serialize::read(forward_map_path.to_str().unwrap());
+    let (labels, labels_size): (DashMap<String, u32>, _) =
+      serialize::read(labels_path.to_str().unwrap());
+    let (time_series, time_series_size): (DashMap<u32, TimeSeries>, _) =
+      serialize::read(time_series_path.to_str().unwrap());
     let commit_lock = Mutex::new(thread::current().id());
 
-    Segment {
+    let total_size = metadata_size
+      + terms_size
+      + inverted_map_size
+      + forward_map_size
+      + labels_size
+      + time_series_size;
+
+    let segment = Segment {
       metadata,
       terms,
       inverted_map,
@@ -314,7 +325,9 @@ impl Segment {
       labels,
       time_series,
       commit_lock,
-    }
+    };
+
+    (segment, total_size)
   }
 
   /// Search the segment for the given query. If a query has multiple terms, it is by
@@ -813,10 +826,10 @@ mod tests {
       .unwrap();
 
     // Commit so that the segment is serialized to disk, and refresh it from disk.
-    let num_bytes = original_segment.commit(segment_dir_path, false);
-    assert!(num_bytes > 0);
+    let num_bytes_written = original_segment.commit(segment_dir_path, false);
+    assert!(num_bytes_written > 0);
 
-    let from_disk_segment: Segment = Segment::refresh(segment_dir_path);
+    let (from_disk_segment, from_disk_segment_size) = Segment::refresh(segment_dir_path);
 
     // Verify that both the segments are equal.
     assert_eq!(
@@ -827,6 +840,8 @@ mod tests {
       from_disk_segment.get_metric_point_count(),
       original_segment.get_metric_point_count()
     );
+    // Verify that the segment size (uncompressed) is greater than or equal to the number of bytes written (compressed).
+    assert!(from_disk_segment_size >= num_bytes_written);
 
     // Test metadata.
     assert!(from_disk_segment.metadata.get_log_message_count() == 1);
