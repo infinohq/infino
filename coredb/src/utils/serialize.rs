@@ -8,7 +8,7 @@ use serde::Serialize;
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
 const COMPRESSION_LEVEL: i32 = 15;
 
-/// Compress and write the specified map to the given file. Returns the number of bytes written.
+/// Compress and write the specified map to the given file. Returns the number of bytes written after compression.
 pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool) -> usize {
   let input = serde_json::to_string(&to_write).unwrap();
   let mut output = Vec::new();
@@ -36,14 +36,14 @@ pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool
   num_bytes
 }
 
-/// Read the map from the given file.
-pub fn read<T: DeserializeOwned>(file_path: &str) -> T {
+/// Read the map from the given file. Returns the map and the number of bytes read after decompression.
+pub fn read<T: DeserializeOwned>(file_path: &str) -> (T, usize) {
   let file = File::open(file_path).unwrap();
   let mmap =
     unsafe { Mmap::map(&file).unwrap_or_else(|_| panic!("Could not map file {}", file_path)) };
   let data = zstd::decode_all(&mmap[..]).unwrap();
   let retval: T = serde_json::from_slice(&data).unwrap();
-  retval
+  (retval, data.len())
 }
 
 #[cfg(test)]
@@ -63,15 +63,15 @@ mod tests {
     for i in 1..=num_keys {
       expected.insert(format!("{prefix}{i}"), i);
     }
+    let num_bytes_written = write(&expected, file_path, false);
+    assert!(num_bytes_written > 0);
 
-    let num_bytes = write(&expected, file_path, false);
-    assert!(num_bytes > 0);
-
-    let received: BTreeMap<String, u32> = read(file_path);
-
+    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = read(file_path);
     for i in 1..=num_keys {
       assert!(received.get(&String::from(format!("{prefix}{i}"))).unwrap() == &i);
     }
+    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written.
+    assert!(num_bytes_read >= num_bytes_written);
 
     file.close().expect("Could not close temporary file");
   }
@@ -88,14 +88,16 @@ mod tests {
       expected.push(format!("{prefix}{i}"));
     }
 
-    let num_bytes = write(&expected, file_path, false);
-    assert!(num_bytes > 0);
+    let num_bytes_written = write(&expected, file_path, false);
+    assert!(num_bytes_written > 0);
 
-    let received: Vec<String> = read(file_path);
+    let (received, num_bytes_read): (Vec<_>, _) = read(file_path);
 
     for i in 1..=num_keys {
       assert!(received.contains(&format!("{prefix}{i}")));
     }
+    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written.
+    assert!(num_bytes_read >= num_bytes_written);
 
     file.close().expect("Could not close temporary file");
   }
@@ -106,11 +108,15 @@ mod tests {
     let file_path = file.path().to_str().unwrap();
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
-    let num_bytes = write(&expected, file_path, false);
-    assert!(num_bytes > 0);
+    let num_bytes_written = write(&expected, file_path, false);
+    assert!(num_bytes_written > 0);
 
-    let received: BTreeMap<String, u32> = read(file_path);
+    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = read(file_path);
     assert!(received.len() == 0);
+
+    // For an empty map, zstd writes more bytes, as metadata - and reads less bytes.
+    // Hence, we don't compare the number of bytes read and written.
+    assert!(num_bytes_read > 0);
 
     file.close().expect("Could not close temporary file");
   }
