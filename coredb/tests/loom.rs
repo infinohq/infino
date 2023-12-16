@@ -23,10 +23,7 @@ mod loom_tests {
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file
-        .write_all(b"num_log_messages_threshold = 20\n")
-        .unwrap();
-      file
-        .write_all(b"num_metric_points_threshold = 40\n")
+        .write_all(b"segment_size_threshold_megabytes = 0.01\n")
         .unwrap();
     }
   }

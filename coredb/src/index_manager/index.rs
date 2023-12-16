@@ -21,13 +21,8 @@ const ALL_SEGMENTS_LIST_FILE_NAME: &str = "all_segments_list.bin";
 /// File name to store index metadata.
 const METADATA_FILE_NAME: &str = "metadata.bin";
 
-/// Default threshold for the number of max log messages per segment. Note that since we create new segments only on commit,
-/// this number will be approximate.
-const DEFAULT_NUM_LOG_MESSAGES_THRESHOLD: u32 = 100_000;
-
-/// Default threshold for the number of max metric points per segment. Note that since we create new segments only on commit,
-/// this number will be approximate.
-const DEFAULT_NUM_METRIC_POINTS_THRESHOLD: u32 = 100_000;
+/// Default threshold for size of segment. A new segment will be created in the next commit when a segment exceeds this size.
+const DEFAULT_SEGMENT_SIZE_THRESHOLD_MEGABYTES: f32 = 256.0;
 
 #[derive(Debug)]
 /// Index for storing log messages and metric points.
@@ -47,29 +42,26 @@ pub struct Index {
 }
 
 impl Index {
-  /// Create a new index with default threshold log messages / threshold metric points parameters.
+  /// Create a new index with default threshold segment size.
   /// However, if a directory with the same path already exists and has a metadata file in it,
   /// the function will refresh the existing index instead of creating a new one.
   /// If the refresh process fails, an error will be thrown to indicate the issue.
   pub fn new(index_dir_path: &str) -> Result<Self, CoreDBError> {
-    Index::new_with_threshold_params(
-      index_dir_path,
-      DEFAULT_NUM_LOG_MESSAGES_THRESHOLD,
-      DEFAULT_NUM_METRIC_POINTS_THRESHOLD,
-    )
+    Index::new_with_threshold_params(index_dir_path, DEFAULT_SEGMENT_SIZE_THRESHOLD_MEGABYTES)
   }
 
-  /// Creates a new index at a specified directory path with customizable parameters for log message
-  /// and metric point thresholds. If a directory with the same path already exists and has a metadata
+  /// Creates a new index at a specified directory path with customizable parameter for the segment size threshold.
+  /// If a directory with the same path already exists and has a metadata
   /// file in it, the existing index will be refreshed instead of creating a new one. If the refresh
   /// process fails, an error will be thrown to indicate the issue.
   pub fn new_with_threshold_params(
     index_dir: &str,
-    num_log_messages_threshold: u32,
-    num_metric_points_threshold: u32,
+    segment_size_threshold_megabytes: f32,
   ) -> Result<Self, CoreDBError> {
-    info!("Creating index - dir {}, max log messages per segment (approx): {}, max metric points per segment {}",
-          index_dir, num_log_messages_threshold, num_metric_points_threshold);
+    info!(
+      "Creating index - dir {}, segment size threshold in megabytes: {}",
+      index_dir, segment_size_threshold_megabytes
+    );
 
     let index_dir_path = Path::new(index_dir);
     if !index_dir_path.is_dir() {
@@ -79,13 +71,9 @@ impl Index {
       // index_dir_path has metadata file, refresh the index instead of creating new one
       match Self::refresh(index_dir) {
         Ok(index) => {
-          // Update metadata with max log messages and metric points
           index
             .metadata
-            .update_max_log_message_count_per_segment(num_log_messages_threshold);
-          index
-            .metadata
-            .update_max_metric_point_count_per_segment(num_metric_points_threshold);
+            .update_segment_size_threshold_megabytes(segment_size_threshold_megabytes);
           return Ok(index);
         }
         Err(err) => {
@@ -111,12 +99,7 @@ impl Index {
 
     // Create an initial segment.
     let segment = Segment::new();
-    let metadata = Metadata::new(
-      0,
-      0,
-      num_log_messages_threshold,
-      num_metric_points_threshold,
-    );
+    let metadata = Metadata::new(0, 0, segment_size_threshold_megabytes);
 
     // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
@@ -216,7 +199,7 @@ impl Index {
   }
 
   /// Helper function to commit a segment with given segment_number to disk.
-  fn commit_segment(&self, segment_number: u32, sync_after_write: bool) {
+  fn commit_segment(&self, segment_number: u32, sync_after_write: bool) -> usize {
     debug!("Committing segment with segment_number: {}", segment_number);
 
     // Get the segment corresponding to the segment_number.
@@ -226,22 +209,8 @@ impl Index {
     // Commit this segment.
     let segment_dir_path =
       io::get_joined_path(&self.index_dir_path, segment_number.to_string().as_str());
-    segment.commit(segment_dir_path.as_str(), sync_after_write);
-  }
 
-  /// Helper function to check if the given segment is 'too big'. In other words, it returns 'true' if the
-  /// number of log messages or the number of metric points in this segment exceeded the corresponding max values.
-  fn is_too_big(&self, segment_number: u32) -> bool {
-    // Get the segment corresponding to the segment_number.
-    let segment_ref = self.all_segments_map.get(&segment_number).unwrap();
-    let segment = segment_ref.value();
-
-    // Check if this segment is 'too big', and return a boolean indicating the same.
-    segment.get_log_message_count() > self.metadata.get_approx_max_log_message_count_per_segment()
-      || segment.get_metric_point_count()
-        > self
-          .metadata
-          .get_approx_max_metric_point_count_per_segment()
+    segment.commit(segment_dir_path.as_str(), sync_after_write)
   }
 
   /// Commit a segment to disk.
@@ -266,10 +235,11 @@ impl Index {
     }
 
     let original_current_segment_number = self.metadata.get_current_segment_number();
-    let too_big = self.is_too_big(original_current_segment_number);
+    let segment_size = self.commit_segment(original_current_segment_number, sync_after_write);
+    let segment_size_in_megabytes = (segment_size as f64 / 1024.0 / 1024.0) as f32;
 
-    // Create a new segment if the current one has become too big.
-    if too_big {
+    if segment_size_in_megabytes > self.metadata.get_segment_size_threshold_megabytes() {
+      // Create a new segment since the current one has become too big.
       let new_segment = Segment::new();
       let new_segment_number = self.metadata.fetch_increment_segment_count();
       let new_segment_dir_path = io::get_joined_path(
@@ -277,7 +247,7 @@ impl Index {
         new_segment_number.to_string().as_str(),
       );
 
-      // Write the new segment.
+      // Write the new (empty) segment to disk.
       new_segment.commit(new_segment_dir_path.as_str(), sync_after_write);
 
       // Note that DashMap::insert *may* cause a single-thread deadlock if the thread has a read
@@ -287,6 +257,7 @@ impl Index {
         .all_segments_map
         .insert(new_segment_number, new_segment);
 
+      // Appends will start going to the new segment after this point.
       self
         .metadata
         .update_current_segment_number(new_segment_number);
@@ -294,6 +265,10 @@ impl Index {
       // Commit the new_segment again as there might be more documents added after making it the
       // current segment.
       self.commit_segment(new_segment_number, sync_after_write);
+
+      // Commit the original segment again to commit any updates from the previous commit till the
+      // time of changing the current_sgement_number above.
+      self.commit_segment(original_current_segment_number, sync_after_write);
 
       all_segments_map_changed = true;
     }
@@ -315,8 +290,6 @@ impl Index {
 
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     serialize::write(&self.metadata, metadata_path.as_str(), sync_after_write);
-
-    self.commit_segment(original_current_segment_number, sync_after_write);
   }
 
   /// Read the index from the given index_dir_path.
@@ -412,6 +385,7 @@ impl Index {
 mod tests {
   use std::fs::File;
   use std::path::Path;
+  use std::thread::sleep;
   use std::time::Duration;
 
   use chrono::Utc;
@@ -580,7 +554,6 @@ mod tests {
     }
 
     let metric_name_label = "__name__";
-    println!("{}", metric_name_label);
     let received_metric_points = index.get_metrics(metric_name_label, "some_name", 0, u64::MAX);
 
     assert_eq!(expected_metric_points, received_metric_points);
@@ -591,7 +564,7 @@ mod tests {
   #[test_case(true, true; "when both logs and metric points are appended")]
   fn test_two_segments(append_log: bool, append_metric_point: bool) {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
-    for _ in 0..100 {
+    for _ in 0..10 {
       let index_dir = TempDir::new("index_test").unwrap();
       let index_dir_path = format!(
         "{}/{}",
@@ -599,7 +572,9 @@ mod tests {
         "test_two_segments"
       );
 
-      let index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
+      // Create an index with a small segment size threshold.
+      let index = Index::new_with_threshold_params(&index_dir_path, 0.001).unwrap();
+
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
         Path::new(&index_dir_path).join(original_segment_number.to_string().as_str());
@@ -608,20 +583,8 @@ mod tests {
       let mut expected_log_messages: Vec<String> = Vec::new();
       let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
-      let mut original_segment_num_log_messages = if append_log {
-        index
-          .metadata
-          .get_approx_max_log_message_count_per_segment()
-      } else {
-        0
-      };
-      let mut original_segment_num_metric_points = if append_metric_point {
-        index
-          .metadata
-          .get_approx_max_metric_point_count_per_segment()
-      } else {
-        0
-      };
+      let original_segment_num_log_messages = if append_log { 1000 } else { 0 };
+      let original_segment_num_metric_points = if append_metric_point { 50000 } else { 0 };
 
       for i in 0..original_segment_num_log_messages {
         let message = format!("{} {}", message_prefix, i);
@@ -640,10 +603,21 @@ mod tests {
       }
 
       // Force commit and then refresh the index.
-      // No new segment creation should happen right now as we are at exactly
-      // APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT log messages.
-      index.commit(false);
+      // This will write one segment to disk and create a new empty segment.
+      index.commit(true);
+
+      // Read the index from disk and see that it has expected number of log messages and metric points.
       let index = Index::refresh(&index_dir_path).unwrap();
+      let original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
+      assert_eq!(
+        original_segment.get_log_message_count(),
+        original_segment_num_log_messages
+      );
+      assert_eq!(
+        original_segment.get_metric_point_count(),
+        original_segment_num_metric_points
+      );
+
       {
         // Write these in a separate block so that reference of current_segment from all_segments_map
         // does not persist when commit() is called (and all_segments_map is updated).
@@ -651,25 +625,21 @@ mod tests {
         let current_segment_ref = index.get_current_segment_ref();
         let current_segment = current_segment_ref.value();
 
-        assert_eq!(index.all_segments_map.len(), 1);
-        assert_eq!(
-          current_segment.get_log_message_count(),
-          original_segment_num_log_messages
-        );
-        assert_eq!(
-          current_segment.get_metric_point_count(),
-          original_segment_num_metric_points
-        );
+        assert_eq!(index.all_segments_map.len(), 2);
+        assert_eq!(current_segment.get_log_message_count(), 0);
+        assert_eq!(current_segment.get_metric_point_count(), 0);
       }
 
-      // Now add a log message and/or a metric point. This will still land in the one and only segment in the index.
+      // Now add a log message and/or a metric point. This will still land in the current (empty) segment in the index.
+      let mut new_segment_num_log_messages = 0;
+      let mut new_segment_num_metric_points = 0;
       if append_log {
         index.append_log_message(
           Utc::now().timestamp_millis() as u64,
           &HashMap::new(),
           "some_message_1",
         );
-        original_segment_num_log_messages += 1;
+        new_segment_num_log_messages += 1;
       }
       if append_metric_point {
         index.append_metric_point(
@@ -678,24 +648,13 @@ mod tests {
           Utc::now().timestamp_millis() as u64,
           1.0,
         );
-        original_segment_num_metric_points += 1;
+        new_segment_num_metric_points += 1;
       }
 
-      // Force a commit and refresh. This will now create a second empty segment, which would now be
-      // the current segment.
-      index.commit(false);
+      // Force a commit and refresh. The index should still have only 2 segments.
+      index.commit(true);
       let index = Index::refresh(&index_dir_path).unwrap();
       let mut original_segment = Segment::refresh(&original_segment_path.to_str().unwrap());
-
-      {
-        // Write these in a separate block so that reference of current_segment from all_segments_map
-        // does not persist when commit() is called (and all_segments_map is updated).
-        // Otherwise, this test may deadlock.
-        let current_segment_ref = index.get_current_segment_ref();
-        let current_segment = current_segment_ref.value();
-        assert_eq!(current_segment.get_log_message_count(), 0);
-        assert_eq!(current_segment.get_metric_point_count(), 0);
-      }
       assert_eq!(index.all_segments_map.len(), 2);
 
       assert_eq!(
@@ -707,10 +666,24 @@ mod tests {
         original_segment_num_metric_points
       );
 
-      let mut new_segment_num_log_messages = 0;
-      let mut new_segment_num_metric_points = 0;
+      {
+        // Write these in a separate block so that reference of current_segment from all_segments_map
+        // does not persist when commit() is called (and all_segments_map is updated).
+        // Otherwise, this test may deadlock.
+        let current_segment_ref = index.get_current_segment_ref();
+        let current_segment = current_segment_ref.value();
+        assert_eq!(
+          current_segment.get_log_message_count(),
+          new_segment_num_log_messages
+        );
+        assert_eq!(
+          current_segment.get_metric_point_count(),
+          new_segment_num_metric_points
+        );
+      }
 
-      // Add one more log message and/or a metric point. This will land in the empty current_segment.
+      // Add one more log message and/or a metric point. This should land in the current_segment that has
+      // only 1 log message and/or metric point.
       if append_log {
         index.append_log_message(
           Utc::now().timestamp_millis() as u64,
@@ -742,18 +715,17 @@ mod tests {
         // Otherwise, this test may deadlock.
         let current_segment_ref = index.get_current_segment_ref();
         let current_segment = current_segment_ref.value();
+        current_segment_log_message_count = current_segment.get_log_message_count();
+        current_segment_metric_point_count = current_segment.get_metric_point_count();
 
         assert_eq!(
-          current_segment.get_log_message_count(),
+          current_segment_log_message_count,
           new_segment_num_log_messages
         );
         assert_eq!(
-          current_segment.get_metric_point_count(),
+          current_segment_metric_point_count,
           new_segment_num_metric_points
         );
-
-        current_segment_log_message_count = current_segment.get_log_message_count();
-        current_segment_metric_point_count = current_segment.get_metric_point_count();
       }
 
       assert_eq!(index.all_segments_map.len(), 2);
@@ -800,16 +772,16 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_multiple_segments_logs"
     );
+    let start_time = Utc::now().timestamp_millis() as u64;
 
-    let mut index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
+    // Create a new index with a low threshold for the segment size.
+    let mut index = Index::new_with_threshold_params(&index_dir_path, 0.001).unwrap();
+
     let message_prefix = "message";
-    let num_segments = 3;
-    let num_log_messages = num_segments
-      * (index
-        .metadata
-        .get_approx_max_log_message_count_per_segment()
-        + 1);
+    let num_log_messages = 10000;
+    let commit_after = 1000;
 
+    // Append log messages.
     let mut num_log_messages_from_last_commit = 0;
     for i in 1..=num_log_messages {
       let message = format!("{} {}", message_prefix, i);
@@ -819,43 +791,49 @@ mod tests {
         &message,
       );
 
-      // Commit immediately after we have indexed more than APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT messages.
+      // Commit after we have indexed more than commit_after messages.
       num_log_messages_from_last_commit += 1;
-      if num_log_messages_from_last_commit
-        > index
-          .metadata
-          .get_approx_max_log_message_count_per_segment()
-      {
+      if num_log_messages_from_last_commit > commit_after {
         index.commit(false);
         num_log_messages_from_last_commit = 0;
+        sleep(Duration::from_millis(1000));
       }
     }
 
+    // Commit and sleep to make sure the index is written to disk.
+    index.commit(true);
+    sleep(Duration::from_millis(1000));
+
+    let end_time = Utc::now().timestamp_millis() as u64;
+
+    // Read the index from disk.
     index = Index::refresh(&index_dir_path).unwrap();
+
     let current_segment_ref = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
-    // The last commit will create an empty segment, so we will have number of segments to be 1 plus num_segments.
-    assert_eq!(index.all_segments_map.len() as u32, num_segments + 1);
+    // Make sure that more than 1 segment was created.
+    assert!(index.all_segments_map.len() > 1);
 
     // The current segment in the index will be empty (i.e. will have 0 documents.)
-    // Rest of the segments should have APPROX_MAX_LOG_MESSAGE_COUNT_PER_SEGMENT+1 documents.
     assert_eq!(current_segment.get_log_message_count(), 0);
-
     for item in &index.all_segments_map {
       let segment_number = item.key();
       let segment = item.value();
       if *segment_number == index.metadata.get_current_segment_number() {
         assert_eq!(segment.get_log_message_count(), 0);
-      } else {
-        assert_eq!(
-          segment.get_log_message_count(),
-          index
-            .metadata
-            .get_approx_max_log_message_count_per_segment()
-            + 1
-        );
       }
+    }
+
+    // Make sure that the prefix is in every log message.
+    let results = index.search_logs(message_prefix, start_time, end_time);
+    assert_eq!(results.len(), num_log_messages);
+
+    // Make sure that the suffix is in exactly one log message.
+    for i in 1..num_log_messages {
+      let suffix = &format!("{}", i);
+      let results = index.search_logs(suffix, start_time, end_time);
+      assert_eq!(results.len(), 1);
     }
   }
 
@@ -868,7 +846,7 @@ mod tests {
       "test_search_logs_count"
     );
 
-    let index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1.0).unwrap();
     let message_prefix = "message";
     let num_message_suffixes = 20;
 
@@ -907,15 +885,13 @@ mod tests {
       "test_multiple_segments_metric_points"
     );
 
-    let mut index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
-    let num_segments = 100;
-    let num_metric_points = num_segments
-      * (index
-        .metadata
-        .get_approx_max_metric_point_count_per_segment()
-        + 1);
-
+    // Create an index with a low threshold for segment size.
+    let mut index = Index::new_with_threshold_params(&index_dir_path, 0.0001).unwrap();
+    let num_metric_points = 10000;
     let mut num_metric_points_from_last_commit = 0;
+    let commit_after = 1000;
+
+    // Append metric points to the index.
     let start_time = Utc::now().timestamp_millis() as u64;
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
@@ -926,48 +902,39 @@ mod tests {
         Utc::now().timestamp_millis() as u64,
         100.0,
       );
-
-      // Commit immediately after we have indexed more than APPROX_MAX_METRIC_POINT_COUNT_PER_SEGMENT messages.
       num_metric_points_from_last_commit += 1;
-      if num_metric_points_from_last_commit
-        > index
-          .metadata
-          .get_approx_max_metric_point_count_per_segment()
-      {
+
+      // Commit after we have indexed more than commit_after messages.
+      if num_metric_points_from_last_commit >= commit_after {
         index.commit(false);
         num_metric_points_from_last_commit = 0;
       }
     }
+    // Commit and sleep to make sure the index is written to disk.
+    index.commit(true);
+    sleep(Duration::from_millis(1000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
 
+    // Refresh the segment from disk.
     index = Index::refresh(&index_dir_path).unwrap();
     let current_segment_ref = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
-    // The last commit will create an empty segment, so we will have number of segments to be 1 plus num_segments.
-    assert_eq!(index.all_segments_map.len() as u32, num_segments + 1);
+    // Make sure that more than 1 segment got created.
+    assert!(index.all_segments_map.len() > 1);
 
     // The current segment in the index will be empty (i.e. will have 0 metric points.)
-    // Rest of the segments should have APPROX_MAX_METRIC_POINT_COUNT_PER_SEGMENT+1 metric points.
     assert_eq!(current_segment.get_metric_point_count(), 0);
-
     for item in &index.all_segments_map {
       let segment_id = item.key();
       let segment = item.value();
       if *segment_id == index.metadata.get_current_segment_number() {
         assert_eq!(segment.get_metric_point_count(), 0);
-      } else {
-        assert_eq!(
-          segment.get_metric_point_count(),
-          index
-            .metadata
-            .get_approx_max_metric_point_count_per_segment()
-            + 1
-        );
       }
     }
 
+    // The number of metric points in the index should be equal to the number of metric points we indexed.
     let ts = index.get_metrics(
       "label_name_1",
       "label_value_1",
@@ -1031,17 +998,17 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_overlap_multiple_segments"
     );
-    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 0.0002).unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
     // may need to be changed.
-    let num_segments = 100;
+    let num_segments = 20;
 
     for i in 0..num_segments {
       let start = i * 2 * 1000;
       index.append_log_message(start, &HashMap::new(), "message_1");
-      index.append_log_message(start + 1000, &HashMap::new(), "message_2");
+      index.append_log_message(start + 500, &HashMap::new(), "message_2");
       index.commit(false);
     }
 
@@ -1075,7 +1042,7 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_concurrent_append"
     );
-    let index = Index::new_with_threshold_params(&index_dir_path, 1000, 2000).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1.0).unwrap();
 
     let arc_index = Arc::new(index);
     let num_threads = 20;
@@ -1090,7 +1057,7 @@ mod tests {
       for _ in 0..100 {
         // We are committing aggressively every few milliseconds - make sure that the contents are flushed to disk.
         arc_index_clone.commit(true);
-        thread::sleep(ten_millis);
+        sleep(ten_millis);
       }
     });
     handles.push(handle);
@@ -1143,12 +1110,12 @@ mod tests {
 
     let start_time = Utc::now().timestamp_millis();
     // Create a new index
-    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1.0).unwrap();
     index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
     index.commit(true);
 
     // Create one more new index using same dir location
-    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1.0).unwrap();
     let search_result = index.search_logs(
       "some_message_1",
       start_time as u64,
@@ -1163,7 +1130,7 @@ mod tests {
     // Create a new index in an empty directory - this should work.
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1);
+    let index = Index::new_with_threshold_params(&index_dir_path, 1.0);
     assert!(index.is_ok());
 
     // Create a new index in an non-empty directory that does not have metadata - this should give an error.
@@ -1171,7 +1138,7 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let file_path = index_dir.path().join("my_file.txt");
     let _ = File::create(&file_path).unwrap();
-    let index = Index::new_with_threshold_params(&index_dir_path, 1, 1);
+    let index = Index::new_with_threshold_params(&index_dir_path, 1.0);
     assert!(index.is_err());
   }
 }

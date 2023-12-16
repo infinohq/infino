@@ -681,10 +681,7 @@ mod tests {
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name.as_bytes()).unwrap();
       file
-        .write_all(b"num_log_messages_threshold = 1000\n")
-        .unwrap();
-      file
-        .write_all(b"num_metric_points_threshold = 10000\n")
+        .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
 
       // Write server section.

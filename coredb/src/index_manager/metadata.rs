@@ -17,15 +17,10 @@ pub struct Metadata {
   #[serde(with = "atomic_cell_serde")]
   current_segment_number: AtomicCell<u32>,
 
-  /// Maximum number of log messages per segment. This is only approximate and a segment can
-  /// contain more messages than this number depending on the frequecy at which commit() is called.
+  /// Threshold size of a segment in megabytes. If the size of a segment exceeds this, a new segment
+  /// will be created in the next commit operation.
   #[serde(with = "atomic_cell_serde")]
-  approx_max_log_message_count_per_segment: AtomicCell<u32>,
-
-  /// Maximum number of metric points per segment. This is only approximate and a segment can
-  /// contain more metric points than this number depending on the frequecy at which commit() is called.
-  #[serde(with = "atomic_cell_serde")]
-  approx_max_metric_point_count_per_segment: AtomicCell<u32>,
+  segment_size_threshold_megabytes: AtomicCell<f32>,
 }
 
 impl Metadata {
@@ -33,14 +28,12 @@ impl Metadata {
   pub fn new(
     segment_count: u32,
     current_segment_number: u32,
-    max_log_messges: u32,
-    max_metric_points: u32,
+    segment_size_threshold_megabytes: f32,
   ) -> Metadata {
     Metadata {
       segment_count: AtomicCell::new(segment_count),
       current_segment_number: AtomicCell::new(current_segment_number),
-      approx_max_log_message_count_per_segment: AtomicCell::new(max_log_messges),
-      approx_max_metric_point_count_per_segment: AtomicCell::new(max_metric_points),
+      segment_size_threshold_megabytes: AtomicCell::new(segment_size_threshold_megabytes),
     }
   }
 
@@ -65,24 +58,14 @@ impl Metadata {
     self.current_segment_number.store(value);
   }
 
-  /// Get the (approx) max log message count per segment.
-  pub fn get_approx_max_log_message_count_per_segment(&self) -> u32 {
-    self.approx_max_log_message_count_per_segment.load()
-  }
-
-  /// Get the (approx) max metric point count per segment.
-  pub fn get_approx_max_metric_point_count_per_segment(&self) -> u32 {
-    self.approx_max_metric_point_count_per_segment.load()
+  /// Get the segment size threshold in megabytes.
+  pub fn get_segment_size_threshold_megabytes(&self) -> f32 {
+    self.segment_size_threshold_megabytes.load()
   }
 
   /// Update the current segment number to the given value.
-  pub fn update_max_log_message_count_per_segment(&self, value: u32) {
-    self.approx_max_log_message_count_per_segment.store(value);
-  }
-
-  /// Update the current segment number to the given value.
-  pub fn update_max_metric_point_count_per_segment(&self, value: u32) {
-    self.approx_max_metric_point_count_per_segment.store(value);
+  pub fn update_segment_size_threshold_megabytes(&self, value: f32) {
+    self.segment_size_threshold_megabytes.store(value);
   }
 }
 
@@ -97,18 +80,17 @@ mod tests {
     is_sync::<Metadata>();
 
     // Check a newly created Metadata.
-    let m: Metadata = Metadata::new(10, 5, 1000, 2000);
+    let m: Metadata = Metadata::new(10, 5, 1000 as f32);
 
     assert_eq!(m.get_segment_count(), 10);
     assert_eq!(m.get_current_segment_number(), 5);
-    assert_eq!(m.get_approx_max_log_message_count_per_segment(), 1000);
-    assert_eq!(m.get_approx_max_metric_point_count_per_segment(), 2000);
+    assert_eq!(m.get_segment_size_threshold_megabytes(), 1000 as f32);
   }
 
   #[test]
   pub fn test_increment_and_update() {
     // Check the increment and update operations on Metadata.
-    let m: Metadata = Metadata::new(10, 5, 1000, 2000);
+    let m: Metadata = Metadata::new(10, 5, 1000 as f32);
     assert_eq!(m.fetch_increment_segment_count(), 10);
     m.update_current_segment_number(7);
     assert_eq!(m.get_segment_count(), 11);
