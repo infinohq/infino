@@ -222,7 +222,7 @@ impl Segment {
   }
 
   /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
-  pub fn commit(&self, dir: &str, sync_after_write: bool) -> usize {
+  pub fn commit(&self, dir: &str, sync_after_write: bool) -> (u64, u64) {
     let mut lock = self.commit_lock.lock().unwrap();
     *lock = thread::current().id();
 
@@ -240,55 +240,95 @@ impl Segment {
     let labels_path = dir_path.join(LABELS_FILE_NAME);
     let time_series_path = dir_path.join(TIME_SERIES_FILE_NAME);
 
-    let num_bytes_metadata = serialize::write(
-      &self.metadata,
-      metadata_path.to_str().unwrap(),
-      sync_after_write,
-    );
-    log::debug!("Serialized metadata to {} bytes", num_bytes_metadata);
-
-    let num_bytes_terms =
+    let (uncompressed_terms_size, compressed_terms_size) =
       serialize::write(&self.terms, terms_path.to_str().unwrap(), sync_after_write);
-    serialize::write(
+    log::debug!(
+      "Serialized terms to {} bytes uncompressed, {} bytes compressed",
+      uncompressed_terms_size,
+      compressed_terms_size
+    );
+
+    let (uncompressed_inverted_map_size, compressed_inverted_map_size) = serialize::write(
       &self.inverted_map,
       inverted_map_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!("Serialized terms to {} bytes", num_bytes_terms);
+    log::debug!(
+      "Serialized inverted map to {} bytes uncompressed, {} bytes compressed",
+      uncompressed_inverted_map_size,
+      compressed_inverted_map_size
+    );
 
-    let num_bytes_forward_map = serialize::write(
+    let (uncompressed_forward_map_size, compressed_forward_map_size) = serialize::write(
       &self.forward_map,
       forward_map_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!("Serialized forward map to {} bytes", num_bytes_forward_map);
+    log::debug!(
+      "Serialized forward map to {} bytes uncompressed, {} bytes compressed",
+      uncompressed_forward_map_size,
+      compressed_forward_map_size
+    );
 
-    let num_bytes_labels = serialize::write(
+    let (uncompressed_labels_size, compressed_labels_size) = serialize::write(
       &self.labels,
       labels_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!("Serialized labels to {} bytes", num_bytes_labels);
+    log::debug!(
+      "Serialized labels to {} bytes uncompressed, {} bytes compressed",
+      uncompressed_labels_size,
+      compressed_labels_size
+    );
 
-    let num_bytes_time_series = serialize::write(
+    let (uncompressed_time_series_size, compressed_time_series_size) = serialize::write(
       &self.time_series,
       time_series_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!("Serialized time series to {} bytes", num_bytes_time_series);
+    log::debug!(
+      "Serialized time series to {} bytes uncompressed, {} bytes compressed",
+      uncompressed_time_series_size,
+      compressed_time_series_size
+    );
 
-    let num_bytes_total = num_bytes_metadata
-      + num_bytes_terms
-      + num_bytes_forward_map
-      + num_bytes_labels
-      + num_bytes_time_series;
-    log::debug!("Serialized segment to {} bytes", num_bytes_total);
+    let (uncompressed_metadata_size, compressed_metadata_size) = self.metadata.get_metadata_size();
 
-    num_bytes_total
+    let uncompressed_segment_size = uncompressed_metadata_size
+      + uncompressed_terms_size
+      + uncompressed_inverted_map_size
+      + uncompressed_forward_map_size
+      + uncompressed_labels_size
+      + uncompressed_time_series_size;
+    let compressed_segment_size = compressed_metadata_size
+      + compressed_terms_size
+      + compressed_inverted_map_size
+      + compressed_forward_map_size
+      + compressed_labels_size
+      + compressed_time_series_size;
+
+    self
+      .metadata
+      .update_segment_size(uncompressed_segment_size, compressed_segment_size);
+
+    // Write the metadata at the end - so that its segment size is updated
+    serialize::write(
+      &self.metadata,
+      metadata_path.to_str().unwrap(),
+      sync_after_write,
+    );
+
+    log::debug!(
+      "Serialized segment to {} bytes uncompressed, {} bytes compressed",
+      uncompressed_segment_size,
+      compressed_segment_size
+    );
+
+    (uncompressed_segment_size, compressed_segment_size)
   }
 
   /// Read the segment from the specified directory.
-  pub fn refresh(dir: &str) -> (Segment, usize) {
+  pub fn refresh(dir: &str) -> (Segment, u64) {
     let dir_path = Path::new(dir);
     let metadata_path = dir_path.join(METADATA_FILE_NAME);
     let terms_path = dir_path.join(TERMS_FILE_NAME);
@@ -826,8 +866,10 @@ mod tests {
       .unwrap();
 
     // Commit so that the segment is serialized to disk, and refresh it from disk.
-    let num_bytes_written = original_segment.commit(segment_dir_path, false);
-    assert!(num_bytes_written > 0);
+    let (uncompressed_original_segment_size, compressed_original_segment_size) =
+      original_segment.commit(segment_dir_path, false);
+    assert!(uncompressed_original_segment_size > 0);
+    assert!(compressed_original_segment_size > 0);
 
     let (from_disk_segment, from_disk_segment_size) = Segment::refresh(segment_dir_path);
 
@@ -840,8 +882,12 @@ mod tests {
       from_disk_segment.get_metric_point_count(),
       original_segment.get_metric_point_count()
     );
-    // Verify that the segment size (uncompressed) is greater than or equal to the number of bytes written (compressed).
-    assert!(from_disk_segment_size >= num_bytes_written);
+
+    // Verify that the segment size of the index read from disk is almost same as the uncompressed original segment size.
+    // Note that they may not be exactly the same, but may have a difference of a few bytes. This is because the
+    // size is stored in metadata file, which itself is written to disk. So, the original segment size may not reflect
+    // the exact number of bytes required to store the latest size of the segment.
+    assert!(i64::abs((from_disk_segment_size - uncompressed_original_segment_size) as i64) < 32);
 
     // Test metadata.
     assert!(from_disk_segment.metadata.get_log_message_count() == 1);

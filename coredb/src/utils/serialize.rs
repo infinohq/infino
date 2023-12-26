@@ -6,14 +6,22 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
-const COMPRESSION_LEVEL: i32 = 15;
+pub const COMPRESSION_LEVEL: i32 = 15;
 
 /// Compress and write the specified map to the given file. Returns the number of bytes written after compression.
-pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool) -> usize {
+pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool) -> (u64, u64) {
   let input = serde_json::to_string(&to_write).unwrap();
+  let input = input.as_bytes();
+  let uncomepressed_length = input.len() as u64;
+
   let mut output = Vec::new();
 
-  zstd::stream::copy_encode(input.as_bytes(), &mut output, COMPRESSION_LEVEL).unwrap();
+  zstd::stream::copy_encode(
+    input,
+    &mut output,
+    crate::utils::serialize::COMPRESSION_LEVEL,
+  )
+  .unwrap();
 
   let mut file = File::options()
     .create(true)
@@ -22,9 +30,7 @@ pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool
     .open(file_path)
     .unwrap();
 
-  // Clippy generates a warning is we don't handle the return amount from file.write(). So,
-  // assign it to _ to suppress the warning.
-  let num_bytes = file.write(output.as_slice()).unwrap();
+  let compressed_length = file.write(output.as_slice()).unwrap() as u64;
 
   if sync_after_write {
     // Forcibly sync the file contents without relying on the OS to do so. This is usually
@@ -33,17 +39,17 @@ pub fn write<T: Serialize>(to_write: &T, file_path: &str, sync_after_write: bool
     file.sync_all().unwrap();
   }
 
-  num_bytes
+  (uncomepressed_length, compressed_length)
 }
 
 /// Read the map from the given file. Returns the map and the number of bytes read after decompression.
-pub fn read<T: DeserializeOwned>(file_path: &str) -> (T, usize) {
+pub fn read<T: DeserializeOwned>(file_path: &str) -> (T, u64) {
   let file = File::open(file_path).unwrap();
   let mmap =
     unsafe { Mmap::map(&file).unwrap_or_else(|_| panic!("Could not map file {}", file_path)) };
   let data = zstd::decode_all(&mmap[..]).unwrap();
   let retval: T = serde_json::from_slice(&data).unwrap();
-  (retval, data.len())
+  (retval, data.len() as u64)
 }
 
 #[cfg(test)]
@@ -63,15 +69,16 @@ mod tests {
     for i in 1..=num_keys {
       expected.insert(format!("{prefix}{i}"), i);
     }
-    let num_bytes_written = write(&expected, file_path, false);
-    assert!(num_bytes_written > 0);
+    let (uncompressed, compressed) = write(&expected, file_path, false);
+    assert!(uncompressed > 0);
+    assert!(compressed > 0);
 
     let (received, num_bytes_read): (BTreeMap<String, u32>, _) = read(file_path);
     for i in 1..=num_keys {
       assert!(received.get(&String::from(format!("{prefix}{i}"))).unwrap() == &i);
     }
-    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written.
-    assert!(num_bytes_read >= num_bytes_written);
+    // The number of bytes read is uncompressed - so it should be equal to the uncompressed number of bytes written.
+    assert!(num_bytes_read == uncompressed);
 
     file.close().expect("Could not close temporary file");
   }
@@ -88,16 +95,17 @@ mod tests {
       expected.push(format!("{prefix}{i}"));
     }
 
-    let num_bytes_written = write(&expected, file_path, false);
-    assert!(num_bytes_written > 0);
+    let (uncompressed, compressed) = write(&expected, file_path, false);
+    assert!(uncompressed > 0);
+    assert!(compressed > 0);
 
     let (received, num_bytes_read): (Vec<_>, _) = read(file_path);
 
     for i in 1..=num_keys {
       assert!(received.contains(&format!("{prefix}{i}")));
     }
-    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written.
-    assert!(num_bytes_read >= num_bytes_written);
+    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
+    assert!(num_bytes_read == uncompressed);
 
     file.close().expect("Could not close temporary file");
   }
@@ -108,15 +116,15 @@ mod tests {
     let file_path = file.path().to_str().unwrap();
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
-    let num_bytes_written = write(&expected, file_path, false);
-    assert!(num_bytes_written > 0);
+    let (uncompressed, compressed) = write(&expected, file_path, false);
+    assert!(uncompressed > 0);
+    assert!(compressed > 0);
 
     let (received, num_bytes_read): (BTreeMap<String, u32>, _) = read(file_path);
     assert!(received.len() == 0);
 
-    // For an empty map, zstd writes more bytes, as metadata - and reads less bytes.
-    // Hence, we don't compare the number of bytes read and written.
-    assert!(num_bytes_read > 0);
+    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
+    assert!(num_bytes_read == uncompressed);
 
     file.close().expect("Could not close temporary file");
   }
