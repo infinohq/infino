@@ -199,7 +199,8 @@ impl Index {
   }
 
   /// Helper function to commit a segment with given segment_number to disk.
-  fn commit_segment(&self, segment_number: u32, sync_after_write: bool) -> usize {
+  /// Returns the (uncompressed, compressed) size of the segment.
+  fn commit_segment(&self, segment_number: u32, sync_after_write: bool) -> (u64, u64) {
     debug!("Committing segment with segment_number: {}", segment_number);
 
     // Get the segment corresponding to the segment_number.
@@ -235,8 +236,9 @@ impl Index {
     }
 
     let original_current_segment_number = self.metadata.get_current_segment_number();
-    let segment_size = self.commit_segment(original_current_segment_number, sync_after_write);
-    let segment_size_in_megabytes = (segment_size as f64 / 1024.0 / 1024.0) as f32;
+    let (uncompressed_segment_size, _compressed_segment_size) =
+      self.commit_segment(original_current_segment_number, sync_after_write);
+    let segment_size_in_megabytes = (uncompressed_segment_size as f64 / 1024.0 / 1024.0) as f32;
 
     if segment_size_in_megabytes > self.metadata.get_segment_size_threshold_megabytes() {
       // Create a new segment since the current one has become too big.
@@ -1002,7 +1004,7 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_overlap_multiple_segments"
     );
-    let index = Index::new_with_threshold_params(&index_dir_path, 0.0002).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 0.0003).unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
