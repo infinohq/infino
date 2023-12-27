@@ -841,6 +841,13 @@ mod tests {
       let results = index.search_logs(suffix, start_time, end_time);
       assert_eq!(results.len(), 1);
     }
+
+    // Make sure that the prefix+suffix is in exactly one log message.
+    for i in 1..num_log_messages {
+      let message = &format!("{} {}", message_prefix, i);
+      let results = index.search_logs(message, start_time, end_time);
+      assert_eq!(results.len(), 1);
+    }
   }
 
   #[test]
