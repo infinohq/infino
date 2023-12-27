@@ -498,8 +498,10 @@ impl Segment {
         if acc_index < accumulator.len() && accumulator[acc_index] > initial_values[initial_index] {
           // If current accumulator element is in between current initial_value and next initial_value
           // then check the existing posting block for matches with accumlator
-          if initial_index + 1 < initial_values.len()
-            && accumulator[acc_index] < initial_values[initial_index + 1]
+          // OR if it's the last accumulator is greater than last initial value, then check the last posting block
+          if (initial_index + 1 < initial_values.len()
+            && accumulator[acc_index] < initial_values[initial_index + 1])
+            || (initial_index == initial_values.len() - 1)
           {
             let mut _posting_block = Vec::new();
             // posting_index == posting_list.len() means that we are at last_block
