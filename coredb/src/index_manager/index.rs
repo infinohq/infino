@@ -6,6 +6,7 @@ use dashmap::DashMap;
 use log::{debug, error, info};
 
 use crate::index_manager::metadata::Metadata;
+use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
 use crate::metric::metric_point::MetricPoint;
 use crate::segment_manager::segment::Segment;
@@ -15,8 +16,8 @@ use crate::utils::serialize;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, Mutex};
 
-/// File name where the list (ids) of all segements is stored.
-const ALL_SEGMENTS_LIST_FILE_NAME: &str = "all_segments_list.bin";
+/// File name where the information about all segements is stored.
+const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
 
 /// File name to store index metadata.
 const METADATA_FILE_NAME: &str = "metadata.bin";
@@ -226,13 +227,12 @@ impl Index {
     let mut lock = self.index_dir_lock.lock().unwrap();
     *lock = thread::current().id();
 
-    let mut all_segments_map_changed = false;
-    let all_segments_list_path =
-      io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_LIST_FILE_NAME);
+    let mut write_all_segments_file = false;
+    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
-    if !Path::new(&all_segments_list_path).is_file() {
-      // Initial commit - set all_segments_map_changed to true so that all_segments_map is written to disk.
-      all_segments_map_changed = true;
+    if !Path::new(&all_segments_file).is_file() {
+      // Initial commit - set write_all_segments_file to true so that all_segments_file is created.
+      write_all_segments_file = true;
     }
 
     let original_current_segment_number = self.metadata.get_current_segment_number();
@@ -272,20 +272,24 @@ impl Index {
       // time of changing the current_sgement_number above.
       self.commit_segment(original_current_segment_number, sync_after_write);
 
-      all_segments_map_changed = true;
+      write_all_segments_file = true;
     }
 
-    if all_segments_map_changed {
-      // Write ids of all segments to disk. Note that these may not be in a sorted order.
-      let all_segment_ids: Vec<u32> = self
+    if write_all_segments_file {
+      // Create the summaries from the segments in this index.
+      let mut all_segment_summaries: Vec<SegmentSummary> = self
         .all_segments_map
         .iter()
-        .map(|entry| *entry.key())
+        .map(|entry| SegmentSummary::new(*entry.key(), entry.value()))
         .collect();
 
+      // Sort the summaries in reverse chronological order.
+      all_segment_summaries.sort();
+
+      // Write the summaries to disk.
       serialize::write(
-        &all_segment_ids,
-        all_segments_list_path.as_str(),
+        &all_segment_summaries,
+        all_segments_file.as_str(),
         sync_after_write,
       );
     }
@@ -305,18 +309,18 @@ impl Index {
       )));
     }
 
-    // Read all segments map and metadata from disk.
-    let all_segments_list_path = io::get_joined_path(index_dir_path, ALL_SEGMENTS_LIST_FILE_NAME);
+    // Read all segments summaries from disk.
+    let all_segments_file = io::get_joined_path(index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
-    if !Path::new(&all_segments_list_path).is_file() {
+    if !Path::new(&all_segments_file).is_file() {
       return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
         String::from(index_dir_path),
       ));
     }
 
-    let (all_segment_ids, _): (Vec<u32>, _) = serialize::read(all_segments_list_path.as_str());
-    if all_segment_ids.is_empty() {
-      // No all_segments_map present - so this may not be an index directory. Return an empty index.
+    let (all_segment_summaries, _): (Vec<SegmentSummary>, _) = serialize::read(&all_segments_file);
+    if all_segment_summaries.is_empty() {
+      // No segment summary present - so this may not be an index directory. Return an empty index.
       return Ok(Index::new(index_dir_path).unwrap());
     }
 
@@ -324,10 +328,11 @@ impl Index {
     let (metadata, _): (Metadata, _) = serialize::read(metadata_path.as_str());
 
     let all_segments_map: DashMap<u32, Segment> = DashMap::new();
-    for id in all_segment_ids {
-      let segment_dir_path = io::get_joined_path(index_dir_path, id.to_string().as_str());
+    for segment_summary in all_segment_summaries {
+      let segment_number = segment_summary.get_segment_number();
+      let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
       let (segment, _) = Segment::refresh(&segment_dir_path);
-      all_segments_map.insert(id, segment);
+      all_segments_map.insert(segment_number, segment);
     }
 
     info!("Read index with metadata {:?}", metadata);
@@ -418,7 +423,7 @@ mod tests {
     // Check that the index directory exists, and has expected structure.
     let base = Path::new(&index_dir_path);
     assert!(base.is_dir());
-    assert!(base.join(ALL_SEGMENTS_LIST_FILE_NAME).is_file());
+    assert!(base.join(ALL_SEGMENTS_FILE_NAME).is_file());
     assert!(base
       .join(
         index
