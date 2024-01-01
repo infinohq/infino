@@ -35,6 +35,7 @@ build:
 clean:
 	cargo clean
 	rm -rf docs/release
+	rm -rf data/
 
 .PHONY: docs
 
