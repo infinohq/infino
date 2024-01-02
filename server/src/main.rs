@@ -17,7 +17,6 @@ mod utils;
 
 use std::collections::HashMap;
 use std::env;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query};
@@ -28,6 +27,7 @@ use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
@@ -213,17 +213,19 @@ async fn main() {
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
-  let addr = SocketAddr::from(([0, 0, 0, 0], port));
+  let connection_string = &format!("127.0.0.1:{}", port);
+  let listener = TcpListener::bind(connection_string)
+    .await
+    .unwrap_or_else(|_| panic!("Could not listen using {}", connection_string));
 
-  info!(
-    "Infino server listening on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
-    addr
-  );
-  axum::Server::bind(&addr)
-    .serve(app.into_make_service())
+  axum::serve(listener, app)
     .with_graceful_shutdown(shutdown_signal())
     .await
     .unwrap();
+  info!(
+    "Infino server listening on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
+    connection_string
+  );
 
   if shared_state.queue.is_some() {
     info!("Closing RabbitMQ connection...");
@@ -742,7 +744,9 @@ mod tests {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
     let mut log_messages_received: Vec<LogMessage> = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
@@ -817,7 +821,9 @@ mod tests {
     println!("Response is {:?}", response);
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
     let mut metric_points_received: Vec<MetricPoint> = serde_json::from_slice(&body).unwrap();
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);

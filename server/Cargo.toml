@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.6.20", features = ["tracing"] }
+axum = "0.7.3"
 cfg-if = "1.0"
 chrono = "0.4.31"
 config = "0.13.3"
 env_logger = "0.10"
-hyper = { version = "0.14", features = ["full"] }
+http = "1.0"
+http-body = "1.0"
+hyper = { version = "1.1.0", features = ["full"] }
 lapin = "2.3.1"
 lazy_static = "1"
 log = "0.4.19"
@@ -26,7 +28,7 @@ tokio-stream = "0.1.14"
 tokio-executor-trait = "2.1.1"
 tokio-reactor-trait = "1.1.0"
 tokio-retry = "0.3"
-tower-http = { version = "0.4.0", features = ["trace"] }
+tower-http = { version = "0.5.0", features = ["trace"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dependencies.uuid]
