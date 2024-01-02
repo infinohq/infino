@@ -281,6 +281,9 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 0.2\n")
+        .unwrap();
     }
   }
 
