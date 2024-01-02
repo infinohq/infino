@@ -10,6 +10,7 @@ pub struct CoreDBSettings {
   index_dir_path: String,
   default_index_name: String,
   segment_size_threshold_megabytes: f32,
+  search_memory_budget_megabytes: f32,
 }
 
 impl CoreDBSettings {
@@ -29,6 +30,10 @@ impl CoreDBSettings {
 
   pub fn get_segment_size_threshold_megabytes(&self) -> f32 {
     self.segment_size_threshold_megabytes
+  }
+
+  pub fn get_search_memory_budget_megabytes(&self) -> f32 {
+    self.search_memory_budget_megabytes
   }
 }
 
@@ -100,6 +105,9 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 2048\n")
+        .unwrap();
     }
 
     let settings = Settings::new(&config_dir_path).unwrap();
@@ -109,6 +117,10 @@ mod tests {
     assert_eq!(
       coredb_settings.get_segment_size_threshold_megabytes(),
       1024 as f32
+    );
+    assert_eq!(
+      coredb_settings.get_search_memory_budget_megabytes(),
+      2048 as f32
     );
 
     // Check settings override using RUN_MODE environment variable.
@@ -120,6 +132,9 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes=1\n")
         .unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes=2\n")
+        .unwrap();
     }
     let settings = Settings::new(&config_dir_path).unwrap();
     let coredb_settings = settings.get_coredb_settings();
@@ -127,6 +142,10 @@ mod tests {
     assert_eq!(
       coredb_settings.get_segment_size_threshold_megabytes(),
       1 as f32
+    );
+    assert_eq!(
+      coredb_settings.get_search_memory_budget_megabytes(),
+      2 as f32
     );
     assert_eq!(coredb_settings.get_default_index_name(), ".default");
   }
