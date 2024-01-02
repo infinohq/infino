@@ -123,7 +123,7 @@ mod tests {
 
   #[test]
   fn test_settings() {
-    let config_dir_path = "config";
+    let config_dir_path = "../config";
     let settings = Settings::new(config_dir_path).expect("Could not parse config");
 
     // Check server settings.

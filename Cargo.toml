@@ -1,59 +1,6 @@
 [workspace]
 members = [
-    "coredb",
+    "server", "coredb",
 ]
 exclude = ["benches", "docker", "clients"]
 
-[package]
-name = "infino"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-axum = { version = "0.6.20", features = ["tracing"] }
-cfg-if = "1.0"
-chrono = "0.4.31"
-config = "0.13.3"
-env_logger = "0.10"
-hyper = { version = "0.14", features = ["full"] }
-lapin = "2.3.1"
-lazy_static = "1"
-log = "0.4.19"
-mime = "0.3.16"
-mockall = "*"
-openai-api-rs = "2.1.0"
-rabbitmq-stream-client = { git = "https://github.com/rabbitmq/rabbitmq-stream-rust-client", rev = "203d1a11fb29665e9385741df89b325a1deb3bff" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1"
-coredb = { path = "coredb" }
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1.14"
-tokio-executor-trait = "2.1.1"
-tokio-reactor-trait = "1.1.0"
-tokio-retry = "0.3"
-tower-http = { version = "0.4.0", features = ["trace"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-[dependencies.uuid]
-version = "1.3.0"
-features = [
-    "v4",                # Generate random UUIDs
-    "fast-rng",          # Use a faster (but still sufficiently random) RNG
-    "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
-]
-
-[dev-dependencies]
-tower = { version = "*", features = ["util"] }
-tempdir = "*"
-test-case = "*"
-urlencoding = "*"
-
-[profile.release]
-opt-level = 3
-debug = false
-debug-assertions = false
-
-[profile.test]
-debug-assertions = true
-overflow-checks = true
