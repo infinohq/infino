@@ -17,7 +17,8 @@ check:
 build:
 	cargo build $(release)
 
-all: build
+test: check
+	cargo test
 
 help:
 	@echo "usage: make $(prog) [debug=1]\n"
