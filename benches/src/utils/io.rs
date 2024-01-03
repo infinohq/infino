@@ -19,8 +19,7 @@ where
 pub fn get_directory_size(directory_path: &str) -> u64 {
   println!("Checking size of directory: {}", directory_path);
 
-  let folder_size = get_size(directory_path).unwrap();
-  return folder_size;
+  get_size(directory_path).unwrap()
 }
 
 #[allow(unused)]

@@ -5,17 +5,14 @@ use crate::logs::infino_rest::InfinoApiClient;
 use crate::utils::io::get_directory_size;
 
 use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
-use std::{
-  fs::{self, create_dir},
-  thread, time,
-};
+use std::{fs, thread, time};
 use structopt::StructOpt;
 
 mod logs;
 mod metrics;
 mod utils;
 
-static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
+static INFINO_SEARCH_QUERIES: &[&str] = &[
   "Directory",
   "Digest: done",
   "2006] [notice] mod_jk2 Shutting down",
@@ -24,7 +21,7 @@ static INFINO_SEARCH_QUERIES: &'static [&'static str] = &[
   "Jun 09 06:07:05 2005] [notice] LDAP:",
   "unable to stat",
 ];
-static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
+static CLICKHOUSE_SEARCH_QUERIES: &[&str] = &[
   "Directory",
   "Digest: done",
   "2006] [notice] mod_jk2 Shutting down",
@@ -34,7 +31,7 @@ static CLICKHOUSE_SEARCH_QUERIES: &'static [&'static str] = &[
   "unable to stat",
 ];
 
-static ELASTICSEARCH_SEARCH_QUERIES: &'static [&'static str] = &[
+static ELASTICSEARCH_SEARCH_QUERIES: &[&str] = &[
   "Directory",
   "Digest: done",
   "2006] [notice] mod_jk2 Shutting down",
@@ -169,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   for _ in 1..10 {
     cell_infino_metrics_search_time += infino_metrics_client.search_metrics().await;
   }
-  cell_infino_metrics_search_time = cell_infino_metrics_search_time / 10;
+  cell_infino_metrics_search_time /= 10;
   println!(
     "Infino metrics search avg {} microseconds",
     cell_infino_metrics_search_time
@@ -191,7 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   for _ in 1..10 {
     cell_prometheus_search_time += prometheus_client.search_logs().await;
   }
-  cell_prometheus_search_time = cell_prometheus_search_time / 10;
+  cell_prometheus_search_time /= 10;
   println!(
     "Prometheus timeseries search avg {} microseconds",
     cell_prometheus_search_time
@@ -204,22 +201,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // Print the output in markdown
   println!("\n\n## Results: ");
-  println!(
-    "\nRun date: {}",
-    chrono::Local::now().format("%Y-%m-%d").to_string()
-  );
+  println!("\nRun date: {}", chrono::Local::now().format("%Y-%m-%d"));
   println!("\nOperating System: {}", std::env::consts::OS);
   println!("\nMachine description: <Please fill in>");
   println!("\nDataset: {}", input_data_path);
   println!("\nDataset size: {}bytes", cell_input_data_size);
   println!();
 
-  let elasticsearch_index_size;
-  if cell_es_index_size == 0 {
-    elasticsearch_index_size = "<figure out from cat response>".to_owned();
+  let elasticsearch_index_size = if cell_es_index_size == 0 {
+    "<figure out from cat response>".to_owned()
   } else {
-    elasticsearch_index_size = cell_es_index_size.to_string();
-  }
+    cell_es_index_size.to_string()
+  };
 
   println!("\n\n### Index size\n");
   println!("| dataset | Elasticsearch | Clickhouse | Infino | Infino-Rest |");

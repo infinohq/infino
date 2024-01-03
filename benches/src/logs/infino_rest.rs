@@ -48,7 +48,7 @@ impl InfinoApiClient {
           logs_batch.push(log);
           if num_docs_in_this_batch == num_docs_per_batch {
             let _ = client
-              .post(&format!("http://localhost:3000/append_log"))
+              .post("http://localhost:3000/append_log")
               .header("Content-Type", "application/json")
               .body(Body::from(serde_json::to_string(&logs_batch).unwrap()))
               .send()
@@ -65,7 +65,7 @@ impl InfinoApiClient {
       "Infino REST API - time required for log insertions: {} microseconds",
       elapsed
     );
-    return elapsed;
+    elapsed
   }
 
   /// Searches the given term and returns the time required in microseconds
@@ -103,7 +103,7 @@ impl InfinoApiClient {
     for query in queries {
       time += self.search_logs(query, 0, u64::MAX).await;
     }
-    return time;
+    time
   }
 
   #[allow(unused)]
@@ -111,7 +111,7 @@ impl InfinoApiClient {
     let client = reqwest::Client::new();
 
     let _ = client
-      .post(&format!("http://localhost:3000/flush"))
+      .post("http://localhost:3000/flush")
       .body("")
       .send()
       .await;

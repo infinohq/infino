@@ -19,7 +19,7 @@ use url::Url;
 
 use crate::utils::io;
 
-static INDEX_NAME: &'static str = "perftest";
+static INDEX_NAME: &str = "perftest";
 
 pub struct ElasticsearchEngine {
   client: Elasticsearch,
@@ -76,7 +76,7 @@ impl ElasticsearchEngine {
       println!("Error while creating index {:?}", response);
     }
 
-    ElasticsearchEngine { client: client }
+    ElasticsearchEngine { client }
   }
 
   /// Indexes input data and returns the time required for insertion as microseconds.
@@ -152,7 +152,7 @@ impl ElasticsearchEngine {
       elapsed
     );
 
-    return elapsed;
+    elapsed
   }
 
   pub async fn forcemerge(&self) {
@@ -210,11 +210,11 @@ impl ElasticsearchEngine {
     }
 
     println!("Could not programmatically figure out elasticsearch index size. Figure it out from the cat response printed above");
-    return 0;
+    0
   }
 
   fn create_client() -> Result<Elasticsearch, Error> {
-    let url = Url::parse("http://localhost:9200".as_ref()).unwrap();
+    let url = Url::parse("http://localhost:9200").unwrap();
     let conn_pool = SingleNodeConnectionPool::new(url);
     let builder = TransportBuilder::new(conn_pool).cert_validation(CertificateValidation::None);
     let transport = builder.build()?;
@@ -251,7 +251,7 @@ impl ElasticsearchEngine {
     );
 
     // Convert `took` to microseconds and return.
-    return (took * 1000).try_into().unwrap();
+    (took * 1000).try_into().unwrap()
   }
 
   /// Runs multiple queries and returns the sum of time needed to run them in microseconds.
@@ -260,6 +260,6 @@ impl ElasticsearchEngine {
     for query in queries {
       time += self.search(query).await;
     }
-    return time;
+    time
   }
 }

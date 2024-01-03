@@ -79,7 +79,7 @@ impl ClickhouseEngine {
       elapsed
     );
 
-    return elapsed;
+    elapsed
   }
 
   /// Searches the given term and returns the time required in microseconds
@@ -111,7 +111,7 @@ impl ClickhouseEngine {
       "Clickhouse time required for searching query {} is : {} microseconds",
       query, elapsed
     );
-    return elapsed;
+    elapsed
   }
 
   pub fn get_index_dir_path(&self) -> &str {
@@ -124,6 +124,6 @@ impl ClickhouseEngine {
     for query in queries {
       time += self.search_logs(query, 0, u64::MAX).await;
     }
-    return time;
+    time
   }
 }
