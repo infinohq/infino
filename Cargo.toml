@@ -1,6 +1,4 @@
 [workspace]
 members = [
-    "server", "coredb",
+    "server", "coredb", "benches"
 ]
-exclude = ["benches", "docker", "clients"]
-

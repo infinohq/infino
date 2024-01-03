@@ -22,7 +22,7 @@ impl InfinoMetricsClient {
         let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, "cpu_usage", value);
         let client = reqwest::Client::new();
         let res = client
-          .post(&format!("http://localhost:3000/append_metric"))
+          .post("http://localhost:3000/append_metric")
           .header("Content-Type", "application/json")
           .body(json_str)
           .send()

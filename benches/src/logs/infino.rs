@@ -16,7 +16,7 @@ impl InfinoEngine {
   pub fn new(config_path: &str) -> InfinoEngine {
     let setting = Settings::new(config_path).unwrap();
     let index_dir_path = String::from(setting.get_coredb_settings().get_index_dir_path());
-    let coredb = CoreDB::new(&config_path).unwrap();
+    let coredb = CoreDB::new(config_path).unwrap();
 
     InfinoEngine {
       index_dir_path,
@@ -57,7 +57,7 @@ impl InfinoEngine {
       "Infino time required for insertion: {} microseconds",
       elapsed
     );
-    return elapsed;
+    elapsed
   }
 
   /// Searches the given term and returns the time required in microseconds
@@ -65,7 +65,7 @@ impl InfinoEngine {
     let now = Instant::now();
     let result = self
       .coredb
-      .get_logs(query, range_start_time, range_end_time);
+      .search_logs(query, range_start_time, range_end_time);
     let elapsed = now.elapsed().as_micros();
     println!(
       "Infino time required for searching logs {} is : {} microseconds. Num of results {}",
@@ -73,7 +73,7 @@ impl InfinoEngine {
       elapsed,
       result.len()
     );
-    return elapsed;
+    elapsed
   }
 
   pub fn get_index_dir_path(&self) -> &str {
@@ -85,7 +85,6 @@ impl InfinoEngine {
     queries
       .iter()
       .map(|query| self.search_logs(query, 0, u64::MAX))
-      .map(|time| time)
       .sum()
   }
 }
