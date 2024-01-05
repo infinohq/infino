@@ -11,11 +11,11 @@ endif
 
 run:
 	echo "Running $(prog) server..."
-	cargo run $(release)
+	cargo run $(release) --bin $(prog)
 
 run-debug:
 	echo "Running $(prog) server in debug mode..."
-	RUST_LOG=debug cargo run $(release)
+	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
 check:
 	cargo check
