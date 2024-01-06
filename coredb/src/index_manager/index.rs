@@ -14,6 +14,7 @@ use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
+use crate::utils::sync::RwLock;
 use crate::utils::sync::{Arc, Mutex};
 
 /// File name where the information about all segements is stored.
@@ -31,8 +32,11 @@ pub struct Index {
   /// Metadata for this index.
   metadata: Metadata,
 
-  /// DashMap of segment number to segment.
-  all_segments_map: DashMap<u32, Segment>,
+  /// A reverse-chronological sorted vector of segment summaries.
+  all_segments_summaries: Arc<RwLock<Vec<SegmentSummary>>>,
+
+  /// DashMap of segment number to segment - only for the segments that are in memory.
+  memory_segments_map: DashMap<u32, Segment>,
 
   /// Directory where the index is serialized.
   index_dir_path: String,
@@ -106,14 +110,21 @@ impl Index {
     let current_segment_number = metadata.fetch_increment_segment_count();
     metadata.update_current_segment_number(current_segment_number);
 
-    let all_segments_map = DashMap::new();
-    all_segments_map.insert(current_segment_number, segment);
+    // Create the summary for the initial segment.
+    let mut all_segments_summaries_vec = Vec::new();
+    let current_segment_summary = SegmentSummary::new(current_segment_number, &segment);
+    all_segments_summaries_vec.push(current_segment_summary);
+    let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
+
+    let memory_segments_map = DashMap::new();
+    memory_segments_map.insert(current_segment_number, segment);
 
     let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
 
     let index = Index {
       metadata,
-      all_segments_map,
+      all_segments_summaries,
+      memory_segments_map,
       index_dir_path: index_dir.to_owned(),
       index_dir_lock,
     };
@@ -127,7 +138,7 @@ impl Index {
   /// Get the reference for the current segment.
   fn get_current_segment_ref(&self) -> Ref<u32, Segment> {
     self
-      .all_segments_map
+      .memory_segments_map
       .get(&self.metadata.get_current_segment_number())
       .unwrap()
   }
@@ -190,7 +201,7 @@ impl Index {
 
     // Search in each of the segments.
     for segment_number in segment_numbers {
-      let segment = self.all_segments_map.get(&segment_number).unwrap();
+      let segment = self.memory_segments_map.get(&segment_number).unwrap();
 
       let mut results = segment.search_logs(query, range_start_time, range_end_time);
       retval.append(&mut results);
@@ -205,7 +216,7 @@ impl Index {
     debug!("Committing segment with segment_number: {}", segment_number);
 
     // Get the segment corresponding to the segment_number.
-    let segment_ref = self.all_segments_map.get(&segment_number).unwrap();
+    let segment_ref = self.memory_segments_map.get(&segment_number).unwrap();
     let segment = segment_ref.value();
 
     // Commit this segment.
@@ -252,11 +263,19 @@ impl Index {
       // Write the new (empty) segment to disk.
       new_segment.commit(new_segment_dir_path.as_str(), sync_after_write);
 
+      // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
+      let summary = SegmentSummary::new(new_segment_number, &new_segment);
+      let mut write_lock_summaries = self
+        .all_segments_summaries
+        .write()
+        .expect("Could not get write lock");
+      write_lock_summaries.insert(0, summary);
+
       // Note that DashMap::insert *may* cause a single-thread deadlock if the thread has a read
       // reference to an item in the map. Make sure that no read reference for all_segments_map
       // is present before the insert and visible in this block.
       self
-        .all_segments_map
+        .memory_segments_map
         .insert(new_segment_number, new_segment);
 
       // Appends will start going to the new segment after this point.
@@ -276,22 +295,16 @@ impl Index {
     }
 
     if write_all_segments_file {
-      // Create the summaries from the segments in this index.
-      let mut all_segment_summaries: Vec<SegmentSummary> = self
-        .all_segments_map
-        .iter()
-        .map(|entry| SegmentSummary::new(*entry.key(), entry.value()))
-        .collect();
-
       // Sort the summaries in reverse chronological order.
-      all_segment_summaries.sort();
+      let mut write_lock_summaries = self
+        .all_segments_summaries
+        .write()
+        .expect("Could not get write lock for segment summaries");
+      write_lock_summaries.sort();
+      let summaries: &Vec<SegmentSummary> = write_lock_summaries.as_ref();
 
       // Write the summaries to disk.
-      serialize::write(
-        &all_segment_summaries,
-        all_segments_file.as_str(),
-        sync_after_write,
-      );
+      serialize::write(summaries, all_segments_file.as_str(), sync_after_write);
     }
 
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
@@ -318,8 +331,9 @@ impl Index {
       ));
     }
 
-    let (all_segment_summaries, _): (Vec<SegmentSummary>, _) = serialize::read(&all_segments_file);
-    if all_segment_summaries.is_empty() {
+    let (all_segments_summaries_vec, _): (Vec<SegmentSummary>, _) =
+      serialize::read(&all_segments_file);
+    if all_segments_summaries_vec.is_empty() {
       // No segment summary present - so this may not be an index directory. Return an empty index.
       return Ok(Index::new(index_dir_path).unwrap());
     }
@@ -327,20 +341,23 @@ impl Index {
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let (metadata, _): (Metadata, _) = serialize::read(metadata_path.as_str());
 
-    let all_segments_map: DashMap<u32, Segment> = DashMap::new();
-    for segment_summary in all_segment_summaries {
+    let memory_segments_map: DashMap<u32, Segment> = DashMap::new();
+    for segment_summary in &all_segments_summaries_vec {
       let segment_number = segment_summary.get_segment_number();
       let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
       let (segment, _) = Segment::refresh(&segment_dir_path);
-      all_segments_map.insert(segment_number, segment);
+      memory_segments_map.insert(segment_number, segment);
     }
+
+    let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
 
     info!("Read index with metadata {:?}", metadata);
 
     let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
     Ok(Index {
       metadata,
-      all_segments_map,
+      all_segments_summaries,
+      memory_segments_map,
       index_dir_path: index_dir_path.to_owned(),
       index_dir_lock,
     })
@@ -349,7 +366,7 @@ impl Index {
   /// Returns segment numbers of segments that overlap with the given time range.
   pub fn get_overlapping_segments(&self, range_start_time: u64, range_end_time: u64) -> Vec<u32> {
     let mut segment_numbers = Vec::new();
-    for item in &self.all_segments_map {
+    for item in &self.memory_segments_map {
       if item.value().is_overlap(range_start_time, range_end_time) {
         segment_numbers.push(*item.key());
       }
@@ -370,7 +387,7 @@ impl Index {
 
     let segment_numbers = self.get_overlapping_segments(range_start_time, range_end_time);
     for segment_number in segment_numbers {
-      let segment = self.all_segments_map.get(&segment_number).unwrap();
+      let segment = self.memory_segments_map.get(&segment_number).unwrap();
       let mut metric_points =
         segment.search_metrics(label_name, label_value, range_start_time, range_end_time);
       retval.append(&mut metric_points);
@@ -477,8 +494,8 @@ mod tests {
 
     assert_eq!(&expected.index_dir_path, &received.index_dir_path);
     assert_eq!(
-      &expected.all_segments_map.len(),
-      &received.all_segments_map.len()
+      &expected.memory_segments_map.len(),
+      &received.memory_segments_map.len()
     );
 
     let expected_segment_ref = expected.get_current_segment_ref();
@@ -634,7 +651,7 @@ mod tests {
         let current_segment_ref = index.get_current_segment_ref();
         let current_segment = current_segment_ref.value();
 
-        assert_eq!(index.all_segments_map.len(), 2);
+        assert_eq!(index.memory_segments_map.len(), 2);
         assert_eq!(current_segment.get_log_message_count(), 0);
         assert_eq!(current_segment.get_metric_point_count(), 0);
       }
@@ -665,7 +682,7 @@ mod tests {
       let index = Index::refresh(&index_dir_path).unwrap();
       let (mut original_segment, original_segment_size) =
         Segment::refresh(&original_segment_path.to_str().unwrap());
-      assert_eq!(index.all_segments_map.len(), 2);
+      assert_eq!(index.memory_segments_map.len(), 2);
 
       assert_eq!(
         original_segment.get_log_message_count(),
@@ -739,7 +756,7 @@ mod tests {
         );
       }
 
-      assert_eq!(index.all_segments_map.len(), 2);
+      assert_eq!(index.memory_segments_map.len(), 2);
       assert_eq!(
         original_segment.get_log_message_count(),
         original_segment_num_log_messages
@@ -760,8 +777,8 @@ mod tests {
       let index_final_current_segment = index_final_current_segment_ref.value();
 
       assert_eq!(
-        index.all_segments_map.len(),
-        index_final.all_segments_map.len()
+        index.memory_segments_map.len(),
+        index_final.memory_segments_map.len()
       );
       assert_eq!(index.index_dir_path, index_final.index_dir_path);
       assert_eq!(
@@ -824,11 +841,11 @@ mod tests {
     let current_segment = current_segment_ref.value();
 
     // Make sure that more than 1 segment was created.
-    assert!(index.all_segments_map.len() > 1);
+    assert!(index.memory_segments_map.len() > 1);
 
     // The current segment in the index will be empty (i.e. will have 0 documents.)
     assert_eq!(current_segment.get_log_message_count(), 0);
-    for item in &index.all_segments_map {
+    for item in &index.memory_segments_map {
       let segment_number = item.key();
       let segment = item.value();
       if *segment_number == index.metadata.get_current_segment_number() {
@@ -940,11 +957,11 @@ mod tests {
     let current_segment = current_segment_ref.value();
 
     // Make sure that more than 1 segment got created.
-    assert!(index.all_segments_map.len() > 1);
+    assert!(index.memory_segments_map.len() > 1);
 
     // The current segment in the index will be empty (i.e. will have 0 metric points.)
     assert_eq!(current_segment.get_metric_point_count(), 0);
-    for item in &index.all_segments_map {
+    for item in &index.memory_segments_map {
       let segment_id = item.key();
       let segment = item.value();
       if *segment_id == index.metadata.get_current_segment_number() {
@@ -1031,7 +1048,7 @@ mod tests {
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
-    assert_eq!(index.all_segments_map.len() as u64, num_segments + 1);
+    assert_eq!(index.memory_segments_map.len() as u64, num_segments + 1);
 
     // The first segment will start at time 0 and end at time 1000.
     // The second segment will start at time 2000 and end at time 3000.
