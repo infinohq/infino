@@ -135,6 +135,16 @@ impl Index {
     Ok(index)
   }
 
+  /// Insert a segment in the memory segments map.
+  fn insert_memory_segments_map(&self, segment_number: u32, segment: Segment) {
+    self.memory_segments_map.insert(segment_number, segment);
+  }
+
+  /// Remove a segment from the memory segments map.
+  fn remove_memory_segments_map(&self, segment_number: u32) {
+    self.memory_segments_map.remove(&segment_number);
+  }
+
   /// Get the reference for the current segment.
   fn get_current_segment_ref(&self) -> Ref<u32, Segment> {
     self
