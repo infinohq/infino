@@ -370,42 +370,32 @@ impl Segment {
     (segment, total_size)
   }
 
-  /// Search the segment for the given query. If a query has multiple terms, it is by
-  /// default taken as AND. Boolean queries are not yet supported.
-  pub fn search_logs(
+  // Get the posting lists belonging to a set of matching terms in the query
+  fn get_postings_lists(
     &self,
-    query: &str,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Vec<LogMessage> {
-    // TODO: make the implementation below more performant by not decompressing every block in every postings list.
-    let query_lowercase = query.to_lowercase();
-    let terms = tokenize(&query_lowercase);
-
-    // initial_values_list wil contain list of initial_values corresponding to every posting_list
-    let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
-
-    // postings list will contain list of PostingBlocksCompressed
-    let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
-    let mut last_block_list: Vec<PostingsBlock> = Vec::new();
-
-    let mut shortest_list_index = 0;
+    terms: &[String],
+    initial_values_list: &mut Vec<Vec<u32>>,
+    postings_lists: &mut Vec<Vec<PostingsBlockCompressed>>,
+    last_block_list: &mut Vec<PostingsBlock>,
+    shortest_list_index: &mut usize,
+  ) {
+    *shortest_list_index = 0;
     let mut shortest_list_len = usize::MAX;
 
     for (index, term) in terms.into_iter().enumerate() {
-      let result = self.terms.get(&term);
+      let result = self.terms.get(term);
       let term_id: u32 = match result {
         Some(result) => *result,
         None => {
-          // Term not found, so return an empty vector as search result.
-          return vec![];
+          // Term not found.
+          return; // is this right?
         }
       };
       let postings_list = match self.inverted_map.get(&term_id) {
         Some(result) => result,
         None => {
-          // Postings list not found. We are performing AND query, so return empty result.
-          return vec![];
+          // Postings list not found.
+          return;
         }
       };
       let inital_values = postings_list.get_initial_values().read().unwrap().clone();
@@ -435,20 +425,22 @@ impl Segment {
 
       if postings_block_compressed_vec.len() < shortest_list_len {
         shortest_list_len = postings_block_compressed_vec.len();
-        shortest_list_index = index;
+        *shortest_list_index = index;
       }
 
       postings_lists.push(postings_block_compressed_vec);
     }
+  }
 
-    // If initial values list is empty which means there are no posting block compressed or last block
-    if initial_values_list.is_empty() {
-      // No postings list
-      return vec![];
-    }
-
-    let mut accumulator = Vec::new();
-
+  // Get the matching doc IDs corresponding to a set of posting lists
+  fn get_matching_doc_ids(
+    &self,
+    postings_lists: &[Vec<PostingsBlockCompressed>],
+    last_block_list: &Vec<PostingsBlock>,
+    initial_values_list: &Vec<Vec<u32>>,
+    shortest_list_index: usize,
+    accumulator: &mut Vec<u32>,
+  ) {
     // Create accumulator from shortest posting list from postings_lists. Which is flatten the shortest
     // Vec<PostingsBlockCompressed> to Vec<u32> postings_lists.first() will give Vec<PostingsBlockCompressed>
     // which needs to be iterated on to get Vec<u32>
@@ -469,7 +461,7 @@ impl Segment {
     // If postings_list is empty, then accumulator should be loaded from last_block_list
     if accumulator.is_empty() {
       // No postings list
-      return vec![];
+      return;
     }
 
     for i in 0..initial_values_list.len() {
@@ -609,17 +601,60 @@ impl Segment {
         posting_index += 1;
       }
 
-      accumulator = temp_result_set;
+      *accumulator = temp_result_set;
     }
+  }
+
+  /// Search the segment for the given query. If a query has multiple terms, it is by
+  /// default taken as AND. Boolean queries are not yet supported.
+  pub fn search_logs(
+    &self,
+    query: &str,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Vec<LogMessage> {
+    // TODO: make the implementation below more performant by not decompressing every block in every postings list.
+    let query_lowercase = query.to_lowercase();
+    let terms = tokenize(&query_lowercase);
+
+    // initial_values_list will contain list of initial_values corresponding to every posting_list
+    let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
+
+    // postings list will contain list of PostingBlocksCompressed
+    let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
+    let mut last_block_list: Vec<PostingsBlock> = Vec::new();
+    let mut shortest_list_index = 0;
+    let mut results_accumulator = Vec::new();
+
+    self.get_postings_lists(
+      &terms,
+      &mut initial_values_list,
+      &mut postings_lists,
+      &mut last_block_list,
+      &mut shortest_list_index,
+    );
+
+    // No postings list was found so let's return empty handed.
+    if postings_lists.is_empty() {
+      return vec![];
+    }
+
+    self.get_matching_doc_ids(
+      &postings_lists,
+      &last_block_list,
+      &initial_values_list,
+      shortest_list_index,
+      &mut results_accumulator,
+    );
 
     // Main logic end
 
     // The above intersection may leave around duplicates - see https://github.com/infinohq/infino/issues/58
     // Remove the consecutive duplicates
-    accumulator.dedup();
+    results_accumulator.dedup();
 
     let mut log_messages =
-      self.get_log_messages_from_ids(&accumulator, range_start_time, range_end_time);
+      self.get_log_messages_from_ids(&results_accumulator, range_start_time, range_end_time);
     log_messages.sort();
     log_messages
   }
