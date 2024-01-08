@@ -388,7 +388,7 @@ impl Segment {
         Some(result) => *result,
         None => {
           // Term not found.
-          return; // is this right?
+          return;
         }
       };
       let postings_list = match self.inverted_map.get(&term_id) {
@@ -613,7 +613,6 @@ impl Segment {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Vec<LogMessage> {
-    // TODO: make the implementation below more performant by not decompressing every block in every postings list.
     let query_lowercase = query.to_lowercase();
     let terms = tokenize(&query_lowercase);
 
