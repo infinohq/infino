@@ -398,11 +398,24 @@ impl Index {
 
     let memory_segments_map: DashMap<u32, Segment> = DashMap::new();
 
+    let mut search_memory_budget_consumed_bytes = 0;
+    let search_memory_budget_bytes = (search_memory_budget_megabytes * 1024.0 * 1024.0) as u64;
     for segment_summary in &all_segments_summaries_vec {
-      let segment_number = segment_summary.get_segment_number();
-      let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
-      let (segment, _) = Segment::refresh(&segment_dir_path);
-      memory_segments_map.insert(segment_number, segment);
+      let uncompressed_size = segment_summary.get_uncompressed_size();
+      search_memory_budget_consumed_bytes += uncompressed_size;
+      if search_memory_budget_consumed_bytes <= search_memory_budget_bytes {
+        let segment_number = segment_summary.get_segment_number();
+        let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
+        debug!(
+          "Loading segment with segment number {} and path {}",
+          segment_number, segment_dir_path
+        );
+        let (segment, _) = Segment::refresh(&segment_dir_path);
+        memory_segments_map.insert(segment_number, segment);
+      } else {
+        // We have reached the memory budget - so do not load any more segments.
+        break;
+      }
     }
     let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
 
