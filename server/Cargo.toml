@@ -42,12 +42,3 @@ tower = { version = "*", features = ["util"] }
 tempdir = "*"
 test-case = "*"
 urlencoding = "*"
-
-[profile.release]
-opt-level = 3
-debug = false
-debug-assertions = false
-
-[profile.test]
-debug-assertions = true
-overflow-checks = true

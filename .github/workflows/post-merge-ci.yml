@@ -26,21 +26,6 @@ jobs:
         run: rustup component add rustfmt
       - run: cargo fmt --all --check
 
-  # Uncomment this after clippy errors for benches/ repo is fixed.
-
-  # cargo-clippy:
-  #   name: "cargo clippy"
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #     - name: "Install Rust toolchain"
-  #       run: |
-  #         rustup component add clippy
-  #     - uses: Swatinem/rust-cache@v2
-  #     - run: cargo clippy --all-targets --all-features -- -D warnings
-
-
-  # Skipping COREDB tests till the config errors are solved
   cargo-tests:
     name: "Run Cargo Tests"
     runs-on: ubuntu-latest
@@ -53,7 +38,7 @@ jobs:
           profile: minimal
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
-      - name: Cargo Check
-        run: make check
-      - name: Run Infino package tests
+      - name: Build Infino
+        run: make build
+      - name: Test Infino
         run: make test
