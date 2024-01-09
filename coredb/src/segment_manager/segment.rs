@@ -374,13 +374,22 @@ impl Segment {
   fn get_postings_lists(
     &self,
     terms: &[String],
-    initial_values_list: &mut Vec<Vec<u32>>,
-    postings_lists: &mut Vec<Vec<PostingsBlockCompressed>>,
-    last_block_list: &mut Vec<PostingsBlock>,
-    shortest_list_index: &mut usize,
+  ) -> (
+    Vec<Vec<PostingsBlockCompressed>>,
+    Vec<PostingsBlock>,
+    Vec<Vec<u32>>,
+    usize,
   ) {
-    *shortest_list_index = 0;
+    // initial_values_list will contain list of initial_values corresponding to every posting_list
+    let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
+
+    // postings list will contain list of PostingBlocksCompressed
+    let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
+    let mut last_block_list: Vec<PostingsBlock> = Vec::new();
+    let mut shortest_list_index = 0;
     let mut shortest_list_len = usize::MAX;
+
+    println!("We are looking for {:?}", terms);
 
     for (index, term) in terms.into_iter().enumerate() {
       let result = self.terms.get(term);
@@ -388,14 +397,14 @@ impl Segment {
         Some(result) => *result,
         None => {
           // Term not found.
-          return;
+          return (Vec::new(), Vec::new(), Vec::new(), 0);
         }
       };
       let postings_list = match self.inverted_map.get(&term_id) {
         Some(result) => result,
         None => {
           // Postings list not found.
-          return;
+          return (Vec::new(), Vec::new(), Vec::new(), 0);
         }
       };
       let inital_values = postings_list.get_initial_values().read().unwrap().clone();
@@ -425,18 +434,25 @@ impl Segment {
 
       if postings_block_compressed_vec.len() < shortest_list_len {
         shortest_list_len = postings_block_compressed_vec.len();
-        *shortest_list_index = index;
+        shortest_list_index = index;
       }
 
       postings_lists.push(postings_block_compressed_vec);
     }
+
+    (
+      postings_lists,
+      last_block_list,
+      initial_values_list,
+      shortest_list_index,
+    )
   }
 
   // Get the matching doc IDs corresponding to a set of posting lists
   fn get_matching_doc_ids(
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
-    last_block_list: &Vec<PostingsBlock>,
+    last_block_list: &[PostingsBlock],
     initial_values_list: &Vec<Vec<u32>>,
     shortest_list_index: usize,
     accumulator: &mut Vec<u32>,
@@ -615,23 +631,11 @@ impl Segment {
   ) -> Vec<LogMessage> {
     let query_lowercase = query.to_lowercase();
     let terms = tokenize(&query_lowercase);
-
-    // initial_values_list will contain list of initial_values corresponding to every posting_list
-    let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
-
-    // postings list will contain list of PostingBlocksCompressed
-    let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
-    let mut last_block_list: Vec<PostingsBlock> = Vec::new();
-    let mut shortest_list_index = 0;
     let mut results_accumulator = Vec::new();
 
-    self.get_postings_lists(
-      &terms,
-      &mut initial_values_list,
-      &mut postings_lists,
-      &mut last_block_list,
-      &mut shortest_list_index,
-    );
+    // Call get_postings_lists and destructure its return value
+    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
+      self.get_postings_lists(&terms);
 
     // No postings list was found so let's return empty handed.
     if postings_lists.is_empty() {
