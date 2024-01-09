@@ -633,15 +633,16 @@ impl Segment {
     let terms = tokenize(&query_lowercase);
     let mut results_accumulator = Vec::new();
 
-    // Call get_postings_lists and destructure its return value
+    // Get postings lists for the query terms
     let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
       self.get_postings_lists(&terms);
 
-    // No postings list was found so let's return empty handed.
+    // No postings lists were found so let's return empty handed
     if postings_lists.is_empty() {
       return vec![];
     }
 
+    // Now get the matching document IDs from the postings lists
     self.get_matching_doc_ids(
       &postings_lists,
       &last_block_list,
