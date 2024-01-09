@@ -431,14 +431,12 @@ impl Segment {
         None => {
           // Term not found.
           return (Vec::new(), Vec::new(), Vec::new(), 0);
-          return (Vec::new(), Vec::new(), Vec::new(), 0);
-        }
+\        }
       };
       let postings_list = match self.inverted_map.get(&term_id) {
         Some(result) => result,
         None => {
           // Postings list not found.
-          return (Vec::new(), Vec::new(), Vec::new(), 0);
           return (Vec::new(), Vec::new(), Vec::new(), 0);
         }
       };
