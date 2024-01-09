@@ -2,3 +2,12 @@
 members = [
     "server", "coredb", "benches"
 ]
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+
+[profile.test]
+debug-assertions = true
+overflow-checks = true

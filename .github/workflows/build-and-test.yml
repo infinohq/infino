@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [main]
 
-# Skipping COREDB tests for now
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -17,7 +16,7 @@ jobs:
           profile: minimal
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
-      - name: Static checks
-        run: make check
-      - name: Build Infino and run tests
-        run:  make test
+      - name: Build Infino
+        run: make build
+      - name: Test Infino
+        run: make test
