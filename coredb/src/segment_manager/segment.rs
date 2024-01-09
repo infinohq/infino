@@ -1,9 +1,14 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::create_dir;
 use std::path::Path;
 use std::vec::Vec;
 
+use log::debug;
+
 use dashmap::DashMap;
+
+use serde::{Deserialize, Serialize};
 
 use crate::log::log_message::LogMessage;
 use crate::log::postings_block::PostingsBlock;
@@ -26,6 +31,41 @@ const INVERTED_MAP_FILE_NAME: &str = "inverted_map.bin";
 const FORWARD_MAP_FILE_NAME: &str = "forward_map.bin";
 const LABELS_FILE_NAME: &str = "labels.bin";
 const TIME_SERIES_FILE_NAME: &str = "time_series.bin";
+
+// Ast used for deconstructing queries for searches
+pub enum AstNode {
+  Match(String),
+  Must(Box<AstNode>, Box<AstNode>),
+  Should(Box<AstNode>, Box<AstNode>),
+  MustNot(Box<AstNode>),
+  Filter(Box<AstNode>),
+  None,
+  // Term(String),
+}
+
+// Query condition to evaluate during Ast traversal
+#[derive(Serialize, Deserialize)]
+pub enum Condition {
+  Term(TermQuery),
+  Bool(BoolQuery),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TermQuery {
+  term: Option<String>,
+  field: Option<String>,
+  boost: Option<f32>,
+  fuzziness: Option<String>,
+}
+
+// A Boolean Query definition
+#[derive(Serialize, Deserialize)]
+pub struct BoolQuery {
+  must: Option<Vec<Condition>>,
+  must_not: Option<Vec<Condition>>,
+  should: Option<Vec<Condition>>,
+  filter: Option<Vec<Condition>>,
+}
 
 /// A segment with inverted map (term-ids to log-message-ids) as well
 /// as forward map (log-message-ids to log messages).
@@ -242,10 +282,9 @@ impl Segment {
 
     let (uncompressed_terms_size, compressed_terms_size) =
       serialize::write(&self.terms, terms_path.to_str().unwrap(), sync_after_write);
-    log::debug!(
+    debug!(
       "Serialized terms to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_terms_size,
-      compressed_terms_size
+      uncompressed_terms_size, compressed_terms_size
     );
 
     let (uncompressed_inverted_map_size, compressed_inverted_map_size) = serialize::write(
@@ -253,10 +292,9 @@ impl Segment {
       inverted_map_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!(
+    debug!(
       "Serialized inverted map to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_inverted_map_size,
-      compressed_inverted_map_size
+      uncompressed_inverted_map_size, compressed_inverted_map_size
     );
 
     let (uncompressed_forward_map_size, compressed_forward_map_size) = serialize::write(
@@ -264,10 +302,9 @@ impl Segment {
       forward_map_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!(
+    debug!(
       "Serialized forward map to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_forward_map_size,
-      compressed_forward_map_size
+      uncompressed_forward_map_size, compressed_forward_map_size
     );
 
     let (uncompressed_labels_size, compressed_labels_size) = serialize::write(
@@ -275,10 +312,9 @@ impl Segment {
       labels_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!(
+    debug!(
       "Serialized labels to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_labels_size,
-      compressed_labels_size
+      uncompressed_labels_size, compressed_labels_size
     );
 
     let (uncompressed_time_series_size, compressed_time_series_size) = serialize::write(
@@ -286,10 +322,9 @@ impl Segment {
       time_series_path.to_str().unwrap(),
       sync_after_write,
     );
-    log::debug!(
+    debug!(
       "Serialized time series to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_time_series_size,
-      compressed_time_series_size
+      uncompressed_time_series_size, compressed_time_series_size
     );
 
     let (uncompressed_metadata_size, compressed_metadata_size) = self.metadata.get_metadata_size();
@@ -318,10 +353,9 @@ impl Segment {
       sync_after_write,
     );
 
-    log::debug!(
+    debug!(
       "Serialized segment to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_segment_size,
-      compressed_segment_size
+      uncompressed_segment_size, compressed_segment_size
     );
 
     (uncompressed_segment_size, compressed_segment_size)
@@ -390,8 +424,6 @@ impl Segment {
     let mut shortest_list_index = 0;
     let mut shortest_list_len = usize::MAX;
 
-    println!("We are looking for {:?}", terms);
-
     for (index, term) in terms.iter().enumerate() {
       let result = self.terms.get(term);
       let term_id: u32 = match result {
@@ -399,12 +431,14 @@ impl Segment {
         None => {
           // Term not found.
           return (Vec::new(), Vec::new(), Vec::new(), 0);
+          return (Vec::new(), Vec::new(), Vec::new(), 0);
         }
       };
       let postings_list = match self.inverted_map.get(&term_id) {
         Some(result) => result,
         None => {
           // Postings list not found.
+          return (Vec::new(), Vec::new(), Vec::new(), 0);
           return (Vec::new(), Vec::new(), Vec::new(), 0);
         }
       };
@@ -440,7 +474,6 @@ impl Segment {
 
       postings_lists.push(postings_block_compressed_vec);
     }
-
     (
       postings_lists,
       last_block_list,
@@ -477,7 +510,7 @@ impl Segment {
 
     // If postings_list is empty, then accumulator should be loaded from last_block_list
     if accumulator.is_empty() {
-      // No postings list
+      debug!("Posting list is empty. Loading accumulator from last_block_list.");
       return;
     }
 
@@ -622,46 +655,159 @@ impl Segment {
     }
   }
 
-  /// Search the segment for the given query. If a query has multiple terms, it is by
-  /// default taken as AND. Boolean queries are not yet supported.
+  /// Search the segment for the given query.
   pub fn search_logs(
     &self,
-    query: &str,
+    ast: &AstNode,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Vec<LogMessage> {
-    let query_lowercase = query.to_lowercase();
-    let terms = tokenize(&query_lowercase);
-    let mut results_accumulator = Vec::new();
+    // Get the set of matching doc IDs for the query
+    let results_accumulator = self.traverse_ast(ast);
 
-    // Get postings lists for the query terms
-    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
-      self.get_postings_lists(&terms);
+    // Convert the result set into a vector
+    let mut matching_document_ids: Vec<u32> = results_accumulator.iter().cloned().collect();
 
-    // No postings lists were found so let's return empty handed
-    if postings_lists.is_empty() {
-      return vec![];
-    }
+    // Remove any duplicates
+    matching_document_ids.dedup();
 
-    // Now get the matching document IDs from the postings lists
-    self.get_matching_doc_ids(
-      &postings_lists,
-      &last_block_list,
-      &initial_values_list,
-      shortest_list_index,
-      &mut results_accumulator,
-    );
-
-    // Main logic end
-
-    // The above intersection may leave around duplicates - see https://github.com/infinohq/infino/issues/58
-    // Remove the consecutive duplicates
-    results_accumulator.dedup();
-
+    // Get the log messages, sort, and return with the query results
     let mut log_messages =
-      self.get_log_messages_from_ids(&results_accumulator, range_start_time, range_end_time);
+      self.get_log_messages_from_ids(&matching_document_ids, range_start_time, range_end_time);
     log_messages.sort();
     log_messages
+  }
+
+  // Helper function to combine two nodes using a specific AST combiner
+  fn combine_two_nodes<F>(
+    node1: Option<AstNode>,
+    node2: Option<AstNode>,
+    combiner: F,
+  ) -> Option<AstNode>
+  where
+    F: FnOnce(Box<AstNode>, Box<AstNode>) -> AstNode,
+  {
+    match (node1, node2) {
+      (Some(n1), Some(n2)) => Some(combiner(Box::new(n1), Box::new(n2))),
+      (Some(n), None) | (None, Some(n)) => Some(n),
+      (None, None) => None,
+    }
+  }
+
+  // Helper function to combine AST nodes
+  fn combine_ast_nodes(
+    must_nodes: Option<Vec<AstNode>>,
+    must_not_nodes: Option<Vec<AstNode>>,
+    should_nodes: Option<Vec<AstNode>>,
+  ) -> Option<AstNode> {
+    let must_combined = must_nodes
+      .unwrap_or_else(Vec::new)
+      .into_iter()
+      .reduce(|a, b| AstNode::Must(Box::new(a), Box::new(b)));
+    let must_not_combined = must_not_nodes
+      .unwrap_or_else(Vec::new)
+      .into_iter()
+      .reduce(|a, b| AstNode::MustNot(Box::new(AstNode::Must(Box::new(a), Box::new(b)))));
+    let should_combined = should_nodes
+      .unwrap_or_else(Vec::new)
+      .into_iter()
+      .reduce(|a, b| AstNode::Should(Box::new(a), Box::new(b)));
+
+    let combined_must_must_not =
+      Segment::combine_two_nodes(must_combined, must_not_combined, AstNode::Must);
+    Segment::combine_two_nodes(combined_must_must_not, should_combined, AstNode::Should)
+  }
+
+  // Helper function to evaluate query conditions
+  fn process_conditions(conditions: &Option<Vec<Condition>>) -> Vec<AstNode> {
+    conditions
+      .as_ref()
+      .unwrap_or(&Vec::new())
+      .iter()
+      .flat_map(|cond| Segment::traverse_condition(cond))
+      .collect()
+  }
+
+  // Convert a JSON query to an AST
+  pub fn query_to_ast(query: &BoolQuery) -> AstNode {
+    let must_nodes = Some(Segment::process_conditions(&query.must));
+    let must_not_nodes = Some(Segment::process_conditions(&query.must_not));
+    let should_nodes = Some(Segment::process_conditions(&query.should));
+
+    Segment::combine_ast_nodes(must_nodes, must_not_nodes, should_nodes).unwrap()
+  }
+
+  // Traverse the boolean conditions in the AST
+  pub fn traverse_condition(condition: &Condition) -> Vec<AstNode> {
+    match condition {
+      Condition::Term(term_query) => term_query
+        .term
+        .clone()
+        .map(|term| AstNode::Match(term))
+        .into_iter()
+        .collect(),
+      Condition::Bool(bool_query) => vec![Segment::query_to_ast(bool_query)],
+    }
+  }
+
+  fn traverse_ast(&self, node: &AstNode) -> HashSet<u32> {
+    match node {
+      AstNode::Match(terms) => {
+        let terms_lowercase = terms.to_lowercase();
+        let terms = tokenize(&terms_lowercase);
+        let mut results = Vec::new();
+
+        // Get postings lists for the query terms
+        let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
+          self.get_postings_lists(&terms);
+
+        // No postings lists were found so let's return empty handed
+        if postings_lists.is_empty() {
+          debug!("No posting list found. Returning empty handed.");
+          return HashSet::new();
+        }
+
+        // Now get the matching document IDs from the postings lists
+        self.get_matching_doc_ids(
+          &postings_lists,
+          &last_block_list,
+          &initial_values_list,
+          shortest_list_index,
+          &mut results,
+        );
+
+        // Convert Vec<T> to HashSet<T> without consuming the Vec
+        let result_set: HashSet<_> = results.iter().cloned().collect();
+        result_set
+      }
+      AstNode::Must(left, right) => {
+        let left_results = self.traverse_ast(left);
+        let right_results = self.traverse_ast(right);
+
+        if matches!(**left, AstNode::None) {
+          return right_results;
+        } else if matches!(**right, AstNode::None) {
+          return left_results;
+        }
+
+        left_results.intersection(&right_results).cloned().collect()
+      }
+      AstNode::MustNot(node) => {
+        let node_results = self.traverse_ast(node);
+        let all_doc_ids: HashSet<u32> = self.forward_map.iter().map(|entry| *entry.key()).collect();
+        all_doc_ids.difference(&node_results).cloned().collect()
+      }
+      AstNode::Should(left, right) => {
+        let left_results = self.traverse_ast(left);
+        let right_results = self.traverse_ast(right);
+        left_results.union(&right_results).cloned().collect()
+      }
+      AstNode::Filter(node) => {
+        // Implement the logic for Filter node
+        todo!()
+      }
+      AstNode::None => HashSet::new(),
+    }
   }
 
   /// Return the log messages within the given time range corresponding to the given log message ids.
@@ -747,9 +893,28 @@ mod tests {
   use tempdir::TempDir;
 
   use super::*;
-  use crate::utils::sync::is_sync;
-  use crate::utils::sync::thread;
-  use crate::utils::tokenize::FIELD_DELIMITER;
+  use crate::utils::sync::{is_sync, thread};
+
+  fn create_term_test_node(term: &str) -> AstNode {
+    AstNode::Match(term.to_string())
+  }
+
+  // Populate segment with log messages for testing
+  fn populate_segment(segment: &mut Segment) {
+    let log_messages = vec![
+      ("log 1", "this is a test log message"),
+      ("log 2", "this is another log message"),
+      ("log 3", "test log for different term"),
+    ];
+
+    for (key, message) in log_messages.iter() {
+      let mut fields = HashMap::new();
+      fields.insert("key".to_string(), key.to_string());
+      segment
+        .append_log_message(Utc::now().timestamp_millis() as u64, &fields, message)
+        .unwrap();
+    }
+  }
 
   #[test]
   fn test_new_segment() {
@@ -757,126 +922,147 @@ mod tests {
 
     let segment = Segment::new();
     assert!(segment.is_empty());
-    assert!(segment.search_logs("doesnotexist", 0, u64::MAX).is_empty());
+
+    // Create an AstNode for the term "doesnotexist"
+    let query_node = create_term_test_node("doesnotexist");
+    assert!(segment.search_logs(&query_node, 0, u64::MAX).is_empty());
   }
 
   #[test]
   fn test_default_segment() {
     let segment = Segment::default();
     assert!(segment.is_empty());
-    assert!(segment.search_logs("doesnotexist", 0, u64::MAX).is_empty());
+
+    // Create an AstNode for the term "doesnotexist"
+    let query_node = create_term_test_node("doesnotexist");
+    assert!(segment.search_logs(&query_node, 0, u64::MAX).is_empty());
+  }
+
+  // Test searching with a simple term query
+  #[test]
+  fn test_search_with_term_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let term_node = create_term_test_node("test");
+    let results = segment.search_logs(&term_node, 0, u64::MAX);
+
+    assert_eq!(results.len(), 2); // Assuming two logs contain the term "test"
+  }
+
+  // Test searching with a Must (AND) query with single term
+  #[test]
+  fn test_search_with_must_query_single_term() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let ast = AstNode::None;
+    let right_node = create_term_test_node("another");
+    let must_node = AstNode::Must(Box::new(ast), Box::new(right_node));
+    let results = segment.search_logs(&must_node, 0, u64::MAX);
+
+    assert_eq!(results.len(), 1); // Assuming only one log contains "another"
+  }
+
+  // Test searching with a Must (AND) query
+  #[test]
+  fn test_search_with_must_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let left_node = create_term_test_node("this");
+    let right_node = create_term_test_node("another");
+    let must_node = AstNode::Must(Box::new(left_node), Box::new(right_node));
+    let results = segment.search_logs(&must_node, 0, u64::MAX);
+
+    assert_eq!(results.len(), 1); // Assuming only one log contains both "this" and "another"
+  }
+
+  // Test searching with a MustNot (NOT) query
+  #[test]
+  fn test_search_with_must_not_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let node = create_term_test_node("another");
+    let must_not_node = AstNode::MustNot(Box::new(node));
+    let results = segment.search_logs(&must_not_node, 0, u64::MAX);
+
+    assert_eq!(results.len(), 2);
+
+    assert!(results
+      .iter()
+      .all(|log| !log.get_text().contains("another")));
+  }
+
+  // Test searching with a Should (OR) query
+  #[test]
+  fn test_search_with_should_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let left_node = create_term_test_node("different");
+    let right_node = create_term_test_node("this");
+    let should_node = AstNode::Should(Box::new(left_node), Box::new(right_node));
+    let results = segment.search_logs(&should_node, 0, u64::MAX);
+
+    println!("Results: {:?}", results);
+
+    assert_eq!(results.len(), 3); // Assuming all logs contain either "this" or "different"
+  }
+
+  // Test searching with a Filter query (time range)
+  // #[test]
+  // fn test_search_with_filter_query() {
+  //   let mut segment = Segment::new();
+  //   populate_segment(&mut segment);
+
+  //   let start_time = Utc.ymd(2022, 1, 1).and_hms(0, 0, 0).timestamp_millis() as u64;
+  //   let end_time = Utc.ymd(2022, 1, 2).and_hms(23, 59, 59).timestamp_millis() as u64;
+  //   let filter_node = create_filter_test_node(start_time, end_time);
+  //   let results = segment.search_logs(&filter_node, start_time, end_time);
+
+  //   // Assuming logs within the time range are returned
+  //   assert!(!results.is_empty());
+  //   assert!(results
+  //     .iter()
+  //     .all(|log| log.get_time() >= start_time && log.get_time() <= end_time));
+  // }
+
+  // Test searching with a complex query combining Must and MustNot
+  #[test]
+  fn test_search_with_complex_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let term_node_test = create_term_test_node("test");
+    let term_node_different = create_term_test_node("different");
+    let must_not_node = AstNode::MustNot(Box::new(term_node_different));
+    let complex_query = AstNode::Must(Box::new(term_node_test), Box::new(must_not_node));
+    let results = segment.search_logs(&complex_query, 0, u64::MAX);
+
+    assert_eq!(results.len(), 1); // Assuming only one log contains "test" but not "different"
   }
 
   #[test]
-  fn test_basic_log_messages() {
-    let segment = Segment::new();
+  fn test_search_with_nested_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
 
-    let start = Utc::now().timestamp_millis() as u64;
-    let mut fields = HashMap::new();
-    fields.insert("key1".to_owned(), "val1".to_owned());
-    segment
-      .append_log_message(
-        Utc::now().timestamp_millis() as u64,
-        &HashMap::new(),
-        "this is my 1st log message",
-      )
-      .unwrap();
-    segment
-      .append_log_message(
-        Utc::now().timestamp_millis() as u64,
-        &HashMap::new(),
-        "this is my 2nd log message",
-      )
-      .unwrap();
-    segment
-      .append_log_message(Utc::now().timestamp_millis() as u64, &fields, "blah")
-      .unwrap();
-    let end = Utc::now().timestamp_millis() as u64;
+    // Construct a nested AST
+    let term_node_test = create_term_test_node("test");
+    let term_node_this = create_term_test_node("this");
+    let term_node_different = create_term_test_node("different");
+    let term_node_another = create_term_test_node("another");
 
-    // Test terms map.
-    assert!(segment.terms.contains_key("blah"));
-    assert!(segment.terms.contains_key("log"));
-    assert!(segment.terms.contains_key("1st"));
-    assert!(segment
-      .terms
-      .contains_key(&format!("key1{}val1", FIELD_DELIMITER)));
+    let should_node = AstNode::Should(Box::new(term_node_this), Box::new(term_node_another));
+    let must_not_node = AstNode::MustNot(Box::new(term_node_different));
+    let complex_query = AstNode::Must(Box::new(term_node_test), Box::new(must_not_node));
+    let nested_query = AstNode::Should(Box::new(should_node), Box::new(complex_query));
 
-    // Test search.
-    let mut results = segment.search_logs("this", 0, u64::MAX);
-    assert!(results.len() == 2);
+    let results = segment.search_logs(&nested_query, 0, u64::MAX);
 
-    assert!(
-      results.get(0).unwrap().get_text() == "this is my 1st log message"
-        || results.get(0).unwrap().get_text() == "this is my 2nd log message"
-    );
-    assert!(
-      results.get(1).unwrap().get_text() == "this is my 1st log message"
-        || results.get(1).unwrap().get_text() == "this is my 2nd log message"
-    );
-
-    results = segment.search_logs("blah", start, end);
-    assert!(results.len() == 1);
-    assert_eq!(results.get(0).unwrap().get_text(), "blah");
-
-    results = segment.search_logs(&format!("key1{}val1", FIELD_DELIMITER), start, end);
-    assert!(results.len() == 1);
-    assert_eq!(results.get(0).unwrap().get_text(), "blah");
-
-    // Test search for a term that does not exist in the segment.
-    results = segment.search_logs("__doesnotexist__", start, end);
-    assert!(results.is_empty());
-
-    // Test multi-term queries, which are implicit AND.
-    results = segment.search_logs("blah message", start, end);
-    assert!(results.is_empty());
-
-    results = segment.search_logs("log message", 0, u64::MAX);
     assert_eq!(results.len(), 2);
-
-    results = segment.search_logs("log message this", 0, u64::MAX);
-    assert_eq!(results.len(), 2);
-
-    results = segment.search_logs("1st message", start, end);
-    assert_eq!(results.len(), 1);
-
-    results = segment.search_logs("1st log message", start, end);
-    assert_eq!(results.len(), 1);
-
-    results = segment.search_logs(&format!("blah key1{}val1", FIELD_DELIMITER), start, end);
-    assert_eq!(results.len(), 1);
-
-    // Test with ranges that do not exist in the index.
-    results = segment.search_logs("log message", start - 1000, start - 100);
-    assert_eq!(results.len(), 0);
-
-    results = segment.search_logs("log message", end + 100, end + 1000);
-    assert_eq!(results.len(), 0);
-  }
-
-  #[test]
-  fn test_basic_log_messages_with_colon() {
-    let segment = Segment::new();
-
-    segment
-      .append_log_message(
-        Utc::now().timestamp_millis() as u64,
-        &HashMap::new(),
-        "test: this is my 1st log message",
-      )
-      .unwrap();
-
-    // Test terms map.
-    assert!(segment.terms.contains_key("log"));
-    assert!(segment.terms.contains_key("1st"));
-    assert!(segment.terms.contains_key("test"));
-
-    // Test search.
-    let results = segment.search_logs("test:", 0, u64::MAX);
-    assert!(results.len() == 1);
-    assert_eq!(
-      results.get(0).unwrap().get_text(),
-      "test: this is my 1st log message"
-    );
   }
 
   #[test]
@@ -925,19 +1111,14 @@ mod tests {
       original_segment.get_metric_point_count()
     );
 
-    // Verify that the segment size of the index read from disk is almost same as the uncompressed original segment size.
-    // Note that they may not be exactly the same, but may have a difference of a few bytes. This is because the
-    // size is stored in metadata file, which itself is written to disk. So, the original segment size may not reflect
-    // the exact number of bytes required to store the latest size of the segment.
+    // Verify that the segment size from disk is almost the same as the original segment size.
     assert!(i64::abs((from_disk_segment_size - uncompressed_original_segment_size) as i64) < 32);
 
     // Test metadata.
-    assert!(from_disk_segment.metadata.get_log_message_count() == 1);
-    assert!(from_disk_segment.metadata.get_label_count() == 2);
-    assert!(from_disk_segment.metadata.get_metric_point_count() == 1);
-
-    // 6 terms corresponding to each word in the sentence "this is my 1st log message"
-    assert!(from_disk_segment.metadata.get_term_count() == 6);
+    assert_eq!(from_disk_segment.metadata.get_log_message_count(), 1);
+    assert_eq!(from_disk_segment.metadata.get_label_count(), 2);
+    assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 1);
+    assert_eq!(from_disk_segment.metadata.get_term_count(), 6); // 6 terms in "this is my 1st log message"
 
     // Test terms map.
     assert!(from_disk_segment.terms.contains_key("1st"));
@@ -945,8 +1126,8 @@ mod tests {
     // Test labels.
     let metric_name_key = TimeSeries::get_label_for_metric_name(metric_name);
     let other_label_key = TimeSeries::get_label(other_label_name, other_label_value);
-    from_disk_segment.labels.contains_key(&metric_name_key);
-    from_disk_segment.labels.contains_key(&other_label_key);
+    assert!(from_disk_segment.labels.contains_key(&metric_name_key));
+    assert!(from_disk_segment.labels.contains_key(&other_label_key));
 
     // Test time series.
     assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 1);
@@ -973,19 +1154,22 @@ mod tests {
       100.0
     );
 
-    // Test search.
-    let mut results = from_disk_segment.search_logs("this", 0, u64::MAX);
+    // Test search for "this".
+    let query_node_for_this = create_term_test_node("this");
+    let mut results = from_disk_segment.search_logs(&query_node_for_this, 0, u64::MAX);
     assert_eq!(results.len(), 1);
     assert_eq!(
       results.get(0).unwrap().get_text(),
       "this is my 1st log message"
     );
 
-    results = from_disk_segment.search_logs("blah", 0, u64::MAX);
+    // Test search for "blah".
+    let query_node_for_blah = create_term_test_node("blah");
+    results = from_disk_segment.search_logs(&query_node_for_blah, 0, u64::MAX);
     assert!(results.is_empty());
 
     // Test metadata for labels.
-    assert!(from_disk_segment.metadata.get_label_count() == 2);
+    assert_eq!(from_disk_segment.metadata.get_label_count(), 2);
   }
 
   #[test]
@@ -1140,7 +1324,8 @@ mod tests {
     assert!(segment.terms.contains_key("message"));
 
     // Test search.
-    let results = segment.search_logs("hello", 0, u64::MAX);
+    let query_node = create_term_test_node("hello");
+    let results = segment.search_logs(&query_node, 0, u64::MAX);
     assert_eq!(results.len(), 2);
     assert_eq!(
       results.get(0).unwrap().get_text(),

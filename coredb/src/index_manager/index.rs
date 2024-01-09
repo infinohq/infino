@@ -9,13 +9,17 @@ use crate::index_manager::metadata::Metadata;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
 use crate::metric::metric_point::MetricPoint;
+use crate::segment_manager::segment::AstNode;
+use crate::segment_manager::segment::BoolQuery;
 use crate::segment_manager::segment::Segment;
+
 use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
 use crate::utils::sync::RwLock;
 use crate::utils::sync::{Arc, Mutex};
+use crate::utils::tokenize::tokenize;
 
 /// File name where the information about all segements is stored.
 const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
@@ -183,16 +187,61 @@ impl Index {
   }
 
   /// Search for given query in the given time range.
+  ///
+  /// Infino log searches support simple AND queries with URL parameters:
+  /// http://infino-endpoint?terms="term1 term2"&start_time=blah&end_time=blah"
+  ///
+  /// but these can be overridden by a far more complex query dsl in the
+  /// json body sent with the query: https://opensearch.org/docs/latest/query-dsl/.
+  ///
+  /// Note that while the query terms are not required in the URL, the query parameters
+  /// "start_time" and "end_time" are required in the URL. They are always added by the
+  /// OpenSearch plugin that calls Infino.
   pub fn search_logs(
     &self,
-    query: &str,
+    url_query: &str,
+    json_body: serde_json::Value,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Vec<LogMessage> {
     debug!(
-      "Search logs for query: {}, range_start_time: {}, range_end_time: {}",
-      query, range_start_time, range_end_time
+      "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
+      url_query, json_body, range_start_time, range_end_time
     );
+
+    // Check if JSON body is null or an empty object
+    let is_json_empty = match json_body {
+      serde_json::Value::Null => true,
+      serde_json::Value::Object(ref obj) => obj.is_empty(),
+      _ => false,
+    };
+
+    // Check if URL query is empty
+    let is_url_empty = url_query.trim().is_empty();
+
+    // Return an empty set of results if both JSON and URL queries are missing
+    if is_json_empty && is_url_empty {
+      return Vec::new();
+    }
+
+    let ast = if !is_json_empty {
+      match serde_json::from_value::<BoolQuery>(json_body) {
+        Ok(query) => Segment::query_to_ast(&query),
+        Err(e) => {
+          error!("Error parsing JSON body: {}", e);
+          return Vec::new();
+        }
+      }
+    } else if !is_url_empty {
+      let url_terms = tokenize(url_query);
+      url_terms
+        .into_iter()
+        .map(AstNode::Match)
+        .reduce(|a, b| AstNode::Must(Box::new(a), Box::new(b)))
+        .unwrap_or(AstNode::None)
+    } else {
+      AstNode::None
+    };
 
     let mut retval = Vec::new();
 
@@ -203,7 +252,7 @@ impl Index {
     for segment_number in segment_numbers {
       let segment = self.memory_segments_map.get(&segment_number).unwrap();
 
-      let mut results = segment.search_logs(query, range_start_time, range_end_time);
+      let mut results = segment.search_logs(&ast, range_start_time, range_end_time);
       retval.append(&mut results);
     }
     retval.sort();
@@ -542,18 +591,23 @@ mod tests {
       "thisisunique",
     );
 
+    // Prepare an empty JSON body for the query
+    let json_body = serde_json::Value::Null;
+
     // For the query "message", we should expect num_log_messages-1 results.
     // We collect each message in received_log_messages and then compare it with expected_log_messages.
-    let mut results = index.search_logs("message", 0, u64::MAX);
+    let mut results = index.search_logs("message", json_body.clone(), 0, u64::MAX);
     assert_eq!(results.len(), num_log_messages - 1);
     let mut received_log_messages: Vec<String> = Vec::new();
     for i in 1..num_log_messages {
       received_log_messages.push(results.get(i - 1).unwrap().get_text().to_owned());
     }
-    assert_eq!(expected_log_messages.sort(), received_log_messages.sort());
+    expected_log_messages.sort();
+    received_log_messages.sort();
+    assert_eq!(expected_log_messages, received_log_messages);
 
     // For the query "thisisunique", we should expect only 1 result.
-    results = index.search_logs("thisisunique", 0, u64::MAX);
+    results = index.search_logs("thisisunique", json_body, 0, u64::MAX);
     assert_eq!(results.len(), 1);
     assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
   }
@@ -819,7 +873,7 @@ mod tests {
         &message,
       );
 
-      // Commit after we have indexed more than commit_after messages.
+      // Commit after indexing more than commit_after messages.
       num_log_messages_from_last_commit += 1;
       if num_log_messages_from_last_commit > commit_after {
         index.commit(false);
@@ -828,7 +882,7 @@ mod tests {
       }
     }
 
-    // Commit and sleep to make sure the index is written to disk.
+    // Commit and sleep to ensure the index is written to disk.
     index.commit(true);
     sleep(Duration::from_millis(1000));
 
@@ -837,14 +891,14 @@ mod tests {
     // Read the index from disk.
     index = Index::refresh(&index_dir_path).unwrap();
 
-    let current_segment_ref = index.get_current_segment_ref();
-    let current_segment = current_segment_ref.value();
-
-    // Make sure that more than 1 segment was created.
+    // Ensure that more than 1 segment was created.
     assert!(index.memory_segments_map.len() > 1);
 
-    // The current segment in the index will be empty (i.e. will have 0 documents.)
+    // The current segment should be empty (i.e., have 0 documents).
+    let current_segment_ref = index.get_current_segment_ref();
+    let current_segment = current_segment_ref.value();
     assert_eq!(current_segment.get_log_message_count(), 0);
+
     for item in &index.memory_segments_map {
       let segment_number = item.key();
       let segment = item.value();
@@ -853,21 +907,24 @@ mod tests {
       }
     }
 
-    // Make sure that the prefix is in every log message.
-    let results = index.search_logs(message_prefix, start_time, end_time);
+    // Prepare an empty JSON body for the queries.
+    let json_body = serde_json::Value::Null;
+
+    // Ensure the prefix is in every log message.
+    let results = index.search_logs(message_prefix, json_body.clone(), start_time, end_time);
     assert_eq!(results.len(), num_log_messages);
 
-    // Make sure that the suffix is in exactly one log message.
+    // Ensure the suffix is in exactly one log message.
     for i in 1..num_log_messages {
       let suffix = &format!("{}", i);
-      let results = index.search_logs(suffix, start_time, end_time);
+      let results = index.search_logs(suffix, json_body.clone(), start_time, end_time);
       assert_eq!(results.len(), 1);
     }
 
-    // Make sure that the prefix+suffix is in exactly one log message.
+    // Ensure the prefix+suffix is in exactly one log message.
     for i in 1..num_log_messages {
       let message = &format!("{} {}", message_prefix, i);
-      let results = index.search_logs(message, start_time, end_time);
+      let results = index.search_logs(message, json_body.clone(), start_time, end_time);
       assert_eq!(results.len(), 1);
     }
   }
@@ -885,11 +942,7 @@ mod tests {
     let message_prefix = "message";
     let num_message_suffixes = 20;
 
-    // Create tokens with differnt numeric message suffixes, such as message1, message2, message3, etc.
-    // Write each token to the index 2^{suffix} times. For example:
-    // - message1 is written to index 2^1 times,
-    // - message2 is written to index 2^2 times,
-    // - message10 is written to index 2^10 times,
+    // Create tokens with different numeric message suffixes
     for i in 1..num_message_suffixes {
       let message = &format!("{}{}", message_prefix, i);
       let count = 2u32.pow(i);
@@ -903,10 +956,18 @@ mod tests {
       index.commit(false);
     }
 
+    // Prepare an empty JSON body for the queries
+    let json_body = serde_json::Value::Null;
+
     for i in 1..num_message_suffixes {
       let message = &format!("{}{}", message_prefix, i);
       let expected_count = 2u32.pow(i);
-      let results = index.search_logs(message, 0, Utc::now().timestamp_millis() as u64);
+      let results = index.search_logs(
+        message,
+        json_body.clone(),
+        0,
+        Utc::now().timestamp_millis() as u64,
+      );
       assert_eq!(expected_count, results.len() as u32);
     }
   }
@@ -1090,7 +1151,6 @@ mod tests {
     let ten_millis = Duration::from_millis(10);
     let handle = thread::spawn(move || {
       for _ in 0..100 {
-        // We are committing aggressively every few milliseconds - make sure that the contents are flushed to disk.
         arc_index_clone.commit(true);
         sleep(ten_millis);
       }
@@ -1118,13 +1178,16 @@ mod tests {
       handle.join().unwrap();
     }
 
-    // Commit again to cover the scenario that append threads run for more time than the commit thread,
+    // Commit again to cover the scenario that append threads run for more time than the commit thread
     arc_index.commit(true);
 
     let index = Index::refresh(&index_dir_path).unwrap();
     let expected_len = num_threads * num_appends_per_thread;
 
-    let results = index.search_logs("message", 0, expected_len as u64);
+    // Prepare an empty JSON body for the query
+    let json_body = serde_json::Value::Null;
+
+    let results = index.search_logs("message", json_body.clone(), 0, expected_len as u64);
     let received_logs_len = results.len();
 
     let results = index.get_metrics("label1", "value1", 0, expected_len as u64);
@@ -1151,8 +1214,13 @@ mod tests {
 
     // Create one more new index using same dir location
     let index = Index::new_with_threshold_params(&index_dir_path, 1.0).unwrap();
+
+    // Prepare an empty JSON body for the query
+    let json_body = serde_json::Value::Null;
+
     let search_result = index.search_logs(
       "some_message_1",
+      json_body,
       start_time as u64,
       Utc::now().timestamp_millis() as u64,
     );

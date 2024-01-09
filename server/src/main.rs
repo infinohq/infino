@@ -80,7 +80,6 @@ struct SummarizeQuery {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-/// Represents summarization query. 'k' is the number of results to summarize.
 struct SummarizeQueryResponse {
   summary: String,
   results: Vec<LogMessage>,
@@ -351,17 +350,6 @@ async fn append_log(
   Ok(())
 }
 
-/// Deprecated function for backwards-compatibility. Wraps append_metric().
-// TODO: Remove this function by Jan 2024.
-#[allow(dead_code)]
-#[deprecated(note = "Use append_metric instead")]
-async fn append_ts(
-  State(state): State<Arc<AppState>>,
-  Json(ts_json): Json<serde_json::Value>,
-) -> Result<(), (StatusCode, String)> {
-  append_metric(axum::extract::State(state), axum::Json(ts_json)).await
-}
-
 /// Append metric data to CoreDB.
 async fn append_metric(
   State(state): State<Arc<AppState>>,
@@ -447,56 +435,47 @@ async fn append_metric(
   Ok(())
 }
 
-/// Deprecated function for backwards-compatibility. Wraps search_logs().
-// TODO: Remove this function by Jan 2024.
-#[allow(dead_code)]
-#[deprecated(note = "Use search_logs instead")]
-async fn search_log(
-  State(state): State<Arc<AppState>>,
-  Query(logs_query): Query<LogsQuery>,
-) -> String {
-  search_logs(
-    axum::extract::State(state),
-    axum::extract::Query(logs_query),
-  )
-  .await
-}
-
 /// Search logs in CoreDB.
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
+  Json(json_body): Json<serde_json::Value>,
 ) -> String {
-  debug!("Searching logs: {:?}", logs_query);
+  debug!(
+    "Searching logs with URL query: {:?}, JSON body: {:?}",
+    logs_query, json_body
+  );
 
+  // Pass the deserialized JSON object directly to coredb.search_logs
   let results = state.coredb.search_logs(
     &logs_query.text,
-    // The default for range start time is 0.
+    json_body,
     logs_query.start_time.unwrap_or(0),
-    // The default for range end time is the current time.
     logs_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
 
-  serde_json::to_string(&results).expect("Could not convert search results to json")
+  serde_json::to_string(&results).expect("Could not convert search results to JSON")
 }
 
-/// Search and summarize logs in CoreDB.
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
+  Json(json_body): Json<Value>, // Add this line to extract the JSON body
 ) -> Result<String, (StatusCode, String)> {
-  debug!("Summarizing logs: {:?}", summarize_query);
+  debug!(
+    "Summarizing logs with URL query: {:?}, JSON body: {:?}",
+    summarize_query, json_body
+  );
 
-  // Number of log message to summarize.
+  // Number of log messages to summarize.
   let k = summarize_query.k.unwrap_or(100);
 
   let results = state.coredb.search_logs(
     &summarize_query.text,
-    // The default for range start time is 0.
+    json_body, // Pass the deserialized JSON object directly
     summarize_query.start_time.unwrap_or(0),
-    // The default for range end time is the current time.
     summarize_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
@@ -729,14 +708,17 @@ mod tests {
     let uri = format!("/search_logs?{}", query_string);
     info!("Checking for uri: {}", uri);
 
+    // Provide an empty JSON object as the body
+    let empty_json_body = serde_json::Value::Null;
+
     // Now call search to get the documents.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::GET)
           .uri(uri)
-          .header(http::header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())
-          .body(Body::from(""))
+          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .body(Body::from(serde_json::to_string(&empty_json_body).unwrap()))
           .unwrap(),
       )
       .await
@@ -760,7 +742,14 @@ mod tests {
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    log_messages_received = refreshed_coredb.search_logs(search_text, start_time, end_time);
+
+    // The search_logs call on refreshed_coredb might need to be updated too, if its signature has changed
+    log_messages_received = refreshed_coredb.search_logs(
+      search_text,
+      serde_json::json!(empty_json_body),
+      start_time,
+      end_time,
+    );
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);
