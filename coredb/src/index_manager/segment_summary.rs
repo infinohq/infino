@@ -12,8 +12,14 @@ pub struct SegmentSummary {
   /// Segment number in this index.
   segment_number: u32,
 
+  /// Start time.
+  start_time: u64,
+
   /// Last modified time.
   end_time: u64,
+
+  /// Uncompressed size (i.e., size when the segment is loaded in memory)
+  uncompressed_size: u64,
 }
 
 impl SegmentSummary {
@@ -21,7 +27,9 @@ impl SegmentSummary {
     SegmentSummary {
       segment_id: segment.get_id().to_owned(),
       segment_number,
+      start_time: segment.get_start_time(),
       end_time: segment.get_end_time(),
+      uncompressed_size: segment.get_uncompressed_size(),
     }
   }
 
@@ -34,9 +42,16 @@ impl SegmentSummary {
     self.segment_number
   }
 
-  #[cfg(test)]
+  pub fn get_start_time(&self) -> u64 {
+    self.start_time
+  }
+
   pub fn get_end_time(&self) -> u64 {
     self.end_time
+  }
+
+  pub fn get_uncompressed_size(&self) -> u64 {
+    self.uncompressed_size
   }
 }
 
@@ -73,7 +88,12 @@ mod tests {
 
     assert_eq!(segment_summary.get_segment_id(), segment.get_id());
     assert_eq!(segment_summary.get_segment_number(), 1);
+    assert_eq!(segment_summary.get_start_time(), segment.get_start_time());
     assert_eq!(segment_summary.get_end_time(), segment.get_end_time());
+    assert_eq!(
+      segment_summary.get_uncompressed_size(),
+      segment.get_uncompressed_size()
+    );
   }
 
   #[test]

@@ -72,7 +72,6 @@ impl Segment {
     }
   }
 
-  #[allow(dead_code)]
   /// Get id of this segment.
   pub fn get_id(&self) -> &str {
     self.metadata.get_id()
@@ -102,16 +101,19 @@ impl Segment {
     self.metadata.get_metric_point_count()
   }
 
-  #[allow(dead_code)]
   /// Get the earliest time in this segment.
   pub fn get_start_time(&self) -> u64 {
     self.metadata.get_start_time()
   }
 
-  #[allow(dead_code)]
   /// Get the latest time in this segment.
   pub fn get_end_time(&self) -> u64 {
     self.metadata.get_end_time()
+  }
+
+  /// Get the uncompressed size.
+  pub fn get_uncompressed_size(&self) -> u64 {
+    self.metadata.get_uncompressed_size()
   }
 
   #[allow(dead_code)]
@@ -382,7 +384,7 @@ impl Segment {
     *shortest_list_index = 0;
     let mut shortest_list_len = usize::MAX;
 
-    for (index, term) in terms.into_iter().enumerate() {
+    for (index, term) in terms.iter().enumerate() {
       let result = self.terms.get(term);
       let term_id: u32 = match result {
         Some(result) => *result,
@@ -436,7 +438,7 @@ impl Segment {
   fn get_matching_doc_ids(
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
-    last_block_list: &Vec<PostingsBlock>,
+    last_block_list: &[PostingsBlock],
     initial_values_list: &Vec<Vec<u32>>,
     shortest_list_index: usize,
     accumulator: &mut Vec<u32>,
