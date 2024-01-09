@@ -226,7 +226,15 @@ impl Index {
     debug!("Committing segment with segment_number: {}", segment_number);
 
     // Get the segment corresponding to the segment_number.
-    let segment_ref = self.memory_segments_map.get(&segment_number).unwrap();
+    let segment_ref = self
+      .memory_segments_map
+      .get(&segment_number)
+      .unwrap_or_else(|| {
+        panic!(
+          "Could not commit segment {} since it isn't in memory",
+          segment_number
+        )
+      });
     let segment = segment_ref.value();
 
     // Commit this segment.
@@ -284,9 +292,7 @@ impl Index {
       // Note that DashMap::insert *may* cause a single-thread deadlock if the thread has a read
       // reference to an item in the map. Make sure that no read reference for all_segments_map
       // is present before the insert and visible in this block.
-      self
-        .memory_segments_map
-        .insert(new_segment_number, new_segment);
+      self.insert_memory_segments_map(new_segment_number, new_segment);
 
       // Appends will start going to the new segment after this point.
       self
@@ -352,12 +358,12 @@ impl Index {
     let (metadata, _): (Metadata, _) = serialize::read(metadata_path.as_str());
 
     let memory_segments_map: DashMap<u32, Segment> = DashMap::new();
-    for segment_summary in &all_segments_summaries_vec {
+    /*for segment_summary in &all_segments_summaries_vec {
       let segment_number = segment_summary.get_segment_number();
       let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
       let (segment, _) = Segment::refresh(&segment_dir_path);
       memory_segments_map.insert(segment_number, segment);
-    }
+    }*/
 
     let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
 
