@@ -371,6 +371,7 @@ impl Segment {
   }
 
   // Get the posting lists belonging to a set of matching terms in the query
+  #[allow(clippy::type_complexity)]
   fn get_postings_lists(
     &self,
     terms: &[String],
@@ -391,7 +392,7 @@ impl Segment {
 
     println!("We are looking for {:?}", terms);
 
-    for (index, term) in terms.into_iter().enumerate() {
+    for (index, term) in terms.iter().enumerate() {
       let result = self.terms.get(term);
       let term_id: u32 = match result {
         Some(result) => *result,

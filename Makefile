@@ -17,16 +17,16 @@ run-debug:
 	echo "Running $(prog) server in debug mode..."
 	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
-check:
+rust-check:
+	cargo fmt --all -- --check
 	cargo check
 	cargo clippy
 
-fmt:
-	echo "Running format"
-	cargo fmt --all -- --check
+docker-check:
+	@docker ps > /dev/null 2>&1 || (echo "Docker is not running. Please start Docker to run all tests." && exit 1)
 
-test: check fmt
-	echo "Running test for all the packages"
+test: rust-check docker-check
+	echo "Running tests for all the packages"
 	cargo test --all
 
 build:
@@ -44,14 +44,14 @@ docs:
 	cargo doc --no-deps --workspace --document-private-items --target-dir docs --release
 	git add docs/doc
 
-docker-build:
+docker-build: docker-check
 	echo "Running docker build..."
 	docker build -t infinohq/infino:latest -f docker/Dockerfile .
 
-docker-run:
+docker-run: docker-check
 	echo "Starting docker container for ${prog}..."
 	docker run -it --rm -p 3000:3000 infinohq/infino:latest
 
-docker-push:
+docker-push: docker-check
 	echo "Pushing image for ${prog}"
 	docker push infinohq/infino:latest
