@@ -246,7 +246,6 @@ impl Index {
     };
 
     let ast = ast_result.unwrap_or_else(|e| {
-      // Handle the error here, e.g., log it
       error!("Error building AST: {:?}", e);
       AstNode::None
     });
@@ -613,7 +612,7 @@ mod tests {
       Ok(results) => results,
       Err(err) => {
         eprintln!("Error in search_logs: {:?}", err);
-        Vec::new() // Return an empty Vec as results
+        Vec::new()
       }
     };
 
@@ -632,7 +631,7 @@ mod tests {
       Ok(results) => results,
       Err(err) => {
         eprintln!("Error in search_logs: {:?}", err);
-        Vec::new() // Return an empty Vec as results
+        Vec::new()
       }
     };
     assert_eq!(results.len(), 1);
@@ -1026,7 +1025,6 @@ mod tests {
         }
         Err(err) => {
           eprintln!("Error in search_logs for '{}': {:?}", message, err);
-          // Handle the error as needed, e.g., assert an expected error code
         }
       }
     }
@@ -1255,7 +1253,6 @@ mod tests {
       }
       Err(err) => {
         eprintln!("Error in search_logs: {:?}", err);
-        // Handle the error as needed, e.g., assert an expected error code
       }
     }
 

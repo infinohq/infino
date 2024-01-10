@@ -84,7 +84,7 @@ impl InfinoEngine {
       }
       Err(search_logs_error) => {
         eprintln!("Error in search_logs: {:?}", search_logs_error);
-        0 // You can return a default value or any other suitable value here
+        0
       }
     }
   }
