@@ -141,6 +141,7 @@ impl CoreDB {
   pub fn search_logs(
     &self,
     query: &str,
+    json_body: serde_json::Value,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Vec<LogMessage> {
@@ -149,7 +150,7 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .search_logs(query, range_start_time, range_end_time)
+      .search_logs(query, json_body, range_start_time, range_end_time)
   }
 
   /// Get the metric points for given label and range.
@@ -345,8 +346,11 @@ mod tests {
 
     let end = Utc::now().timestamp_millis() as u64;
 
+    // Prepare an empty JSON body for the query
+    let json_body = serde_json::Value::Null;
+
     // Search for log messages. The order of results should be reverse chronological order.
-    let results = coredb.search_logs("message", start, end);
+    let results = coredb.search_logs("message", json_body.clone(), start, end);
     assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
     assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
 
