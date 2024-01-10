@@ -61,8 +61,8 @@ publishing {
               }
               developers {
                 developer {
-                  name = "OpenSearch"
-                  url = "https://github.com/opensearch-project/opensearch-plugin-template-java"
+                  name = "Infino"
+                  url = "https://github.com/infinohq/infino"
                 }
               }
             }

@@ -1,42 +1,9 @@
 ![Infino Logo (Light)](docs/images/Infino_logo_light.png#gh-light-mode-only)
 ![Infino Logo (Dark)](docs/images/Infino_logo_dark.png#gh-dark-mode-only)
 
-# Your next-gen observability solution
-![Apache Logo] 
-[![Github Commits](https://img.shields.io/github/commit-activity/m/infinohq/infino)](https://github.com/infinohq/infino/commits)
-<a href="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml">
-  <img src="https://github.com/infinohq/infino/actions/workflows/post-merge-ci.yml/badge.svg?branch=main" alt="Status" >
-</a>
-[![Join Slack](https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social)](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email)
+# Infino OpenSearch Plugin
 
-
-[Report Bug](https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=bug_report.md) |
-[Request Feature](https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=feature_request.md)
-
-<hr style="border:2px solid gray">
-
-## What is Infino?
-
-Infino is a scalable telemetry store designed for logs, metrics, and traces. Infino can function as a standalone observability solution or as the storage layer in your observability stack.
-
-## Why Infino?
-Telemetry data volumes are increasing exponentially yet there is no  purpose-built storage platform for telemetry. Most observability stacks are built on [ElasticSearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data so the stacks become complex and expensive to manage. Infino's goal is to reduce the **cost** and **complexity** of observability with smart, high-performance storage for customers and vendors alike.
-
-## How it works
-To address **cost**, Infino focuses on performance ([**see benchmarks here**](benches/README.md)):
-
-- **Index:** Append-only inverted index (more performant on telemetry data than general-purpose indexes like Lucene).
-- **Time:** Efficient sharding and storage based on data recency.
-- **Tools:** Rust core using SIMD instruction sets and telemetry-optimized compression.
-
-To address **complexity**, Infino focuses on AI and automation:
-
-- **Access:** NLP support + charts-on-demand for chat interfaces like Slack or Teams.
-- **Management:** No schema, no labels, no master node + autoscaled everything.
-- **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
-
-
-# What is the Infino plugin for OpenSearch?
+## What is the Infino plugin for OpenSearch?
 
 An Infino Collection is a set of automanaged indexes in OpenSearch.  A collection consists internally of optimized indexes for both documents (Lucene) and telemetry (Infino) that are searchable together. Collections also have built-in AI co-pilots to do summarizations and root cause analysis.
 
