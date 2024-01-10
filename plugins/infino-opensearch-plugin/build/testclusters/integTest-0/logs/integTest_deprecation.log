@@ -1,2 +1,0 @@
-[2024-01-10T05:16:40,546][DEPRECATION][o.o.d.n.Node             ] [integTest-0] no-jdk distributions that do not bundle a JDK are deprecated and will be removed in a future release
-[2024-01-10T05:16:45,843][DEPRECATION][o.o.d.c.s.Settings       ] [integTest-0] [index.force_memory_term_dictionary] setting was deprecated in OpenSearch and will be removed in a future release! See the breaking changes documentation for the next major version.
