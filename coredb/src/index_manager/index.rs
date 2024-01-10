@@ -1281,15 +1281,11 @@ mod tests {
     index.commit(true);
 
     // Create one more new index using same dir location
-<<<<<<< HEAD
     let index = Index::new_with_threshold_params(&index_dir_path, 1.0, 1024.0).unwrap();
-=======
-    let index = Index::new_with_threshold_params(&index_dir_path, 1.0).unwrap();
 
     // Prepare an empty JSON body for the query
     let json_body = serde_json::Value::Null;
 
->>>>>>> origin
     let search_result = index.search_logs(
       "some_message_1",
       json_body,
