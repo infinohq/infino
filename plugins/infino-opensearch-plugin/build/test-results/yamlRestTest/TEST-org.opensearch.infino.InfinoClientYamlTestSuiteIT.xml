@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.opensearch.infino.InfinoClientYamlTestSuiteIT" tests="1" skipped="0" failures="0" errors="0" timestamp="2024-01-10T04:16:57" hostname="MacBook-Pro-74.local" time="0.496">
+  <properties/>
+  <testcase name="test {yaml=/10_basic/Test that the Infino plugin is loaded in OpenSearch}" classname="org.opensearch.infino.InfinoClientYamlTestSuiteIT" time="0.496"/>
+  <system-out><![CDATA[[2024-01-09T21:16:57,640][INFO ][o.o.i.InfinoClientYamlTestSuiteIT] [test] [yaml=/10_basic/Test that the Infino plugin is loaded in OpenSearch] before test
+[2024-01-09T21:16:57,705][INFO ][o.o.i.InfinoClientYamlTestSuiteIT] [test] initializing REST clients against [http://[::1]:64537, http://127.0.0.1:64538]
+[2024-01-09T21:16:58,033][INFO ][o.o.i.InfinoClientYamlTestSuiteIT] [test] initializing client, minimum OpenSearch version [3.0.0], cluster-manager version, [3.0.0], hosts [http://[::1]:64537, http://127.0.0.1:64538]
+[2024-01-09T21:16:58,116][INFO ][o.o.i.InfinoClientYamlTestSuiteIT] [test] [yaml=/10_basic/Test that the Infino plugin is loaded in OpenSearch] after test
+]]></system-out>
+  <system-err><![CDATA[SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+]]></system-err>
+</testsuite>

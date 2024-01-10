@@ -1,0 +1,35 @@
+
+*****************************************************
+Summary
+-------
+Generated at: 2024-01-10T05:16:34+01:00
+
+Notes: 0
+Binaries: 0
+Archives: 0
+Standards: 9
+
+Apache Licensed: 0
+Generated Documents: 0
+
+JavaDocs are generated, thus a license header is optional.
+Generated files do not require license headers.
+
+0 Unknown Licenses
+
+*****************************************************
+  Files with Apache License headers will be marked AL
+  Binary files (which do not require any license headers) will be marked B
+  Compressed archives will be marked A
+  Notices, licenses etc. will be marked N
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/main/java/org/opensearch/infino/InfinoPlugin.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/main/java/org/opensearch/infino/InfinoRestHandler.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/main/java/org/opensearch/infino/InfinoSerializeRequestURI.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/test/java/org/opensearch/bootstrap/JarHell.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/test/java/org/opensearch/infino/InfinoMockService.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/test/java/org/opensearch/infino/InfinoPluginIT.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/test/java/org/opensearch/infino/InfinoRestHandlerTests.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/test/java/org/opensearch/infino/InfinoSerializeRequestURITests.java
+  SPDX  /Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/src/yamlRestTest/java/org/opensearch/infino/InfinoClientYamlTestSuiteIT.java
+ 
+*****************************************************

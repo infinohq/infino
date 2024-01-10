@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.opensearch.infino.InfinoSerializeRequestURITests" tests="19" skipped="0" failures="0" errors="0" timestamp="2024-01-10T04:16:48" hostname="MacBook-Pro-74.local" time="0.677">
+  <properties/>
+  <testcase name="testMethodTypeHandling" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.549"/>
+  <testcase name="testUndefinedIndexType" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.01"/>
+  <testcase name="testInvalidPathConstruction" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.021"/>
+  <testcase name="testNoIndexNameProvided" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.013"/>
+  <testcase name="testMissingEndTimeDefaultHandling" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.007"/>
+  <testcase name="testDefaultTimeRange" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.009"/>
+  <testcase name="testInvalidParameterEncoding" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.004"/>
+  <testcase name="testMissingStartTimeDefaultHandling" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.006"/>
+  <testcase name="testPingEndpoint" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.006"/>
+  <testcase name="testRequestProcessing" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.005"/>
+  <testcase name="testPostAppendLogEndpoint" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.004"/>
+  <testcase name="testLogsSearchEndpoint" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.006"/>
+  <testcase name="testEncodeParameters" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.004"/>
+  <testcase name="testMetricsSearchEndpoint" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.005"/>
+  <testcase name="testInvalidPath" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.006"/>
+  <testcase name="testInvalidRequestMethod" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.008"/>
+  <testcase name="testUrlConstructionForPostMethod" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.003"/>
+  <testcase name="testDeleteIndexEndpoint" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.004"/>
+  <testcase name="testPutIndexEndpoint" classname="org.opensearch.infino.InfinoSerializeRequestURITests" time="0.004"/>
+  <system-out><![CDATA[[2024-01-10T15:16:48,909][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMethodTypeHandling] before test
+[2024-01-10T15:16:49,439][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMethodTypeHandling] after test
+[2024-01-10T15:16:49,457][INFO ][o.o.i.InfinoSerializeRequestURITests] [testUndefinedIndexType] before test
+[2024-01-10T15:16:49,458][INFO ][o.o.i.InfinoSerializeRequestURITests] [testUndefinedIndexType] after test
+[2024-01-10T15:16:49,477][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidPathConstruction] before test
+[2024-01-10T15:16:49,480][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidPathConstruction] after test
+[2024-01-10T15:16:49,492][INFO ][o.o.i.InfinoSerializeRequestURITests] [testNoIndexNameProvided] before test
+[2024-01-10T15:16:49,492][INFO ][o.o.i.InfinoSerializeRequestURITests] [testNoIndexNameProvided] after test
+[2024-01-10T15:16:49,498][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMissingEndTimeDefaultHandling] before test
+[2024-01-10T15:16:49,499][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMissingEndTimeDefaultHandling] after test
+[2024-01-10T15:16:49,506][INFO ][o.o.i.InfinoSerializeRequestURITests] [testDefaultTimeRange] before test
+[2024-01-10T15:16:49,507][INFO ][o.o.i.InfinoSerializeRequestURITests] [testDefaultTimeRange] after test
+[2024-01-10T15:16:49,512][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidParameterEncoding] before test
+[2024-01-10T15:16:49,513][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidParameterEncoding] after test
+[2024-01-10T15:16:49,517][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMissingStartTimeDefaultHandling] before test
+[2024-01-10T15:16:49,519][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMissingStartTimeDefaultHandling] after test
+[2024-01-10T15:16:49,523][INFO ][o.o.i.InfinoSerializeRequestURITests] [testPingEndpoint] before test
+[2024-01-10T15:16:49,525][INFO ][o.o.i.InfinoSerializeRequestURITests] [testPingEndpoint] after test
+[2024-01-10T15:16:49,528][INFO ][o.o.i.InfinoSerializeRequestURITests] [testRequestProcessing] before test
+[2024-01-10T15:16:49,530][INFO ][o.o.i.InfinoSerializeRequestURITests] [testRequestProcessing] after test
+[2024-01-10T15:16:49,533][INFO ][o.o.i.InfinoSerializeRequestURITests] [testPostAppendLogEndpoint] before test
+[2024-01-10T15:16:49,534][INFO ][o.o.i.InfinoSerializeRequestURITests] [testPostAppendLogEndpoint] after test
+[2024-01-10T15:16:49,540][INFO ][o.o.i.InfinoSerializeRequestURITests] [testLogsSearchEndpoint] before test
+[2024-01-10T15:16:49,541][INFO ][o.o.i.InfinoSerializeRequestURITests] [testLogsSearchEndpoint] after test
+[2024-01-10T15:16:49,544][INFO ][o.o.i.InfinoSerializeRequestURITests] [testEncodeParameters] before test
+[2024-01-10T15:16:49,545][INFO ][o.o.i.InfinoSerializeRequestURITests] [testEncodeParameters] after test
+[2024-01-10T15:16:49,548][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMetricsSearchEndpoint] before test
+[2024-01-10T15:16:49,550][INFO ][o.o.i.InfinoSerializeRequestURITests] [testMetricsSearchEndpoint] after test
+[2024-01-10T15:16:49,554][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidPath] before test
+[2024-01-10T15:16:49,556][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidPath] after test
+[2024-01-10T15:16:49,560][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidRequestMethod] before test
+[2024-01-10T15:16:49,564][INFO ][o.o.i.InfinoSerializeRequestURITests] [testInvalidRequestMethod] after test
+[2024-01-10T15:16:49,567][INFO ][o.o.i.InfinoSerializeRequestURITests] [testUrlConstructionForPostMethod] before test
+[2024-01-10T15:16:49,568][INFO ][o.o.i.InfinoSerializeRequestURITests] [testUrlConstructionForPostMethod] after test
+[2024-01-10T15:16:49,571][INFO ][o.o.i.InfinoSerializeRequestURITests] [testDeleteIndexEndpoint] before test
+[2024-01-10T15:16:49,573][INFO ][o.o.i.InfinoSerializeRequestURITests] [testDeleteIndexEndpoint] after test
+[2024-01-10T15:16:49,576][INFO ][o.o.i.InfinoSerializeRequestURITests] [testPutIndexEndpoint] before test
+[2024-01-10T15:16:49,577][INFO ][o.o.i.InfinoSerializeRequestURITests] [testPutIndexEndpoint] after test
+]]></system-out>
+  <system-err><![CDATA[SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+]]></system-err>
+</testsuite>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.opensearch.infino.InfinoPluginIT" tests="1" skipped="0" failures="0" errors="0" timestamp="2024-01-10T04:16:43" hostname="MacBook-Pro-74.local" time="2.385">
+  <properties/>
+  <testcase name="testInfinoInstalled" classname="org.opensearch.infino.InfinoPluginIT" time="2.385"/>
+  <system-out><![CDATA[[2024-01-10T06:16:43,816][INFO ][o.o.i.InfinoPluginIT     ] [testInfinoInstalled] before test
+[2024-01-10T06:16:43,821][INFO ][o.o.i.InfinoPluginIT     ] [testInfinoInstalled] [InfinoPluginIT#testInfinoInstalled]: setting up test
+[2024-01-10T06:16:43,960][INFO ][o.o.n.Node               ] [testInfinoInstalled] version[3.0.0-SNAPSHOT], pid[96714], build[unknown/332f4c535643b459071aa9d2b3e5d50d137d8523/2023-12-15T23:14:57.483165Z], OS[Mac OS X/13.0.1/aarch64], JVM[Amazon.com Inc./OpenJDK 64-Bit Server VM/17.0.9/17.0.9+8-LTS]
+[2024-01-10T06:16:43,961][INFO ][o.o.n.Node               ] [testInfinoInstalled] JVM home [/Users/ekechi/.sdkman/candidates/java/17.0.9-amzn]
+[2024-01-10T06:16:43,963][DEPRECATION][o.o.d.n.Node             ] [testInfinoInstalled] no-jdk distributions that do not bundle a JDK are deprecated and will be removed in a future release
+[2024-01-10T06:16:43,964][INFO ][o.o.n.Node               ] [testInfinoInstalled] JVM arguments [-Dgradle.dist.lib=/Users/ekechi/.gradle/wrapper/dists/gradle-8.4-all/56r6xik2f6skrm47et0ibifug/gradle-8.4/lib, -Dgradle.user.home=/Users/ekechi/.gradle, -Dgradle.worker.jar=/Users/ekechi/.gradle/caches/8.4/workerMain/gradle-worker.jar, -Dio.netty.noKeySetOptimization=true, -Dio.netty.noUnsafe=true, -Dio.netty.recycler.maxCapacityPerThread=0, -Djava.awt.headless=true, -Djava.locale.providers=SPI,COMPAT, -Djna.nosys=true, -Dopensearch.scripting.update.ctx_in_params=false, -Dopensearch.search.rewrite_sort=true, -Dopensearch.transport.cname_in_publish_address=true, -Dorg.gradle.internal.worker.tmpdir=/Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/build/tmp/integTest/work, -Dorg.gradle.native=false, -Dtests.artifact=plugin-template, -Dtests.cluster=[::1]:64503,127.0.0.1:64504, -Dtests.clustername=integTest, -Dtests.gradle=true, -Dtests.logger.level=WARN, -Dtests.rest.cluster=[::1]:64505,127.0.0.1:64506, -Dtests.rest.load_packaged=false, -Dtests.security.manager=false, -Dtests.seed=BA9F4E9F30CD29EA, -Dtests.task=:integTest, -XX:+HeapDumpOnOutOfMemoryError, -esa, -XX:HeapDumpPath=/Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/build/heapdump, -javaagent:/Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/build/tmp/.cache/expanded/zip_0bd0851504e6286cb5fc6f37a81e25cc/jacocoagent.jar=destfile=../../jacoco/integTest.exec,append=true,inclnolocationclasses=false,dumponexit=true,output=file,jmx=false, -Xms512m, -Xmx512m, -Dfile.encoding=UTF-8, -Djava.io.tmpdir=/Users/ekechi/ekechinwokah/infino/plugins/infino-opensearch-plugin/build/testrun/integTest/temp, -Duser.country=US, -Duser.language=en, -Duser.variant, -ea]
+[2024-01-10T06:16:43,964][WARN ][o.o.n.Node               ] [testInfinoInstalled] version [3.0.0-SNAPSHOT] is a pre-release version of OpenSearch and is not suitable for production
+[2024-01-10T06:16:43,970][INFO ][o.o.p.PluginsService     ] [testInfinoInstalled] no modules loaded
+[2024-01-10T06:16:43,971][INFO ][o.o.p.PluginsService     ] [testInfinoInstalled] loaded plugin [org.opensearch.infino.InfinoPlugin]
+[2024-01-10T06:16:43,971][INFO ][o.o.p.PluginsService     ] [testInfinoInstalled] loaded plugin [org.opensearch.test.MockHttpTransport$TestPlugin]
+[2024-01-10T06:16:43,971][INFO ][o.o.p.PluginsService     ] [testInfinoInstalled] loaded plugin [org.opensearch.transport.nio.MockNioTransportPlugin]
+[2024-01-10T06:16:43,973][INFO ][o.o.e.ExtensionsManager  ] [testInfinoInstalled] ExtensionsManager initialized
+[2024-01-10T06:16:43,993][INFO ][o.o.e.NodeEnvironment    ] [testInfinoInstalled] using [1] data paths, mounts [[/System/Volumes/Data (/dev/disk3s5)]], net usable_space [19.7gb], net total_space [926.3gb], types [apfs]
+[2024-01-10T06:16:43,993][INFO ][o.o.e.NodeEnvironment    ] [testInfinoInstalled] heap size [512mb], compressed ordinary object pointers [true]
+[2024-01-10T06:16:43,994][DEPRECATION][o.o.d.c.s.Settings       ] [testInfinoInstalled] [node.master] setting was deprecated in OpenSearch and will be removed in a future release! See the breaking changes documentation for the next major version.
+[2024-01-10T06:16:43,996][DEPRECATION][o.o.d.c.s.Settings       ] [testInfinoInstalled] [node.data] setting was deprecated in OpenSearch and will be removed in a future release! See the breaking changes documentation for the next major version.
+[2024-01-10T06:16:43,996][DEPRECATION][o.o.d.c.s.Settings       ] [testInfinoInstalled] [node.ingest] setting was deprecated in OpenSearch and will be removed in a future release! See the breaking changes documentation for the next major version.
+[2024-01-10T06:16:44,034][INFO ][o.o.n.Node               ] [testInfinoInstalled] node name [external_0], node ID [RiBjSwAAQAC67yKP_____w], cluster name [integTest], roles [remote_cluster_client]
+[2024-01-10T06:16:45,083][INFO ][o.o.d.DiscoveryModule    ] [testInfinoInstalled] using discovery type [zen] and seed hosts providers [settings]
+[2024-01-10T06:16:45,304][WARN ][o.o.g.DanglingIndicesState] [testInfinoInstalled] gateway.auto_import_dangling_indices is disabled, dangling indices will not be automatically detected or imported and must be managed manually
+[2024-01-10T06:16:45,490][INFO ][o.o.n.Node               ] [testInfinoInstalled] initialized
+[2024-01-10T06:16:45,491][INFO ][o.o.n.Node               ] [testInfinoInstalled] starting ...
+[2024-01-10T06:16:45,508][INFO ][o.o.t.TransportService   ] [testInfinoInstalled] publish_address {127.0.0.1:9300}, bound_addresses {[::1]:9300}, {127.0.0.1:9300}
+[2024-01-10T06:16:45,509][INFO ][o.o.t.TransportService   ] [testInfinoInstalled] Remote clusters initialized successfully.
+[2024-01-10T06:16:45,788][INFO ][o.o.c.s.ClusterApplierService] [external_0] cluster-manager node changed {previous [], current [{integTest-0}{IWphJIrjTrO4vEZmc5FWvw}{Y_2MoKWwQluhJRsrE5qMCQ}{127.0.0.1}{127.0.0.1:64504}{dimr}{testattr=test, shard_indexing_pressure_enabled=true}]}, added {{integTest-0}{IWphJIrjTrO4vEZmc5FWvw}{Y_2MoKWwQluhJRsrE5qMCQ}{127.0.0.1}{127.0.0.1:64504}{dimr}{testattr=test, shard_indexing_pressure_enabled=true}}, term: 1, version: 3, reason: ApplyCommitRequest{term=1, version=3, sourceNode={integTest-0}{IWphJIrjTrO4vEZmc5FWvw}{Y_2MoKWwQluhJRsrE5qMCQ}{127.0.0.1}{127.0.0.1:64504}{dimr}{testattr=test, shard_indexing_pressure_enabled=true}}
+[2024-01-10T06:16:45,793][INFO ][o.o.n.Node               ] [testInfinoInstalled] started
+[2024-01-10T06:16:45,796][INFO ][o.o.d.PeerFinder         ] [external_0] setting findPeersInterval to [1s] as node commission status = [true] for local node [{external_0}{RiBjSwAAQAC67yKP_____w}{xoArsznrRU6s6rYbQk3h4w}{127.0.0.1}{127.0.0.1:9300}{r}{shard_indexing_pressure_enabled=true}]
+[2024-01-10T06:16:45,802][INFO ][o.o.t.ExternalTestCluster] [testInfinoInstalled] Setup ExternalTestCluster [integTest] made of [2] nodes
+[2024-01-10T06:16:45,934][INFO ][o.o.i.InfinoPluginIT     ] [testInfinoInstalled] [InfinoPluginIT#testInfinoInstalled]: all set up test
+[2024-01-10T06:16:46,088][INFO ][o.o.i.InfinoPluginIT     ] [testInfinoInstalled] response body: external_0  org.opensearch.infino.InfinoPlugin                  NA
+external_0  org.opensearch.test.MockHttpTransport$TestPlugin    NA
+external_0  org.opensearch.transport.nio.MockNioTransportPlugin NA
+integTest-0 infino-opensearch-plugin-3.0.0-SNAPSHOT             unspecified
+
+[2024-01-10T06:16:46,089][INFO ][o.o.i.InfinoPluginIT     ] [testInfinoInstalled] [InfinoPluginIT#testInfinoInstalled]: cleaning up after test
+[2024-01-10T06:16:46,186][INFO ][o.o.i.InfinoPluginIT     ] [testInfinoInstalled] [InfinoPluginIT#testInfinoInstalled]: cleaned up after test
+[2024-01-10T06:16:46,187][INFO ][o.o.i.InfinoPluginIT     ] [testInfinoInstalled] after test
+[2024-01-10T06:16:46,193][INFO ][o.o.n.Node               ] [suite] stopping ...
+[2024-01-10T06:16:46,193][DEPRECATION][o.o.d.c.s.Settings       ] [suite] [node.data] setting was deprecated in OpenSearch and will be removed in a future release! See the breaking changes documentation for the next major version.
+[2024-01-10T06:16:46,193][DEPRECATION][o.o.d.c.s.Settings       ] [suite] [node.ingest] setting was deprecated in OpenSearch and will be removed in a future release! See the breaking changes documentation for the next major version.
+[2024-01-10T06:16:46,193][DEPRECATION][o.o.d.c.s.Settings       ] [suite] [node.master] setting was deprecated in OpenSearch and will be removed in a future release! See the breaking changes documentation for the next major version.
+[2024-01-10T06:16:46,195][INFO ][o.o.c.c.Coordinator      ] [external_0] cluster-manager node [{integTest-0}{IWphJIrjTrO4vEZmc5FWvw}{Y_2MoKWwQluhJRsrE5qMCQ}{127.0.0.1}{127.0.0.1:64504}{dimr}{testattr=test, shard_indexing_pressure_enabled=true}] failed, restarting discovery
+org.opensearch.transport.NodeDisconnectedException: [integTest-0][127.0.0.1:64504][disconnected] disconnected
+[2024-01-10T06:16:46,198][INFO ][o.o.n.Node               ] [suite] stopped
+[2024-01-10T06:16:46,198][INFO ][o.o.n.Node               ] [suite] closing ...
+[2024-01-10T06:16:46,202][INFO ][o.o.n.Node               ] [suite] closed
+]]></system-out>
+  <system-err><![CDATA[SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+]]></system-err>
+</testsuite>
