@@ -38,9 +38,7 @@ pub enum AstNode {
   Must(Box<AstNode>, Box<AstNode>),
   Should(Box<AstNode>, Box<AstNode>),
   MustNot(Box<AstNode>),
-  Filter(Box<AstNode>),
   None,
-  // Term(String),
 }
 
 // Query condition to evaluate during Ast traversal
@@ -699,15 +697,15 @@ impl Segment {
     should_nodes: Option<Vec<AstNode>>,
   ) -> Option<AstNode> {
     let must_combined = must_nodes
-      .unwrap_or_else(Vec::new)
+      .unwrap_or_default()
       .into_iter()
       .reduce(|a, b| AstNode::Must(Box::new(a), Box::new(b)));
     let must_not_combined = must_not_nodes
-      .unwrap_or_else(Vec::new)
+      .unwrap_or_default()
       .into_iter()
       .reduce(|a, b| AstNode::MustNot(Box::new(AstNode::Must(Box::new(a), Box::new(b)))));
     let should_combined = should_nodes
-      .unwrap_or_else(Vec::new)
+      .unwrap_or_default()
       .into_iter()
       .reduce(|a, b| AstNode::Should(Box::new(a), Box::new(b)));
 
@@ -722,7 +720,7 @@ impl Segment {
       .as_ref()
       .unwrap_or(&Vec::new())
       .iter()
-      .flat_map(|cond| Segment::traverse_condition(cond))
+      .flat_map(Segment::traverse_condition)
       .collect()
   }
 
@@ -741,7 +739,7 @@ impl Segment {
       Condition::Term(term_query) => term_query
         .term
         .clone()
-        .map(|term| AstNode::Match(term))
+        .map(AstNode::Match)
         .into_iter()
         .collect(),
       Condition::Bool(bool_query) => vec![Segment::query_to_ast(bool_query)],
@@ -799,10 +797,6 @@ impl Segment {
         let left_results = self.traverse_ast(left);
         let right_results = self.traverse_ast(right);
         left_results.union(&right_results).cloned().collect()
-      }
-      AstNode::Filter(node) => {
-        // Implement the logic for Filter node
-        todo!()
       }
       AstNode::None => HashSet::new(),
     }
