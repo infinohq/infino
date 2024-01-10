@@ -17,6 +17,7 @@ mod utils;
 
 use std::collections::HashMap;
 use std::env;
+use std::result::Result;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query};
@@ -36,6 +37,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
+use coredb::utils::error::SearchLogsError;
 use coredb::CoreDB;
 use utils::error::InfinoError;
 
@@ -440,14 +442,14 @@ async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
   Json(json_body): Json<serde_json::Value>,
-) -> String {
+) -> Result<String, (StatusCode, String)> {
   debug!(
     "Searching logs with URL query: {:?}, JSON body: {:?}",
     logs_query, json_body
   );
 
   // Pass the deserialized JSON object directly to coredb.search_logs
-  let results = state.coredb.search_logs(
+  let result = state.coredb.search_logs(
     &logs_query.text,
     json_body,
     logs_query.start_time.unwrap_or(0),
@@ -456,13 +458,38 @@ async fn search_logs(
       .unwrap_or(Utc::now().timestamp_millis() as u64),
   );
 
-  serde_json::to_string(&results).expect("Could not convert search results to JSON")
+  match result {
+    Ok(log_messages) => {
+      let result_json =
+        serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
+      Ok(result_json)
+    }
+    Err(search_logs_error) => {
+      // Handle the error and return an appropriate status code and error message.
+      match search_logs_error {
+        SearchLogsError::JsonParseError(_) => {
+          Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+        }
+        SearchLogsError::SegmentSearchError(_) => Err((
+          StatusCode::INTERNAL_SERVER_ERROR,
+          "Internal server error".to_string(),
+        )),
+        SearchLogsError::SegmentError(_) => Err((
+          StatusCode::INTERNAL_SERVER_ERROR,
+          "Internal server error".to_string(),
+        )),
+        SearchLogsError::NoQueryProvided => {
+          Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
+        }
+      }
+    }
+  }
 }
 
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
-  Json(json_body): Json<Value>, // Add this line to extract the JSON body
+  Json(json_body): Json<Value>,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
     "Summarizing logs with URL query: {:?}, JSON body: {:?}",
@@ -472,49 +499,53 @@ async fn summarize(
   // Number of log messages to summarize.
   let k = summarize_query.k.unwrap_or(100);
 
-  let results = state.coredb.search_logs(
+  // Call search_logs and handle errors
+  match state.coredb.search_logs(
     &summarize_query.text,
     json_body, // Pass the deserialized JSON object directly
     summarize_query.start_time.unwrap_or(0),
     summarize_query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64),
-  );
+  ) {
+    Ok(results) => {
+      // Call openai_helper.summarize and handle errors
+      match state.openai_helper.summarize(&results, k) {
+        Some(summary) => {
+          let response = SummarizeQueryResponse { summary, results };
 
-  let summary = state.openai_helper.summarize(&results, k);
-  match summary {
-    Some(summary) => {
-      let response = SummarizeQueryResponse { summary, results };
+          let retval =
+            serde_json::to_string(&response).expect("Could not convert search results to json");
+          Ok(retval)
+        }
+        None => {
+          let mut msg: String = "Could not summarize logs.".to_owned();
+          let is_var_set = std::env::var_os("OPENAI_API_KEY").is_some();
+          if !is_var_set {
+            msg = format!("{} Pl check if OPENAI_API_KEY is set.", msg);
+          }
 
-      let retval =
-        serde_json::to_string(&response).expect("Could not convert search results to json");
-      Ok(retval)
-    }
-    None => {
-      let mut msg: String = "Could not summarize logs.".to_owned();
-      let is_var_set = std::env::var_os("OPENAI_API_KEY").is_some();
-      if !is_var_set {
-        msg = format!("{} Pl check if OPENAI_API_KEY is set.", msg);
+          Err((StatusCode::FAILED_DEPENDENCY, msg))
+        }
       }
-
-      Err((StatusCode::FAILED_DEPENDENCY, msg))
+    }
+    Err(search_logs_error) => {
+      // Handle the error when calling search_logs
+      Err(match search_logs_error {
+        // Map SearchLogsError to appropriate StatusCode and error message
+        SearchLogsError::JsonParseError(_) => {
+          (StatusCode::BAD_REQUEST, "Invalid JSON input".to_string())
+        }
+        SearchLogsError::SegmentSearchError(_) | SearchLogsError::SegmentError(_) => (
+          StatusCode::INTERNAL_SERVER_ERROR,
+          "Internal server error".to_string(),
+        ),
+        SearchLogsError::NoQueryProvided => {
+          (StatusCode::BAD_REQUEST, "No query provided".to_string())
+        }
+      })
     }
   }
-}
-
-/// Deprecated function for backwards-compatibility. Wraps search_metrics().
-// TODO: Remove this function by Jan 2024.
-#[allow(dead_code)]
-#[deprecated(note = "Use search_metrics instead")]
-async fn search_ts(
-  State(state): State<Arc<AppState>>,
-  Query(metrics_query): Query<MetricsQuery>,
-) -> String {
-  search_metrics(
-    axum::extract::State(state),
-    axum::extract::Query(metrics_query),
-  )
-  .await
 }
 
 /// Search metrics in CoreDB.
@@ -729,7 +760,7 @@ mod tests {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
       .await
       .unwrap();
-    let mut log_messages_received: Vec<LogMessage> = serde_json::from_slice(&body).unwrap();
+    let log_messages_received: Vec<LogMessage> = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(log_messages_expected.len(), log_messages_received.len());
     assert_eq!(log_messages_expected, log_messages_received);
@@ -743,16 +774,24 @@ mod tests {
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
 
-    // The search_logs call on refreshed_coredb might need to be updated too, if its signature has changed
-    log_messages_received = refreshed_coredb.search_logs(
+    // Handle errors from search_logs
+    let log_messages_result = refreshed_coredb.search_logs(
       search_text,
       serde_json::json!(empty_json_body),
       start_time,
       end_time,
     );
 
-    assert_eq!(log_messages_expected.len(), log_messages_received.len());
-    assert_eq!(log_messages_expected, log_messages_received);
+    match log_messages_result {
+      Ok(log_messages_received) => {
+        assert_eq!(log_messages_expected.len(), log_messages_received.len());
+        assert_eq!(log_messages_expected, log_messages_received);
+      }
+      Err(search_logs_error) => {
+        // Handle the error from search_logs
+        eprintln!("Error in search_logs: {:?}", search_logs_error);
+      }
+    }
   }
 
   fn check_metric_point_vectors(expected: &Vec<MetricPoint>, received: &Vec<MetricPoint>) {

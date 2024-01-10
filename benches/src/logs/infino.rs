@@ -68,18 +68,25 @@ impl InfinoEngine {
     // Passing an empty JSON object
     let json_query = Value::Null;
 
-    let result = self
+    match self
       .coredb
-      .search_logs(query, json_query, range_start_time, range_end_time);
-
-    let elapsed = now.elapsed().as_micros();
-    println!(
-      "Infino time required for searching logs {} is : {} microseconds. Num of results {}",
-      query,
-      elapsed,
-      result.len()
-    );
-    elapsed
+      .search_logs(query, json_query, range_start_time, range_end_time)
+    {
+      Ok(result) => {
+        let elapsed = now.elapsed().as_micros();
+        println!(
+          "Infino time required for searching logs {} is : {} microseconds. Num of results {}",
+          query,
+          elapsed,
+          result.len()
+        );
+        elapsed
+      }
+      Err(search_logs_error) => {
+        eprintln!("Error in search_logs: {:?}", search_logs_error);
+        0 // You can return a default value or any other suitable value here
+      }
+    }
   }
 
   pub fn get_index_dir_path(&self) -> &str {

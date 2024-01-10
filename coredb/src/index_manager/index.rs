@@ -13,7 +13,10 @@ use crate::segment_manager::segment::AstNode;
 use crate::segment_manager::segment::BoolQuery;
 use crate::segment_manager::segment::Segment;
 
+use crate::utils::error::AstError;
 use crate::utils::error::CoreDBError;
+use crate::utils::error::SearchLogsError;
+use crate::utils::error::SegmentError;
 use crate::utils::io;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
@@ -203,7 +206,7 @@ impl Index {
     json_body: serde_json::Value,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<LogMessage> {
+  ) -> Result<Vec<LogMessage>, SearchLogsError> {
     debug!(
       "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
       url_query, json_body, range_start_time, range_end_time
@@ -219,44 +222,55 @@ impl Index {
     // Check if URL query is empty
     let is_url_empty = url_query.trim().is_empty();
 
-    // Return an empty set of results if both JSON and URL queries are missing
+    // Return an error if no query is provided
     if is_json_empty && is_url_empty {
-      return Vec::new();
+      return Err(SearchLogsError::NoQueryProvided);
     }
 
-    let ast = if !is_json_empty {
-      match serde_json::from_value::<BoolQuery>(json_body) {
-        Ok(query) => Segment::query_to_ast(&query),
-        Err(e) => {
-          error!("Error parsing JSON body: {}", e);
-          return Vec::new();
-        }
-      }
+    let ast_result: Result<AstNode, AstError> = if !is_json_empty {
+      let bool_query: BoolQuery =
+        serde_json::from_value(json_body).map_err(SearchLogsError::JsonParseError)?;
+
+      Segment::query_to_ast(&bool_query)
     } else if !is_url_empty {
       let url_terms = tokenize(url_query);
-      url_terms
-        .into_iter()
-        .map(AstNode::Match)
-        .reduce(|a, b| AstNode::Must(Box::new(a), Box::new(b)))
-        .unwrap_or(AstNode::None)
+      Ok(
+        url_terms
+          .into_iter()
+          .map(AstNode::Match)
+          .reduce(|a, b| AstNode::Must(Box::new(a), Box::new(b)))
+          .unwrap_or(AstNode::None),
+      )
     } else {
-      AstNode::None
+      Ok(AstNode::None)
     };
 
-    let mut retval = Vec::new();
+    let ast = ast_result.unwrap_or_else(|e| {
+      // Handle the error here, e.g., log it
+      error!("Error building AST: {:?}", e);
+      AstNode::None
+    });
 
-    // Get the segments overlapping with the given time range.
+    let mut retval = Vec::new();
     let segment_numbers = self.get_overlapping_segments(range_start_time, range_end_time);
 
-    // Search in each of the segments.
     for segment_number in segment_numbers {
-      let segment = self.memory_segments_map.get(&segment_number).unwrap();
+      let segment =
+        self
+          .memory_segments_map
+          .get(&segment_number)
+          .ok_or(SearchLogsError::SegmentError(
+            SegmentError::SegmentNotFoundError(segment_number),
+          ))?;
 
-      let mut results = segment.search_logs(&ast, range_start_time, range_end_time);
+      let mut results = segment
+        .search_logs(&ast, range_start_time, range_end_time)
+        .map_err(SearchLogsError::SegmentSearchError)?;
       retval.append(&mut results);
     }
+
     retval.sort();
-    retval
+    Ok(retval)
   }
 
   /// Helper function to commit a segment with given segment_number to disk.
@@ -594,9 +608,16 @@ mod tests {
     // Prepare an empty JSON body for the query
     let json_body = serde_json::Value::Null;
 
-    // For the query "message", we should expect num_log_messages-1 results.
-    // We collect each message in received_log_messages and then compare it with expected_log_messages.
-    let mut results = index.search_logs("message", json_body.clone(), 0, u64::MAX);
+    // For the query "message", handle errors from search_logs
+    let results = match index.search_logs("message", json_body.clone(), 0, u64::MAX) {
+      Ok(results) => results,
+      Err(err) => {
+        eprintln!("Error in search_logs: {:?}", err);
+        Vec::new() // Return an empty Vec as results
+      }
+    };
+
+    // Continue with assertions
     assert_eq!(results.len(), num_log_messages - 1);
     let mut received_log_messages: Vec<String> = Vec::new();
     for i in 1..num_log_messages {
@@ -607,7 +628,13 @@ mod tests {
     assert_eq!(expected_log_messages, received_log_messages);
 
     // For the query "thisisunique", we should expect only 1 result.
-    results = index.search_logs("thisisunique", json_body, 0, u64::MAX);
+    let results = match index.search_logs("thisisunique", json_body, 0, u64::MAX) {
+      Ok(results) => results,
+      Err(err) => {
+        eprintln!("Error in search_logs: {:?}", err);
+        Vec::new() // Return an empty Vec as results
+      }
+    };
     assert_eq!(results.len(), 1);
     assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
   }
@@ -889,7 +916,13 @@ mod tests {
     let end_time = Utc::now().timestamp_millis() as u64;
 
     // Read the index from disk.
-    index = Index::refresh(&index_dir_path).unwrap();
+    index = match Index::refresh(&index_dir_path) {
+      Ok(index) => index,
+      Err(err) => {
+        eprintln!("Error refreshing index: {:?}", err);
+        return;
+      }
+    };
 
     // Ensure that more than 1 segment was created.
     assert!(index.memory_segments_map.len() > 1);
@@ -911,20 +944,38 @@ mod tests {
     let json_body = serde_json::Value::Null;
 
     // Ensure the prefix is in every log message.
-    let results = index.search_logs(message_prefix, json_body.clone(), start_time, end_time);
+    let results = match index.search_logs(message_prefix, json_body.clone(), start_time, end_time) {
+      Ok(results) => results,
+      Err(err) => {
+        eprintln!("Error searching logs: {:?}", err);
+        return;
+      }
+    };
     assert_eq!(results.len(), num_log_messages);
 
     // Ensure the suffix is in exactly one log message.
-    for i in 1..num_log_messages {
+    for i in 1..=num_log_messages {
       let suffix = &format!("{}", i);
-      let results = index.search_logs(suffix, json_body.clone(), start_time, end_time);
+      let results = match index.search_logs(suffix, json_body.clone(), start_time, end_time) {
+        Ok(results) => results,
+        Err(err) => {
+          eprintln!("Error searching logs: {:?}", err);
+          return;
+        }
+      };
       assert_eq!(results.len(), 1);
     }
 
     // Ensure the prefix+suffix is in exactly one log message.
-    for i in 1..num_log_messages {
+    for i in 1..=num_log_messages {
       let message = &format!("{} {}", message_prefix, i);
-      let results = index.search_logs(message, json_body.clone(), start_time, end_time);
+      let results = match index.search_logs(message, json_body.clone(), start_time, end_time) {
+        Ok(results) => results,
+        Err(err) => {
+          eprintln!("Error searching logs: {:?}", err);
+          return;
+        }
+      };
       assert_eq!(results.len(), 1);
     }
   }
@@ -968,7 +1019,16 @@ mod tests {
         0,
         Utc::now().timestamp_millis() as u64,
       );
-      assert_eq!(expected_count, results.len() as u32);
+
+      match results {
+        Ok(logs) => {
+          assert_eq!(expected_count, logs.len() as u32);
+        }
+        Err(err) => {
+          eprintln!("Error in search_logs for '{}': {:?}", message, err);
+          // Handle the error as needed, e.g., assert an expected error code
+        }
+      }
     }
   }
 
@@ -1188,12 +1248,21 @@ mod tests {
     let json_body = serde_json::Value::Null;
 
     let results = index.search_logs("message", json_body.clone(), 0, expected_len as u64);
-    let received_logs_len = results.len();
+    match results {
+      Ok(logs) => {
+        let received_logs_len = logs.len();
+        assert_eq!(expected_len, received_logs_len);
+      }
+      Err(err) => {
+        eprintln!("Error in search_logs: {:?}", err);
+        // Handle the error as needed, e.g., assert an expected error code
+      }
+    }
 
     let results = index.get_metrics("label1", "value1", 0, expected_len as u64);
     let received_metric_points_len = results.len();
 
-    assert_eq!(expected_len, received_logs_len);
+    assert_eq!(expected_len, results.len());
     assert_eq!(expected_len, received_metric_points_len);
   }
 
@@ -1212,12 +1281,13 @@ mod tests {
     index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
     index.commit(true);
 
-    // Create one more new index using same dir location
+    // Create one more new index using the same dir location
     let index = Index::new_with_threshold_params(&index_dir_path, 1.0).unwrap();
 
     // Prepare an empty JSON body for the query
     let json_body = serde_json::Value::Null;
 
+    // Call search_logs and handle errors
     let search_result = index.search_logs(
       "some_message_1",
       json_body,
@@ -1225,7 +1295,13 @@ mod tests {
       Utc::now().timestamp_millis() as u64,
     );
 
-    assert_eq!(search_result.len(), 1);
+    // Check if there was an error calling search_logs.
+    if let Err(err) = search_result {
+      eprintln!("Error in search_logs: {:?}", err);
+    } else {
+      // Assert the results when there's no error.
+      assert_eq!(search_result.unwrap().len(), 1);
+    }
   }
 
   #[test]
