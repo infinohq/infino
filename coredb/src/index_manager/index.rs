@@ -12,7 +12,6 @@ use crate::metric::metric_point::MetricPoint;
 use crate::segment_manager::segment::AstNode;
 use crate::segment_manager::segment::BoolQuery;
 use crate::segment_manager::segment::Segment;
-
 use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;
