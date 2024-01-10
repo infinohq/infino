@@ -296,7 +296,7 @@ impl Index {
     Ok(all_segments_summaries_vec)
   }
 
-  /// Commit a segment to disk.
+  /// Commit an index to disk.
   ///
   /// If sync_after_write is set to true, make sure that the OS buffers are flushed to
   /// disk before returning (typically sync_after_write should be set to true in tests that refresh the index
