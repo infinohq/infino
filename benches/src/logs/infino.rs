@@ -4,6 +4,7 @@ use std::time::Instant;
 use chrono::Utc;
 use coredb::utils::config::Settings;
 use coredb::CoreDB;
+use serde_json::Value;
 
 use crate::utils::io;
 
@@ -63,9 +64,14 @@ impl InfinoEngine {
   /// Searches the given term and returns the time required in microseconds
   pub fn search_logs(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let now = Instant::now();
+
+    // Passing an empty JSON object
+    let json_query = Value::Null;
+
     let result = self
       .coredb
-      .search_logs(query, range_start_time, range_end_time);
+      .search_logs(query, json_query, range_start_time, range_end_time);
+
     let elapsed = now.elapsed().as_micros();
     println!(
       "Infino time required for searching logs {} is : {} microseconds. Num of results {}",
