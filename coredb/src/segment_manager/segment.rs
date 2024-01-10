@@ -721,7 +721,7 @@ impl Segment {
         combiner(Box::new(n1), Box::new(n2)).map_err(AstError::CombinerFailure)
       }
       (Some(n), None) | (None, Some(n)) => Ok(n),
-      (None, None) => Err(AstError::InvalidNode), // Or a different error as appropriate
+      (None, None) => Err(AstError::InvalidNode),
     }
   }
 
