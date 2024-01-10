@@ -880,29 +880,6 @@ impl Default for Segment {
   }
 }
 
-impl PartialEq for Segment {
-  fn eq(&self, other: &Self) -> bool {
-    self.metadata.get_id() == other.metadata.get_id()
-  }
-}
-
-impl Eq for Segment {}
-
-impl PartialOrd for Segment {
-  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-    other
-      .metadata
-      .get_end_time()
-      .partial_cmp(&self.metadata.get_end_time())
-  }
-}
-
-impl Ord for Segment {
-  fn cmp(&self, other: &Self) -> Ordering {
-    self.partial_cmp(other).unwrap()
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use std::sync::{Arc, RwLock};
@@ -1350,35 +1327,5 @@ mod tests {
       "hello world hello world"
     );
     assert_eq!(results.get(1).unwrap().get_text(), "hello world");
-  }
-
-  #[test]
-  pub fn test_sort_segments() {
-    let num_segments = 3;
-    let mut segments = Vec::new();
-    let mut expected_segment_ids = Vec::new();
-
-    // Create a few segments.
-    for i in 1..=num_segments {
-      let segment = Segment::new();
-      segment
-        .append_log_message(i, &HashMap::new(), "some log message")
-        .expect("Could not append to segment");
-      segments.push(segment);
-
-      // The latest created segment is expected to the first one in sorted segements - since the
-      // they are sorted in reverse chronological order.
-      expected_segment_ids.insert(0, segment.get_id().to_owned());
-    }
-
-    // Sort the segment summaries and retrieve their ids.
-    segments.sort();
-    let retrieved_segment_ids: Vec<String> = segments
-      .iter()
-      .map(|segment| segment.metadata.get_id().to_owned())
-      .collect();
-
-    // Make sure that the retrieved ids are in reverse cronological order - i.e., they are same as the expected ids.
-    assert_eq!(retrieved_segment_ids, expected_segment_ids);
   }
 }

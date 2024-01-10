@@ -28,12 +28,12 @@ impl CoreDBSettings {
     DEFAULT_CONFIG_FILE_NAME
   }
 
-  pub fn get_segment_size_threshold_megabytes(&self) -> f32 {
-    self.segment_size_threshold_megabytes
+  pub fn get_segment_size_threshold_bytes(&self) -> u64 {
+    (self.segment_size_threshold_megabytes * 1024.0 * 1024.) as u64
   }
 
-  pub fn get_search_memory_budget_megabytes(&self) -> f32 {
-    self.search_memory_budget_megabytes
+  pub fn get_search_memory_budget_bytes(&self) -> u64 {
+    (self.search_memory_budget_megabytes * 1024.0 * 1024.0) as u64
   }
 }
 
@@ -115,12 +115,12 @@ mod tests {
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
     assert_eq!(coredb_settings.get_default_index_name(), ".default");
     assert_eq!(
-      coredb_settings.get_segment_size_threshold_megabytes(),
-      1024 as f32
+      coredb_settings.get_segment_size_threshold_bytes(),
+      1024 * 1024 * 1024
     );
     assert_eq!(
-      coredb_settings.get_search_memory_budget_megabytes(),
-      2048 as f32
+      coredb_settings.get_search_memory_budget_bytes(),
+      2048 * 1024 * 1024
     );
 
     // Check if we are running this test as part of a GitHub actions. We can't change environment variables
@@ -144,12 +144,12 @@ mod tests {
       let coredb_settings = settings.get_coredb_settings();
       assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
       assert_eq!(
-        coredb_settings.get_segment_size_threshold_megabytes(),
-        1 as f32
+        coredb_settings.get_segment_size_threshold_bytes(),
+        1 * 1024 * 1024
       );
       assert_eq!(
-        coredb_settings.get_search_memory_budget_megabytes(),
-        2 as f32
+        coredb_settings.get_search_memory_budget_bytes(),
+        2 * 1024 * 1024
       );
       assert_eq!(coredb_settings.get_default_index_name(), ".default");
     }

@@ -37,9 +37,8 @@ impl CoreDB {
         let coredb_settings = settings.get_coredb_settings();
         let index_dir_path = coredb_settings.get_index_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
-        let segment_size_threshold_megabytes =
-          coredb_settings.get_segment_size_threshold_megabytes();
-        let search_memory_budget_megabytes = coredb_settings.get_search_memory_budget_megabytes();
+        let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
+        let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
@@ -61,8 +60,8 @@ impl CoreDB {
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
               let index = Index::new_with_threshold_params(
                 &default_index_dir_path,
-                segment_size_threshold_megabytes,
-                search_memory_budget_megabytes,
+                segment_size_threshold_bytes,
+                search_memory_budget_bytes,
               )?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
@@ -70,7 +69,7 @@ impl CoreDB {
                 let entry = entry.unwrap();
                 let index_name = entry.file_name().into_string().unwrap();
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
-                let index = Index::refresh(&full_index_path_name, search_memory_budget_megabytes)?;
+                let index = Index::refresh(&full_index_path_name, search_memory_budget_bytes)?;
                 index_map.insert(index_name, index);
               }
             }
@@ -83,8 +82,8 @@ impl CoreDB {
             let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
             let index = Index::new_with_threshold_params(
               &default_index_dir_path,
-              segment_size_threshold_megabytes,
-              1024.0,
+              segment_size_threshold_bytes,
+              search_memory_budget_bytes,
             )?;
             index_map.insert(default_index_name.to_string(), index);
           }
@@ -189,12 +188,12 @@ impl CoreDB {
     let index_dir_path = settings.get_coredb_settings().get_index_dir_path();
     let default_index_name = settings.get_coredb_settings().get_default_index_name();
     let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
-    let search_memory_budget_megabytes = settings
+    let search_memory_budget_bytes = settings
       .get_coredb_settings()
-      .get_search_memory_budget_megabytes();
+      .get_search_memory_budget_bytes();
 
     // Refresh the index.
-    let index = Index::refresh(&default_index_dir_path, search_memory_budget_megabytes).unwrap();
+    let index = Index::refresh(&default_index_dir_path, search_memory_budget_bytes).unwrap();
 
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
@@ -223,20 +222,20 @@ impl CoreDB {
   /// Create a new index.
   pub fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let index_dir_path = self.settings.get_coredb_settings().get_index_dir_path();
-    let segment_size_threshold_megabytes = self
+    let segment_size_threshold_bytes = self
       .settings
       .get_coredb_settings()
-      .get_segment_size_threshold_megabytes();
-    let search_memory_budget_megabytes = self
+      .get_segment_size_threshold_bytes();
+    let search_memory_budget_bytes = self
       .settings
       .get_coredb_settings()
-      .get_search_memory_budget_megabytes();
+      .get_search_memory_budget_bytes();
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
     let index = Index::new_with_threshold_params(
       &index_dir_path,
-      segment_size_threshold_megabytes,
-      search_memory_budget_megabytes,
+      segment_size_threshold_bytes,
+      search_memory_budget_bytes,
     )?;
 
     self.index_map.insert(index_name.to_string(), index);
