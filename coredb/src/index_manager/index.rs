@@ -12,7 +12,6 @@ use crate::metric::metric_point::MetricPoint;
 use crate::segment_manager::segment::AstNode;
 use crate::segment_manager::segment::BoolQuery;
 use crate::segment_manager::segment::Segment;
-
 use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;
@@ -152,9 +151,57 @@ impl Index {
     self.memory_segments_map.insert(segment_number, segment);
   }
 
-  /// Remove a segment from the memory segments map.
-  fn remove_memory_segments_map(&self, segment_number: u32) {
-    self.memory_segments_map.remove(&segment_number);
+  /// Possibly remove segment from the memory segments map.
+  fn evict_from_memory_segments_map(&self, memory_budget_in_bytes: u64, additional_memory: u64) {
+    // Create a vector that has each segment's number, uncompressed size and end time.
+    let mut segment_data: Vec<(u32, u64, u64)> = Vec::new();
+    let mut memory_consumed = 0;
+    for entry in self.memory_segments_map.iter() {
+      let segment_number = *entry.key();
+      let segment = entry.value();
+      let uncompressed_size = segment.get_uncompressed_size();
+      let end_time = segment.get_end_time();
+      segment_data.push((segment_number, uncompressed_size, end_time));
+      memory_consumed += uncompressed_size;
+    }
+
+    // Calculate the memory to evict.
+    let memory_to_evict = memory_consumed + additional_memory - memory_budget_in_bytes;
+
+    // We are within the memory budget - so no need to evict anything.
+    if memory_to_evict <= 0 {
+      return;
+    }
+
+    // Evict the oldest segments until we free up memory_to_evict bytes of memory.
+
+    // Sort this vector by end time in ascending order (i.e., oldest segments first).
+    segment_data.sort_by_key(|&(_, _, end_time)| end_time);
+
+    // Counter to track memory evicted so far.
+    let mut count = 0;
+
+    // Iterate and evict the oldest segments first.
+    for segment in segment_data {
+      let uncompressed_size = segment.1;
+      count += uncompressed_size;
+      if count >= memory_to_evict {
+        debug!(
+          "Already evicted {} bytes of memory, greather than {}. Not evciting further.",
+          count, memory_to_evict
+        );
+        break;
+      }
+      let segment_number = segment.0;
+      if segment_number == self.metadata.get_current_segment_number() {
+        debug!(
+          "Not evicting the current segment with segment_number {}",
+          segment_number
+        );
+      } else {
+        self.memory_segments_map.remove(&segment_number);
+      }
+    }
   }
 
   /// Get the reference for the current segment.
