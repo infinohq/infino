@@ -627,14 +627,13 @@ mod tests {
     assert_eq!(expected_log_messages, received_log_messages);
 
     // For the query "thisisunique", we should expect only 1 result.
-    let results = if let Ok(results) = index.search_logs("message", json_body.clone(), 0, u64::MAX)
-    {
-      results
-    } else {
-      eprintln!("Error in search_logs");
-      Vec::new()
-    };
-
+    let results =
+      if let Ok(results) = index.search_logs("thisisunique", json_body.clone(), 0, u64::MAX) {
+        results
+      } else {
+        eprintln!("Error in search_logs");
+        Vec::new()
+      };
     assert_eq!(results.len(), 1);
     assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
   }
