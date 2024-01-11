@@ -16,7 +16,7 @@ use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
-use crate::utils::sync::{Arc, Mutex};
+use crate::utils::sync::{Arc, Mutex, RwLock};
 use crate::utils::tokenize::tokenize;
 
 /// File name where the information about all segements is stored.
@@ -38,7 +38,7 @@ pub struct Index {
   metadata: Metadata,
 
   /// A reverse-chronological sorted vector of segment summaries.
-  all_segments_summaries: Arc<Mutex<Vec<SegmentSummary>>>,
+  all_segments_summaries: Arc<RwLock<Vec<SegmentSummary>>>,
 
   /// DashMap of segment number to segment - only for the segments that are in memory.
   memory_segments_map: DashMap<u32, Segment>,
@@ -129,7 +129,7 @@ impl Index {
     let mut all_segments_summaries_vec = Vec::new();
     let current_segment_summary = SegmentSummary::new(current_segment_number, &segment);
     all_segments_summaries_vec.push(current_segment_summary);
-    let all_segments_summaries = Arc::new(Mutex::new(all_segments_summaries_vec));
+    let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
 
     let memory_segments_map = DashMap::new();
     memory_segments_map.insert(current_segment_number, segment);
@@ -441,7 +441,7 @@ impl Index {
     // We will be updating the self.all_segment_summaries, so acquire the lock.
     let write_lock_summaries = &mut self
       .all_segments_summaries
-      .lock()
+      .write()
       .expect("Could not read all_segment_summaries");
 
     let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
@@ -557,7 +557,7 @@ impl Index {
     info!("Read index with metadata {:?}", metadata);
 
     let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
-    let all_segments_summaries = Arc::new(Mutex::new(all_segments_summaries_vec));
+    let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
     Ok(Index {
       metadata,
       all_segments_summaries,
@@ -573,7 +573,7 @@ impl Index {
     let mut segment_numbers = Vec::new();
     let all_segments_summaries = &*self
       .all_segments_summaries
-      .lock()
+      .read()
       .expect("Could not read all_segments_summaries");
 
     // The segment start and end times in segment summaries are updated only in commit. So, prefer
@@ -1424,5 +1424,89 @@ mod tests {
     let _ = File::create(&file_path).unwrap();
     let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024);
     assert!(index.is_err());
+  }
+
+  #[test_case(32; "search_memory_budget = 32 * segment_size_threshold")]
+  #[test_case(24; "search_memory_budget = 24 * segment_size_threshold")]
+  #[test_case(16; "search_memory_budget = 16 * segment_size_threshold")]
+  #[test_case(8; "search_memory_budget = 8 * segment_size_threshold")]
+  #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
+  fn test_limited_memory(num_segments_in_memory: u64) {
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_limited_memory"
+    );
+    let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
+    let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
+    let index = Index::new_with_threshold_params(
+      &index_dir_path,
+      // This size depends on the number of log messages added in each segment in the for loop below.
+      segment_size_threshold_bytes,
+      search_memory_budget_bytes,
+    )
+    .unwrap();
+
+    // Setting it high to test out that there is no single-threaded deadlock while commiting.
+    // Note that if you change this value, some of the assertions towards the end of this test
+    // may need to be changed.
+    let num_segments = 20;
+
+    for i in 0..num_segments {
+      let start = i * 2 * 1000;
+      let end = start + 500;
+      // Insert unique messages in each segment - these will come handy for testing later.
+      let message_start = &format!("message_{}", start);
+      let message_end = &format!("message_{}", end);
+      index.append_log_message(start, &HashMap::new(), message_start);
+      index.append_log_message(end, &HashMap::new(), message_end);
+      index.commit(false);
+    }
+
+    // We'll have num_segments segments, plus one empty segment at the end.
+    assert_eq!(
+      (*index.all_segments_summaries.read().unwrap()).len() as u64,
+      num_segments + 1
+    );
+
+    // We shouldn't have more than specified segments in memory.
+    assert!(index.memory_segments_map.len() as u64 <= num_segments_in_memory);
+
+    // Check the queries return results as expected.
+    for i in 0..num_segments {
+      let start = i * 2 * 1000;
+      let end = start + 500;
+      let message_start = &format!("message_{}", start);
+      let message_end = &format!("message_{}", end);
+
+      // Check that the queries for unique messages across the entire time range returns exactly one result.
+      assert_eq!(
+        index
+          .search_logs(&message_start, serde_json::Value::Null, 0, u64::MAX)
+          .len(),
+        1
+      );
+      assert_eq!(
+        index
+          .search_logs(&message_end, serde_json::Value::Null, 0, u64::MAX)
+          .len(),
+        1
+      );
+
+      // Check that the queries for unique messages across the specific time range returns exactly one result.
+      assert_eq!(
+        index
+          .search_logs(&message_start, serde_json::Value::Null, start, end)
+          .len(),
+        1
+      );
+      assert_eq!(
+        index
+          .search_logs(&message_end, serde_json::Value::Null, start, end)
+          .len(),
+        1
+      );
+    }
   }
 }
