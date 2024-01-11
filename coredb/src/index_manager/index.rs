@@ -50,6 +50,9 @@ pub struct Index {
   /// Mutex for locking the directory where the index is committed / read from, so that two threads
   /// don't write the directory at the same time.
   index_dir_lock: Arc<Mutex<thread::ThreadId>>,
+
+  /// Memory budget for searching this index.
+  search_memory_budget_bytes: u64,
 }
 
 impl Index {
@@ -86,10 +89,11 @@ impl Index {
     } else if Path::new(&io::get_joined_path(index_dir, METADATA_FILE_NAME)).is_file() {
       // index_dir_path has metadata file, refresh the index instead of creating new one
       match Self::refresh(index_dir, search_memory_budget_bytes) {
-        Ok(index) => {
+        Ok(mut index) => {
           index
             .metadata
             .update_segment_size_threshold_bytes(segment_size_threshold_bytes);
+          index.search_memory_budget_bytes = search_memory_budget_bytes;
           return Ok(index);
         }
         Err(err) => {
@@ -138,6 +142,7 @@ impl Index {
       memory_segments_map,
       index_dir_path: index_dir.to_owned(),
       index_dir_lock,
+      search_memory_budget_bytes,
     };
 
     // Commit the empty index so that the index directory will be created.
@@ -151,8 +156,9 @@ impl Index {
     self.memory_segments_map.insert(segment_number, segment);
   }
 
-  /// Possibly remove segment from the memory segments map.
-  fn evict_from_memory_segments_map(&self, memory_budget_in_bytes: u64, additional_memory: u64) {
+  /// Possibly remove older segments from the memory segments map, so that the memory consumed is
+  /// within the memory_budget_in_bytes.
+  fn evict_from_memory_segments_map(&self) {
     // Create a vector that has each segment's number, uncompressed size and end time.
     let mut segment_data: Vec<(u32, u64, u64)> = Vec::new();
     let mut memory_consumed = 0;
@@ -165,17 +171,16 @@ impl Index {
       memory_consumed += uncompressed_size;
     }
 
-    let total_memory_needed = memory_consumed + additional_memory;
-
-    if total_memory_needed <= memory_budget_in_bytes {
+    if memory_consumed <= self.search_memory_budget_bytes {
       // We are within the memory budget - no eviction needed.
       return;
     }
 
-    // After allocating additional_memory, we'll go over the memory budget.
-    // So, find out the memory to evict (from the older segments), so that we'll still be
+    // Find out the memory to evict (from the older segments), so that we'll still be
     // within the memory budget.
-    let memory_to_evict = total_memory_needed - memory_budget_in_bytes;
+    let memory_to_evict = memory_consumed - self.search_memory_budget_bytes;
+
+    debug!("Now evicting memory {} bytes", memory_to_evict);
 
     // Sort this vector by end time in ascending order (i.e., oldest segments first).
     segment_data.sort_by_key(|&(_, _, end_time)| end_time);
@@ -189,13 +194,14 @@ impl Index {
       count += uncompressed_size;
       if count >= memory_to_evict {
         debug!(
-          "Already evicted {} bytes of memory, greather than {}. Not evciting further.",
+          "Already evicted {} bytes of memory, greather than or equal to {}. Not evicting further.",
           count, memory_to_evict
         );
         break;
       }
       let segment_number = segment.0;
       if segment_number == self.metadata.get_current_segment_number() {
+        // Do not evict the current segment - as it would be needed for inserts.
         debug!(
           "Not evicting the current segment with segment_number {}",
           segment_number
@@ -214,9 +220,13 @@ impl Index {
       .memory_segments_map
       .get(&segment_number)
       .unwrap_or_else(|| {
+        // Here, we may choose to load the current segment in memory. However,
+        // we always keep the segment being inserted into (i.e. current segment) in
+        // memory, so this should never happen. Keeping a panic for now to know quickly
+        // in case this happens due to an unanticipated scenario.
         panic!(
           "Could not get segment corresponding to segment number {} in memory",
-          158 + segment_number
+          segment_number
         )
       })
   }
@@ -414,6 +424,9 @@ impl Index {
       write_all_segments_file = true;
     }
 
+    //
+
+    // Commit the current segment.
     let original_current_segment_number = self.metadata.get_current_segment_number();
     let (uncompressed_segment_size, _compressed_segment_size) =
       self.commit_segment(original_current_segment_number, sync_after_write);
@@ -524,6 +537,7 @@ impl Index {
       memory_segments_map,
       index_dir_path: index_dir_path.to_owned(),
       index_dir_lock,
+      search_memory_budget_bytes,
     })
   }
 
