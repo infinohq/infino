@@ -1,7 +1,7 @@
 ![Infino Logo (Light)](docs/images/Infino_logo_light.png#gh-light-mode-only)
 ![Infino Logo (Dark)](docs/images/Infino_logo_dark.png#gh-dark-mode-only)
 
-# Store, search, and analyze telemetry data at scale.
+# Store, search, and analyze telemetry data at scale with OpenSearch.
 
 ![Elastic Logo](docs/images/ElasticLicenseLogo.svg)
 [![Github Commits](https://img.shields.io/github/commit-activity/m/infinohq/infino)](https://github.com/infinohq/infino/commits)
@@ -18,28 +18,24 @@
 
 ## What is Infino?
 
-Infino is a scalable telemetry search engine designed for logs, metrics, and traces. Infino is integrated with OpenSearch.
+Infino is a next-gen telemetry plugin for OpenSearch designed to handle logs, metrics, and traces at scale. It is designed to turn OpenSearch into a unified, state-of-the-art, AI-led observability stack.
 
 ## Why Infino?
-Telemetry data volumes are increasing exponentially yet there is no  purpose-built storage platform for telemetry. Most observability stacks are built on [ElasticSearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data so the stacks become complex and expensive to manage. Infino's goal is to reduce the **cost** and **complexity** of observability with smart, high-performance storage for customers and vendors alike.
+Telemetry data volumes are increasing exponentially yet there is no  purpose-built storage platform for telemetry. Most observability stacks are built on [Lucene](https://lucene.apache.org/), [Clickhouse](https://github.com/ClickHouse/ClickHouse) or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data so the stacks become complex and expensive to manage. Infino's goal is to rethink observability with smart, high-performance telemetry engine for OpenSearch.
 
 ## How it works
-To address **cost**, Infino focuses on performance ([**see benchmarks here**](benches/README.md)):
 
-- **Index:** Append-only inverted index (more performant on telemetry data than general-purpose indexes like Lucene).
-- **Time:** Efficient sharding and storage based on data recency.
-- **Tools:** Rust core using SIMD instruction sets and telemetry-optimized compression.
+Infino defines a set of telemetry data as a **collection**, which is effectively a set of automanaged indexes in OpenSearch.  A collection consists internally of optimized indexes for both documents (Lucene) and telemetry (Infino) that are searchable together. Collections also have built-in AI co-pilots to do summarizations and root cause analysis.
 
-To address **complexity**, Infino focuses on AI and automation:
+You can access a collection just like you would a normal OpenSearch index, except you don't have to worry about managing clusters or optimizing your index as collections are automatically scaled and optimized. When you access a collection you just need to preface your index with **/infino** as shown in the diagram below. You can read more about accessing OpenSearch [here](https://opensearch.org/docs/latest/).
 
-- **Access:** NLP support + charts-on-demand for chat interfaces like Slack or Teams.
-- **Management:** No schema, no labels, no master node + autoscaled everything.
-- **Dashboards:** OSS dashboard support + SQL support for BI interfaces like Tableau or Sigma.
-- **Analysis:** Hypeless LLMs + scalable search to accelerate your investigations.
+![Architecture (Light)](plugins/infino-opensearch-plugin/docs/images/Infino_Architecture.png)
 
-![Architecture (Light)](docs/images/Infino_architecture_light.png#gh-light-mode-only)
-![Architecture (Dark)](docs/images/Infino_architecture_dark.png#gh-dark-mode-only)
+Infino collections are a great option for security and observability use cases, particularly if users do not want to manage and scale OpenSearch themselves. Infino collections enable a much faster/cheaper/simpler version of OpenSearch for security and observability that accelerate root-cause analysis by combining code, tickets, telemetry, etc. 
 
+It is worth noting that a collection is represented by a mirror Lucene index prefixed with **infino-** which contains stats about the collection and otherwise generally behaves as a normal index in OpenSearch. The caveat is that since collections are autoscaled and automanaged, the number of shards and replicas etc. for an Infino collection will always show as 1 and several index operations like split, merge, replicate, etc. are not honored as they don’t make sense for collections. 
+
+Cluster requests work as normal but do not impact Infino Collections which are automanaged.
 
 ## Developer Resources
 ### Developing with Visual Studio Code and Dev Containers
@@ -75,28 +71,22 @@ Note that we are still very much an alpha product but we have lots on the roadma
 
 #### Available now
  - Store logs and metrics
- - Ingest using [FluentBit](https://fluentbit.io/)
- - Query logs and metrics
- - Python client
- - LLM monitoring using [Langchain](https://github.com/langchain-ai/langchain)
+ - OpenSearch plugin
+ - Basic boolean Query DSL support
+ - Basic OpenSearch dashboard support
 
 #### Coming soon
-- Dashboards
-- SQL
+- DQL support
+- More Query DSL coverage
 - NLP
 - Traces
 - AI copilot
 
 ## Getting started
 
-### Try it
-For now, you need to build the repo. You will first need to:
-
-- Install [Docker](https://docs.docker.com/engine/install/).
-- Install [Rust toolchain](https://www.rust-lang.org/tools/install).
-
-
 ### Examples
+
+The core Infino engine has some legacy integrations which might give you a sense of Infino's capabilities. Please note that these integrations are being ported to OpenSearch as Infino is not supported as a standalone engine.
 
 * [Integration with Fluentbit](examples/fluentbit/README.md) - Learn how to publish telemetry to Infino using FluentBit.
 * [LLM monitoring with Langchain](examples/llm-monitoring-langchain/llm-monitoring-langchain.ipynb) - Discover how Infino's callback in Langchain can be used for monitoring requests in real-time. Also checkout the [Langchain <> Infino docs](https://python.langchain.com/docs/ecosystem/integrations/infino).
