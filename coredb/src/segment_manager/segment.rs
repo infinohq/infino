@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::create_dir;
@@ -830,6 +829,7 @@ impl Segment {
   }
 
   /// Returns true if this segment overlaps with the given range.
+  #[allow(dead_code)]
   pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
     is_overlap(
       self.metadata.get_start_time(),

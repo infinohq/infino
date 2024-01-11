@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 use crate::segment_manager::segment::Segment;
+use crate::utils::range::is_overlap;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SegmentSummary {
@@ -33,7 +34,6 @@ impl SegmentSummary {
     }
   }
 
-  #[cfg(test)]
   pub fn get_segment_id(&self) -> &str {
     &self.segment_id
   }
@@ -52,6 +52,21 @@ impl SegmentSummary {
 
   pub fn get_uncompressed_size(&self) -> u64 {
     self.uncompressed_size
+  }
+
+  pub fn update_start_end_time(&mut self, start_time: u64, end_time: u64) {
+    self.start_time = start_time;
+    self.end_time = end_time;
+  }
+
+  /// Returns true if this segment summary overlaps with the given range.
+  pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
+    is_overlap(
+      self.get_start_time(),
+      self.get_end_time(),
+      range_start_time,
+      range_end_time,
+    )
   }
 }
 

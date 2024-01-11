@@ -16,7 +16,6 @@ use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
-use crate::utils::sync::RwLock;
 use crate::utils::sync::{Arc, Mutex};
 use crate::utils::tokenize::tokenize;
 
@@ -39,7 +38,7 @@ pub struct Index {
   metadata: Metadata,
 
   /// A reverse-chronological sorted vector of segment summaries.
-  all_segments_summaries: Arc<RwLock<Vec<SegmentSummary>>>,
+  all_segments_summaries: Arc<Mutex<Vec<SegmentSummary>>>,
 
   /// DashMap of segment number to segment - only for the segments that are in memory.
   memory_segments_map: DashMap<u32, Segment>,
@@ -49,6 +48,7 @@ pub struct Index {
 
   /// Mutex for locking the directory where the index is committed / read from, so that two threads
   /// don't write the directory at the same time.
+  /// Essentially, this mutex serializes the commit() and refresh() operations on this index.
   index_dir_lock: Arc<Mutex<thread::ThreadId>>,
 
   /// Memory budget for searching this index.
@@ -129,7 +129,7 @@ impl Index {
     let mut all_segments_summaries_vec = Vec::new();
     let current_segment_summary = SegmentSummary::new(current_segment_number, &segment);
     all_segments_summaries_vec.push(current_segment_summary);
-    let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
+    let all_segments_summaries = Arc::new(Mutex::new(all_segments_summaries_vec));
 
     let memory_segments_map = DashMap::new();
     memory_segments_map.insert(current_segment_number, segment);
@@ -329,14 +329,21 @@ impl Index {
 
     let mut retval = Vec::new();
 
-    // Get the segments overlapping with the given time range.
+    // Get the segments overlapping with the given time range. This is in the reverse chronological order.
     let segment_numbers = self.get_overlapping_segments(range_start_time, range_end_time);
 
-    // Search in each of the segments.
+    // Search in each of the segments. Note these these are in reverse chronological order - so when we add a
+    // limit to the number of results, one can break out of the loop when desired number of results are retrieved.
     for segment_number in segment_numbers {
-      let segment = self.memory_segments_map.get(&segment_number).unwrap();
+      let segment = self.memory_segments_map.get(&segment_number);
+      let mut results = match segment {
+        Some(segment) => segment.search_logs(&ast, range_start_time, range_end_time),
+        None => {
+          let segment = Self::refresh_segment(&self.index_dir_path, segment_number);
+          segment.search_logs(&ast, range_start_time, range_end_time)
+        }
+      };
 
-      let mut results = segment.search_logs(&ast, range_start_time, range_end_time);
       retval.append(&mut results);
     }
     retval.sort();
@@ -344,8 +351,12 @@ impl Index {
   }
 
   /// Helper function to commit a segment with given segment_number to disk.
-  /// Returns the (uncompressed, compressed) size of the segment.
-  fn commit_segment(&self, segment_number: u32, sync_after_write: bool) -> (u64, u64) {
+  /// Returns the (id, start_time, end_time, uncompressed_size, compressed_size) for the segment.
+  fn commit_segment(
+    &self,
+    segment_number: u32,
+    sync_after_write: bool,
+  ) -> (String, u64, u64, u64, u64) {
     debug!("Committing segment with segment_number: {}", segment_number);
 
     // Get the segment corresponding to the segment_number.
@@ -359,12 +370,23 @@ impl Index {
         )
       });
     let segment = segment_ref.value();
+    let segment_id = segment.get_id();
+    let start_time = segment.get_start_time();
+    let end_time = segment.get_end_time();
 
     // Commit this segment.
     let segment_dir_path =
       io::get_joined_path(&self.index_dir_path, segment_number.to_string().as_str());
 
-    segment.commit(segment_dir_path.as_str(), sync_after_write)
+    let (uncompressed, compressed) = segment.commit(segment_dir_path.as_str(), sync_after_write);
+
+    (
+      segment_id.to_owned(),
+      start_time,
+      end_time,
+      uncompressed,
+      compressed,
+    )
   }
 
   /// Get the summaries of the segments in this index.
@@ -416,20 +438,27 @@ impl Index {
     let mut lock = self.index_dir_lock.lock().unwrap();
     *lock = thread::current().id();
 
-    let mut write_all_segments_file = false;
+    // We will be updating the self.all_segment_summaries, so acquire the lock.
+    let write_lock_summaries = &mut self
+      .all_segments_summaries
+      .lock()
+      .expect("Could not read all_segment_summaries");
+
     let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
-    if !Path::new(&all_segments_file).is_file() {
-      // Initial commit - set write_all_segments_file to true so that all_segments_file is created.
-      write_all_segments_file = true;
-    }
-
-    //
-
-    // Commit the current segment.
+    // Commit the current segment. This also updates the start and end times in the corresponding segment summary.
     let original_current_segment_number = self.metadata.get_current_segment_number();
-    let (uncompressed_segment_size, _compressed_segment_size) =
+    let (segment_id, start_time, end_time, uncompressed_segment_size, _compressed_segment_size) =
       self.commit_segment(original_current_segment_number, sync_after_write);
+
+    // Update the start and end time in the summary for this segment.
+    // We don't update these in append_* methods for performance, and update only in commit.
+    if let Some(summary) = write_lock_summaries
+      .iter_mut()
+      .find(|s| s.get_segment_id() == segment_id)
+    {
+      summary.update_start_end_time(start_time, end_time);
+    }
 
     if uncompressed_segment_size > self.metadata.get_segment_size_threshold_bytes() {
       // Create a new segment since the current one has become too big.
@@ -445,10 +474,6 @@ impl Index {
 
       // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
       let summary = SegmentSummary::new(new_segment_number, &new_segment);
-      let mut write_lock_summaries = self
-        .all_segments_summaries
-        .write()
-        .expect("Could not get write lock");
       write_lock_summaries.insert(0, summary);
 
       // Note that DashMap::insert *may* cause a single-thread deadlock if the thread has a read
@@ -469,24 +494,31 @@ impl Index {
       // time of changing the current_sgement_number above.
       self.commit_segment(original_current_segment_number, sync_after_write);
 
-      write_all_segments_file = true;
+      // We created a new segment - possibly exceeding the memory budget. So, evict older segments if needed.
+      self.evict_from_memory_segments_map();
     }
 
-    if write_all_segments_file {
-      // Sort the summaries in reverse chronological order.
-      let mut write_lock_summaries = self
-        .all_segments_summaries
-        .write()
-        .expect("Could not get write lock for segment summaries");
-      write_lock_summaries.sort();
-      let summaries: &Vec<SegmentSummary> = write_lock_summaries.as_ref();
+    // Sort the summaries in reverse chronological order.
+    write_lock_summaries.sort();
+    let summaries: &Vec<SegmentSummary> = write_lock_summaries.as_ref();
 
-      // Write the summaries to disk.
-      serialize::write(summaries, all_segments_file.as_str(), sync_after_write);
-    }
+    // Write the summaries to disk.
+    serialize::write(summaries, all_segments_file.as_str(), sync_after_write);
 
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     serialize::write(&self.metadata, metadata_path.as_str(), sync_after_write);
+  }
+
+  /// Reads a segment from memory and insert it in memory_segments_map.
+  fn refresh_segment(index_dir_path: &str, segment_number: u32) -> Segment {
+    let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
+    debug!(
+      "Loading segment with segment number {} and path {}",
+      segment_number, segment_dir_path
+    );
+    let (segment, _) = Segment::refresh(&segment_dir_path);
+
+    segment
   }
 
   /// Read the index from the given index_dir_path.
@@ -514,23 +546,18 @@ impl Index {
       search_memory_budget_consumed_bytes += uncompressed_size;
       if search_memory_budget_consumed_bytes <= search_memory_budget_bytes {
         let segment_number = segment_summary.get_segment_number();
-        let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
-        debug!(
-          "Loading segment with segment number {} and path {}",
-          segment_number, segment_dir_path
-        );
-        let (segment, _) = Segment::refresh(&segment_dir_path);
+        let segment = Self::refresh_segment(index_dir_path, segment_number);
         memory_segments_map.insert(segment_number, segment);
       } else {
         // We have reached the memory budget - so do not load any more segments.
         break;
       }
     }
-    let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
 
     info!("Read index with metadata {:?}", metadata);
 
     let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
+    let all_segments_summaries = Arc::new(Mutex::new(all_segments_summaries_vec));
     Ok(Index {
       metadata,
       all_segments_summaries,
@@ -541,12 +568,31 @@ impl Index {
     })
   }
 
-  /// Returns segment numbers of segments that overlap with the given time range.
+  /// Returns segment numbers of segments, in reverse chronological order, that overlap with the given time range.
   pub fn get_overlapping_segments(&self, range_start_time: u64, range_end_time: u64) -> Vec<u32> {
     let mut segment_numbers = Vec::new();
-    for item in &self.memory_segments_map {
-      if item.value().is_overlap(range_start_time, range_end_time) {
-        segment_numbers.push(*item.key());
+    let all_segments_summaries = &*self
+      .all_segments_summaries
+      .lock()
+      .expect("Could not read all_segments_summaries");
+
+    // The segment start and end times in segment summaries are updated only in commit. So, prefer
+    // getting the start and end times of the segment in memory in case it is in memory_segment_map,
+    // else get the start and end times from the summary.
+    for segment_summary in all_segments_summaries {
+      let segment_number = segment_summary.get_segment_number();
+      let segment = self.memory_segments_map.get(&segment_number);
+      match segment {
+        Some(segment) => {
+          if segment.is_overlap(range_start_time, range_end_time) {
+            segment_numbers.push(segment_number);
+          }
+        }
+        _ => {
+          if segment_summary.is_overlap(range_start_time, range_end_time) {
+            segment_numbers.push(segment_number);
+          }
+        }
       }
     }
     segment_numbers
