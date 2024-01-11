@@ -5,13 +5,7 @@
 
 ## What is the Infino plugin for OpenSearch?
 
-An Infino Collection is a set of automanaged indexes in OpenSearch.  A collection consists internally of optimized indexes for both documents (Lucene) and telemetry (Infino) that are searchable together. Collections also have built-in AI co-pilots to do summarizations and root cause analysis.
-
-Infino Collections are a great option for security and observability use cases, particularly if users do not want to manage and scale OpenSearch themselves. Infino Collections enable a much faster/cheaper/simpler version of OpenSearch for security and observability that accelerate root-cause analysis by combining code, tickets, telemetry, etc. 
-
-In OpenSearch, a collection is represented by an index named Infino which contains stats about the collection and otherwise generally behaves as a normal index in OpenSearch. The caveat is that since collections are autoscaled and automanaged, the number of shards and replicas etc. for an Infino collection will always show as 1 and several index operations like split, merge, replicate, etc. are not honored as they don’t make sense for collections. 
-
-Cluster requests work as normal but do not impact Infino Collections which are automanaged.
+The Infino OpenSearch plugin allows Infino to handle requests to operation on a collection. It is a REST handler plugin that allows requests to bypass Lucene and be handled by the Infino telemetry engine.
 
 ![Architecture (Light)](docs/images/Infino_Architecture.png)
 

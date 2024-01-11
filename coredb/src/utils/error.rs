@@ -36,3 +36,42 @@ pub enum CoreDBError {
   #[error("Index not found. {0}")]
   IndexNotFound(String),
 }
+
+#[derive(Debug)]
+pub enum AstError {
+  InvalidNode,
+  CombinerFailure(String),
+  TraverseError(String),
+  PostingsListError(String),
+  DocMatchingError(String),
+}
+
+#[derive(Debug)]
+pub enum LogError {
+  LogMessageNotFound(u32),
+}
+
+#[derive(Debug)]
+pub enum SegmentSearchError {
+  AstError(AstError),
+  LogError(LogError),
+}
+
+#[derive(Debug)]
+pub enum SegmentError {
+  SegmentNotFoundError(u32),
+}
+
+#[derive(Debug)]
+pub enum SummaryError {
+  ExternalSummaryError(String),
+  SearchLogsError(SearchLogsError),
+}
+
+#[derive(Debug)]
+pub enum SearchLogsError {
+  JsonParseError(serde_json::Error),
+  SegmentSearchError(SegmentSearchError),
+  SegmentError(SegmentError),
+  NoQueryProvided,
+}

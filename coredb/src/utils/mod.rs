@@ -1,7 +1,7 @@
 //! Utilities for managing CoreDB.
 
 pub(crate) mod custom_serde;
-pub(crate) mod error;
+pub mod error;
 pub(crate) mod range;
 pub(crate) mod serialize;
 
