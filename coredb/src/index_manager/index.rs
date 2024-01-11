@@ -609,13 +609,25 @@ impl Index {
   ) -> Vec<MetricPoint> {
     let mut retval = Vec::new();
 
+    // Get the segments overlapping with the given time range. This is in the reverse chronological order.
     let segment_numbers = self.get_overlapping_segments(range_start_time, range_end_time);
+
+    // Get the metrics from each of the segments. If a segment isn't present is memory, it is loaded in memory temporarily.
     for segment_number in segment_numbers {
-      let segment = self.memory_segments_map.get(&segment_number).unwrap();
-      let mut metric_points =
-        segment.search_metrics(label_name, label_value, range_start_time, range_end_time);
+      let segment = self.memory_segments_map.get(&segment_number);
+      let mut metric_points = match segment {
+        Some(segment) => {
+          segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
+        }
+        None => {
+          let segment = Self::refresh_segment(&self.index_dir_path, segment_number);
+          segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
+        }
+      };
+
       retval.append(&mut metric_points);
     }
+
     retval
   }
 
@@ -1311,15 +1323,26 @@ mod tests {
       .is_empty());
   }
 
-  #[test]
-  fn test_concurrent_append() {
+  #[test_case(32; "search_memory_budget = 32 * segment_size_threshold")]
+  #[test_case(24; "search_memory_budget = 24 * segment_size_threshold")]
+  #[test_case(16; "search_memory_budget = 16 * segment_size_threshold")]
+  #[test_case(8; "search_memory_budget = 8 * segment_size_threshold")]
+  #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
+  fn test_concurrent_append(num_segments_in_memory: u64) {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
       index_dir.path().to_str().unwrap(),
       "test_concurrent_append"
     );
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
+    let segment_size_threshold_bytes = 1024;
+    let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
+    let index = Index::new_with_threshold_params(
+      &index_dir_path,
+      segment_size_threshold_bytes,
+      search_memory_budget_bytes,
+    )
+    .unwrap();
 
     let arc_index = Arc::new(index);
     let num_threads = 20;
