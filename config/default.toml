@@ -2,7 +2,7 @@
 index_dir_path = "data"
 default_index_name = ".default"
 segment_size_threshold_megabytes = 256
-search_memory_budget_megabytes = 1024
+memory_budget_megabytes = 1024
 
 
 [server]

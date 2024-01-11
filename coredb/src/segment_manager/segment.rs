@@ -113,7 +113,6 @@ impl Segment {
     }
   }
 
-  #[allow(dead_code)]
   /// Get id of this segment.
   pub fn get_id(&self) -> &str {
     self.metadata.get_id()
@@ -143,16 +142,19 @@ impl Segment {
     self.metadata.get_metric_point_count()
   }
 
-  #[allow(dead_code)]
   /// Get the earliest time in this segment.
   pub fn get_start_time(&self) -> u64 {
     self.metadata.get_start_time()
   }
 
-  #[allow(dead_code)]
   /// Get the latest time in this segment.
   pub fn get_end_time(&self) -> u64 {
     self.metadata.get_end_time()
+  }
+
+  /// Get the uncompressed size.
+  pub fn get_uncompressed_size(&self) -> u64 {
+    self.metadata.get_uncompressed_size()
   }
 
   #[allow(dead_code)]
@@ -881,6 +883,7 @@ impl Segment {
   }
 
   /// Returns true if this segment overlaps with the given range.
+  #[allow(dead_code)]
   pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
     is_overlap(
       self.metadata.get_start_time(),
