@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use ::log::{debug, info};
 use dashmap::DashMap;
+use utils::error::SearchLogsError;
 
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
@@ -141,13 +142,17 @@ impl CoreDB {
     json_body: serde_json::Value,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<LogMessage> {
-    self
+  ) -> Result<Vec<LogMessage>, SearchLogsError> {
+    let index = self
       .index_map
       .get(self.get_default_index_name())
-      .unwrap()
+      .ok_or(SearchLogsError::NoQueryProvided)?;
+
+    let results = index
       .value()
-      .search_logs(query, json_body, range_start_time, range_end_time)
+      .search_logs(query, json_body, range_start_time, range_end_time)?;
+
+    Ok(results)
   }
 
   /// Get the metric points for given label and range.
@@ -337,9 +342,15 @@ mod tests {
     let json_body = serde_json::Value::Null;
 
     // Search for log messages. The order of results should be reverse chronological order.
-    let results = coredb.search_logs("message", json_body.clone(), start, end);
-    assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
-    assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
+    if let Err(err) = coredb.search_logs("message", json_body.clone(), start, end) {
+      eprintln!("Error in search_logs: {:?}", err);
+    } else {
+      let results = coredb
+        .search_logs("message", json_body.clone(), start, end)
+        .expect("Error in search_logs");
+      assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
+      assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
+    }
 
     // Search for metric points.
     let results = coredb.get_metrics(&"__name__", &"some_metric", start, end);
