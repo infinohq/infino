@@ -159,7 +159,7 @@ impl Index {
   }
 
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
-  /// within the memory_budget_in_bytes.
+  /// within the search_memory_budget_bytes.
   fn evict_from_memory_segments_map(&self) {
     // Create a vector that has each segment's number, uncompressed size and end time.
     let mut segment_data: Vec<(u32, u64, u64)> = Vec::new();
