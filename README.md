@@ -21,7 +21,7 @@
 Infino is a next-gen telemetry plugin for OpenSearch designed to handle logs, metrics, and traces at scale. It is designed to turn OpenSearch into a unified, state-of-the-art, AI-led observability stack.
 
 ## Why Infino?
-Telemetry data volumes are increasing exponentially yet there is no  purpose-built storage platform for telemetry. Most observability stacks are built on [Lucene](https://lucene.apache.org/), [Clickhouse](https://github.com/ClickHouse/ClickHouse) or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data so the stacks become complex and expensive to manage. Infino's goal is to rethink observability with smart, high-performance telemetry engine for OpenSearch.
+Telemetry data volumes are increasing exponentially yet there is no purpose-built search engine for telemetry. Most observability stacks are built on [Lucene](https://lucene.apache.org/), [Clickhouse](https://github.com/ClickHouse/ClickHouse) or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data so the stacks become complex and expensive to manage. Infino's goal is to rethink observability with smart, high-performance telemetry engine for OpenSearch.
 
 ## How it works
 

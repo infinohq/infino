@@ -972,11 +972,9 @@ mod tests {
     // Create an AstNode for the term "doesnotexist"
     let query_node = create_term_test_node("doesnotexist");
 
-    // Call search_logs and handle errors
     if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
       eprintln!("Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
       assert!(results.is_empty());
     }
@@ -990,11 +988,9 @@ mod tests {
     // Create an AstNode for the term "doesnotexist"
     let query_node = create_term_test_node("doesnotexist");
 
-    // Call search_logs and handle errors
     if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
       eprintln!("Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
       assert!(results.is_empty());
     }
@@ -1008,12 +1004,10 @@ mod tests {
 
     let term_node = create_term_test_node("test");
 
-    // Call search_logs and handle errors
     if let Err(err) = segment.search_logs(&term_node, 0, u64::MAX) {
       eprintln!("Error in search_logs: {:?}", err);
       assert!(false, "Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&term_node, 0, u64::MAX).unwrap();
       assert_eq!(results.len(), 2); // Assuming two logs contain the term "test"
     }
@@ -1029,12 +1023,10 @@ mod tests {
     let right_node = create_term_test_node("another");
     let must_node = AstNode::Must(Box::new(ast), Box::new(right_node));
 
-    // Call search_logs and handle errors
     if let Err(err) = segment.search_logs(&must_node, 0, u64::MAX) {
       eprintln!("Error in search_logs: {:?}", err);
       assert!(false, "Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&must_node, 0, u64::MAX).unwrap();
       assert_eq!(results.len(), 1); // Assuming only one log contains "another"
     }
@@ -1050,12 +1042,10 @@ mod tests {
     let right_node = create_term_test_node("another");
     let must_node = AstNode::Must(Box::new(left_node), Box::new(right_node));
 
-    // Call search_logs and handle errors
     if let Err(err) = segment.search_logs(&must_node, 0, u64::MAX) {
       eprintln!("Error in search_logs: {:?}", err);
       assert!(false, "Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&must_node, 0, u64::MAX).unwrap();
       assert_eq!(results.len(), 1); // Assuming only one log contains both "this" and "another"
     }
@@ -1070,12 +1060,10 @@ mod tests {
     let node = create_term_test_node("another");
     let must_not_node = AstNode::MustNot(Box::new(node));
 
-    // Call search_logs and handle errors
     if let Err(err) = segment.search_logs(&must_not_node, 0, u64::MAX) {
       eprintln!("Error in search_logs: {:?}", err);
       assert!(false, "Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&must_not_node, 0, u64::MAX).unwrap();
       assert_eq!(results.len(), 2);
       assert!(results
@@ -1094,12 +1082,10 @@ mod tests {
     let right_node = create_term_test_node("this");
     let should_node = AstNode::Should(Box::new(left_node), Box::new(right_node));
 
-    // Call search_logs and handle errors
     if let Err(err) = segment.search_logs(&should_node, 0, u64::MAX) {
       eprintln!("Error in search_logs: {:?}", err);
       assert!(false, "Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&should_node, 0, u64::MAX).unwrap();
       assert_eq!(results.len(), 3); // Assuming all logs contain either "this" or "different"
     }
@@ -1121,7 +1107,6 @@ mod tests {
       eprintln!("Error in search_logs: {:?}", err);
       assert!(false, "Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&complex_query, 0, u64::MAX).unwrap();
       assert_eq!(results.len(), 1); // Assuming only one log contains "test" but not "different"
     }
@@ -1148,7 +1133,6 @@ mod tests {
       eprintln!("Error in search_logs: {:?}", err);
       assert!(false, "Error in search_logs: {:?}", err);
     } else {
-      // Assert the results.
       let results = segment.search_logs(&nested_query, 0, u64::MAX).unwrap();
       assert_eq!(results.len(), 2);
     }
