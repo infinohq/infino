@@ -1,43 +1,54 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/rust
+// See https://code.visualstudio.com/docs/devcontainers/containers
+// for an overview of devcontainers
+//
+// See https://containers.dev/implementors/json_reference/
+// for a list of all devcontainer.json properties.
 {
-	"name": "Infino-Rust",
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/rust:1-1-bullseye",
+	"name": "Infino-Devcontainer",
+	// TODO: pre-build and image that can be pulled from dockerhub
+	// or another registry intead of building it locally.
+	"build": {
+		"dockerfile": "./Dockerfile",
+		"context": "."
+	},
 	"features": {
+		// We install rust as a standard devcontainer feature
+		// as the standard rust is good for us.
 		"ghcr.io/devcontainers/features/rust:1": {
 			"version": "latest",
 			"profile": "default"
+		},
+		"ghcr.io/devcontainers/features/git:1": {
+			"ppa": "false"
 		}
+		// Where is Java? We install Java via SDKManager as part of
+		// building the image (in the Dockerfile). For now, we want
+		// to be able to make changes to the Java security policy
+		// and it is easier to do so with Java installed via
+		// SDKManager. We can later on switch to installing
+		// Java as a devcontainer feature. That will make
+		// the image lite and the devcontainer more configurable.
 	},
 	"customizations": {
 		"vscode": {
-			"settings": {},
+			// Configure properties specific to VS code
+			"settings": {
+				// VS Code settings.json configs specific to this devcontainer env
+				// Disable rust analyzer running on save, so that it doesn't
+				// start automatically and consume CPU + Memory.
+				"rust-analyzer.checkOnSave": false
+			},
 			"extensions": [
+				// List of vscode extensions to be installed in the devcontainer
 				"rust-lang.rust-analyzer",
 				"tamasfe.even-better-toml",
-				"ms-vscode.makefile-tools"
+				"ms-vscode.makefile-tools",
+				"vscjava.vscode-java-pack"
 			]
 		}
 	},
-	// Use 'mounts' to make the cargo cache persistent in a Docker Volume.
-	// "mounts": [
-	// 	{
-	// 		"source": "devcontainer-cargo-cache-${devcontainerId}",
-	// 		"target": "/usr/local/cargo",
-	// 		"type": "volume"
-	// 	}
-	// ]
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	"forwardPorts": [
 		3000
-	]
-	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "rustc --version",
-	// Configure tool-specific properties.
-	// "customizations": {},
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
+	],
+	"remoteUser": "infino"
 }
