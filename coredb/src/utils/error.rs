@@ -39,11 +39,12 @@ pub enum CoreDBError {
 
 #[derive(Debug)]
 pub enum AstError {
-  InvalidNode,
+  InvalidQuery,
   CombinerFailure(String),
   TraverseError(String),
   PostingsListError(String),
   DocMatchingError(String),
+  UnsupportedQuery(String),
 }
 
 #[derive(Debug)]
@@ -70,7 +71,7 @@ pub enum SummaryError {
 
 #[derive(Debug)]
 pub enum SearchLogsError {
-  JsonParseError(serde_json::Error),
+  JsonParseError(String),
   SegmentSearchError(SegmentSearchError),
   SegmentError(SegmentError),
   NoQueryProvided,

@@ -1,0 +1,8 @@
+//! Executes Infino requests on an index
+//!
+//! Infino supports a wide range of OpenSearch and Lucene queries.
+//! It will attempt to at least parse all such queries
+//! and the user will be notified about any query that is not supported.
+
+pub mod lucene_query;
+pub mod query_dsl;

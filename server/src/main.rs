@@ -441,7 +441,7 @@ async fn append_metric(
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
-  Json(json_body): Json<serde_json::Value>,
+  json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
     "Searching logs with URL query: {:?}, JSON body: {:?}",
@@ -451,7 +451,7 @@ async fn search_logs(
   // Pass the deserialized JSON object directly to coredb.search_logs
   let result = state.coredb.search_logs(
     &logs_query.text,
-    json_body,
+    &json_body,
     logs_query.start_time.unwrap_or(0),
     logs_query
       .end_time
@@ -489,7 +489,7 @@ async fn search_logs(
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
-  Json(json_body): Json<Value>,
+  json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
     "Summarizing logs with URL query: {:?}, JSON body: {:?}",
@@ -502,7 +502,7 @@ async fn summarize(
   // Call search_logs and handle errors
   match state.coredb.search_logs(
     &summarize_query.text,
-    json_body, // Pass the deserialized JSON object directly
+    &json_body,
     summarize_query.start_time.unwrap_or(0),
     summarize_query
       .end_time
@@ -695,7 +695,9 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 0.2\n")
+        .unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
@@ -773,12 +775,7 @@ mod tests {
       .unwrap_or(Utc::now().timestamp_millis() as u64);
 
     // Handle errors from search_logs
-    let log_messages_result = refreshed_coredb.search_logs(
-      search_text,
-      serde_json::json!(empty_json_body),
-      start_time,
-      end_time,
-    );
+    let log_messages_result = refreshed_coredb.search_logs(search_text, "", start_time, end_time);
 
     match log_messages_result {
       Ok(log_messages_received) => {

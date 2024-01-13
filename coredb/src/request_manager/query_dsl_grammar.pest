@@ -1,0 +1,282 @@
+/// PEG grammar for Query DSL
+
+start = { ws ~ search_query ~ ws }
+
+search_query = {
+    query_section ~ aggregation_section? ~ highlight_section? ~ suggest_section? ~ filter_section? ~ sort_section? ~ pagination_section? ~ script_fields_section?
+}
+
+query_section       = { "query" ~ ":" ~ ws ~ "{" ~ ws ~ query ~ ws ~ "}" }
+aggregation_section = { "," ~ ws ~ "aggs" ~ ":" ~ ws ~ "{" ~ ws ~ (aggregation ~ ("," ~ ws ~ aggregation)*)? ~ ws ~ "}" }
+highlight_section   = { "," ~ ws ~ "highlight" ~ ":" ~ ws ~ "{" ~ ws ~ highlight_fields ~ ws ~ "}" }
+suggest_section     = { "," ~ ws ~ "suggest" ~ ":" ~ ws ~ "{" ~ ws ~ suggesters ~ ws ~ "}" }
+filter_section      = { "," ~ ws ~ "filter" ~ ":" ~ ws ~ filter ~ ws ~ "}" }
+
+// Extending query types
+query = {
+    bool_query
+  | match_query
+  | term_query
+  | range_query
+  | exists_query
+  | ids_query
+  | prefix_query
+  | wildcard_query
+  | dis_max_query
+  | constant_score_query
+  | script_query
+  | geo_distance_query
+  | more_like_this_query
+  | nested_query
+  | geo_shape_query
+  | script_score_query
+  | function_score_query
+  | query_string_query
+  | geo_polygon_query
+  | span_term_query
+  | span_first_query
+  | span_near_query
+  | span_or_query
+  | span_not_query
+  | boosting_query
+  | common_terms_query
+  | fuzzy_query
+  | regexp_query
+  | simple_query_string_query
+  | percolate_query
+  | pinned_query
+  | rank_feature_query
+  | geo_bounding_box_query
+  | geo_shape_query
+  | nested_query
+  | has_child_query
+}
+
+percolate_query    = { "percolate" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "document" ~ ":" ~ ws ~ object ~ ws ~ "}" }
+pinned_query       = { "pinned" ~ ":" ~ ws ~ "{" ~ ws ~ "ids" ~ ":" ~ ws ~ "[" ~ ws ~ (quoted_string ~ ("," ~ ws ~ quoted_string)*)? ~ ws ~ "]" ~ "," ~ ws ~ "organic" ~ ":" ~ ws ~ query ~ ws ~ "}" }
+rank_feature_query = { "rank_feature" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+
+// Standard rules for full text queries
+match_query = { "match" ~ "{" ~ ws ~ (field_part | all_part)? ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ term_value ~ ws ~ "}" }
+term_query  = { "term" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ set_of_terms ~ ws ~ "}" }
+
+// Other types of queries
+bool_query                = { "bool" ~ "{" ~ ws ~ (must_clauses ~ should_clauses? ~ must_not_clauses? ~ filter_clauses?)? ~ ws ~ "}" }
+range_query               = { "range" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ range_expression ~ ws ~ "}" }
+exists_query              = { "exists" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+ids_query                 = { "ids" ~ "{" ~ ws ~ "values" ~ ":" ~ ws ~ "[" ~ ws ~ quoted_string ~ ("," ~ ws ~ quoted_string)* ~ ws ~ "]" ~ ws ~ "}" }
+prefix_query              = { "prefix" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+wildcard_query            = { "wildcard" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+span_term_query           = { "span_term" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+span_first_query          = { "span_first" ~ "{" ~ ws ~ "match" ~ ":" ~ ws ~ query ~ "," ~ ws ~ "end" ~ ":" ~ ws ~ number ~ ws ~ "}" }
+span_near_query           = { "span_near" ~ "{" ~ ws ~ "clauses" ~ ":" ~ "[" ~ ws ~ span_clause ~ ("," ~ ws ~ span_clause)* ~ ws ~ "]" ~ span_near_options? ~ ws ~ "}" }
+span_or_query             = { "span_or" ~ "{" ~ ws ~ "clauses" ~ ":" ~ "[" ~ ws ~ span_clause ~ ("," ~ ws ~ span_clause)* ~ ws ~ "]" ~ ws ~ "}" }
+span_not_query            = { "span_not" ~ "{" ~ ws ~ "include" ~ ":" ~ ws ~ span_clause ~ "," ~ ws ~ "exclude" ~ ":" ~ ws ~ span_clause ~ ws ~ "}" }
+script_query              = { "script" ~ "{" ~ ws ~ "script" ~ ":" ~ "{" ~ ws ~ "source" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "params" ~ ":" ~ "{" ~ ws ~ (script_param ~ ("," ~ ws ~ script_param)*)? ~ ws ~ "}" ~ ws ~ "}" ~ ws ~ "}" }
+geo_distance_query        = { "geo_distance" ~ "{" ~ ws ~ "distance" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ fieldname ~ ":" ~ "{" ~ ws ~ "lat" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "lon" ~ ":" ~ ws ~ number ~ ws ~ "}" ~ ws ~ "}" }
+more_like_this_query      = { "more_like_this" ~ "{" ~ ws ~ "fields" ~ ":" ~ "[" ~ ws ~ (fieldname ~ ("," ~ ws ~ fieldname)*)? ~ ws ~ "]" ~ "," ~ ws ~ "like" ~ ":" ~ ws ~ "[" ~ ws ~ (quoted_string ~ ("," ~ ws ~ quoted_string)*)? ~ ws ~ "]" ~ more_like_this_options? ~ ws ~ "}" }
+geo_polygon_query         = { "geo_polygon" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "points" ~ ":" ~ "[" ~ ws ~ geo_point ~ ("," ~ ws ~ geo_point)* ~ ws ~ "]" ~ ws ~ "}" }
+geo_shape_query           = { "geo_shape" ~ "{" ~ ws ~ fieldname ~ ":" ~ ws ~ "{" ~ ws ~ "shape" ~ ":" ~ ws ~ quoted_string ~ ws ~ "relation" ~ ":" ~ ws ~ ("intersects" | "disjoint" | "within") ~ ws ~ "}" ~ ws ~ "}" }
+script_score_query        = { "script_score" ~ "{" ~ ws ~ "query" ~ ":" ~ ws ~ query ~ "," ~ ws ~ "script" ~ ":" ~ ws ~ "{" ~ ws ~ "source" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "params" ~ ":" ~ ws ~ "{" ~ ws ~ (script_param ~ ("," ~ ws ~ script_param)*)? ~ ws ~ "}" ~ ws ~ "}" ~ ws ~ "}" }
+function_score_query      = { "function_score" ~ "{" ~ ws ~ "query" ~ ":" ~ ws ~ query ~ "," ~ ws ~ "functions" ~ ":" ~ ws ~ "[" ~ ws ~ function_score_function ~ ("," ~ ws ~ function_score_function)* ~ ws ~ "]" ~ ws ~ "}" }
+boosting_query            = { "boosting" ~ "{" ~ ws ~ "positive" ~ ":" ~ ws ~ query ~ "," ~ ws ~ "negative" ~ ":" ~ ws ~ query ~ "," ~ ws ~ "negative_boost" ~ ":" ~ ws ~ number ~ ws ~ "}" }
+fuzzy_query               = { "fuzzy" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "fuzziness" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+regexp_query              = { "regexp" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+simple_query_string_query = { "simple_query_string" ~ "{" ~ ws ~ "query" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "fields" ~ ":" ~ "[" ~ ws ~ fieldname ~ ("," ~ ws ~ fieldname)* ~ ws ~ "]" ~ simple_query_string_options? ~ ws ~ "}" }
+common_terms_query        = { "common_terms" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "query" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "cutoff_frequency" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "low_freq_operator" ~ ":" ~ ws ~ ("and" | "or") ~ ws ~ "high_freq_operator" ~ ":" ~ ws ~ ("and" | "or") ~ ws ~ "minimum_should_match" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+constant_score_query      = { "constant_score" ~ "{" ~ ws ~ "filter" ~ ":" ~ ws ~ filter ~ ws ~ "}" }
+dis_max_query             = { "dis_max" ~ "{" ~ ws ~ "queries" ~ ":" ~ "[" ~ ws ~ query ~ ("," ~ ws ~ query)* ~ ws ~ "]" ~ dis_max_options? ~ ws ~ "}" }
+
+// Note that query_strings are handled by a separate lucene syntax parser.
+query_string_query = { "query_string" ~ "{" ~ ws ~ "query" ~ ":" ~ ws ~ "}" }
+
+has_child_query = {
+    "has_child" ~ ":" ~ ws ~ "{" ~ ws ~ "type" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "query" ~ ":" ~ ws ~ query ~ ("," ~ ws ~ "score_mode" ~ ":" ~ ws ~ parent_child_score_mode)? ~ ("," ~ ws ~ "min_children" ~ ":" ~ ws ~ number)? ~ ("," ~ ws ~ "max_children" ~ ":" ~ ws ~ number)? ~ ws ~ "}"
+}
+
+geo_bounding_box_query = {
+    "geo_bounding_box" ~ ":" ~ ws ~ "{" ~ ws ~ fieldname ~ ":" ~ ws ~ "{" ~ ws ~ "top_left" ~ ":" ~ ws ~ geo_point ~ "," ~ ws ~ "bottom_right" ~ ":" ~ ws ~ geo_point ~ ws ~ "}" ~ ws ~ "}"
+}
+
+nested_query = {
+    "nested" ~ ":" ~ ws ~ "{" ~ ws ~ "path" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "query" ~ ":" ~ ws ~ query ~ ("," ~ ws ~ "score_mode" ~ ":" ~ ws ~ nested_score_mode)? ~ ws ~ "}"
+}
+
+parent_child_score_mode = { "none" | "avg" | "sum" | "max" | "min" }
+nested_score_mode       = { "avg" | "sum" | "min" | "max" | "none" }
+
+highlight_fields        = { "fields" ~ ":" ~ ws ~ "{" ~ ws ~ (highlight_field ~ ("," ~ ws ~ highlight_field)*)? ~ ws ~ "}" }
+highlight_field         = { fieldname ~ ":" ~ ws ~ "{" ~ ws ~ highlight_field_options? ~ ws ~ "}" }
+highlight_field_options = {
+    fragment_size_option? ~ number_of_fragments_option? ~ pre_tags_option? ~ post_tags_option?
+}
+
+fragment_size_option       = { "fragment_size" ~ ":" ~ ws ~ number }
+number_of_fragments_option = { "number_of_fragments" ~ ":" ~ ws ~ number }
+pre_tags_option            = { "pre_tags" ~ ":" ~ ws ~ array_of_strings }
+post_tags_option           = { "post_tags" ~ ":" ~ ws ~ array_of_strings }
+
+// Definition for an array of strings, as it might be used in pre_tags and post_tags
+array_of_strings = { "[" ~ ws ~ (quoted_string ~ ("," ~ ws ~ quoted_string)*)? ~ ws ~ "]" }
+
+sort_section    = { "sort" ~ ":" ~ ws ~ "[" ~ ws ~ (sort_expression ~ ("," ~ ws ~ sort_expression)*)? ~ ws ~ "]" }
+sort_expression = { fieldname ~ ":" ~ ws ~ "{" ~ ws ~ "order" ~ ":" ~ ws ~ ("asc" | "desc") ~ ws ~ "}" }
+
+script_field          = { fieldname ~ ":" ~ ws ~ script }
+script_fields_section = { "script_fields" ~ ":" ~ ws ~ "{" ~ ws ~ (script_field ~ ("," ~ ws ~ script_field)*)? ~ ws ~ "}" }
+
+pagination_section = { size_param ~ "," ~ ws ~ from_param }
+size_param         = { "size" ~ ":" ~ ws ~ number }
+from_param         = { "from" ~ ":" ~ ws ~ number }
+
+script_param = { fieldname ~ ":" ~ ws ~ (quoted_string | number | boolean) }
+
+script         = { "script" ~ ":" ~ ws ~ "{" ~ ws ~ (script_content ~ ("," ~ ws ~ script_content)*)? ~ ws ~ "}" }
+script_content = { script_param | script_source | script_lang | script_params }
+script_source  = { "source" ~ ":" ~ ws ~ quoted_string }
+script_lang    = { "lang" ~ ":" ~ ws ~ quoted_string }
+script_params  = { "params" ~ ":" ~ ws ~ "{" ~ ws ~ (pair ~ ("," ~ ws ~ pair)*)? ~ ws ~ "}" }
+
+function_score_function     = { linear_decay_function | exp_decay_function | gauss_decay_function | field_value_factor_function }
+linear_decay_function       = { "linear" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "origin" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "scale" ~ ":" ~ ws ~ number ~ "}" }
+exp_decay_function          = { "exp" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "origin" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "scale" ~ ":" ~ ws ~ number ~ "}" }
+gauss_decay_function        = { "gauss" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "origin" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "scale" ~ ":" ~ ws ~ number ~ "}" }
+field_value_factor_function = { "field_value_factor" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "factor" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "modifier" ~ ":" ~ ws ~ ("none" | "log" | "log1p" | "log2p" | "ln" | "ln1p" | "ln2p" | "square" | "sqrt" | "reciprocal") ~ "}" }
+
+filter       = { bool_filter | term_filter | range_filter }
+bool_filter  = { "bool" ~ "{" ~ ws ~ (filter_must_clauses ~ filter_should_clauses? ~ filter_must_not_clauses?)? ~ ws ~ "}" }
+term_filter  = { "term" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+range_filter = { "range" ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ range_expression ~ ws ~ "}" }
+
+must_clauses            = { "must" ~ ":" ~ "[" ~ ws ~ query ~ ("," ~ ws ~ query)* ~ ws ~ "]" }
+should_clauses          = { "should" ~ ":" ~ "[" ~ ws ~ query ~ ("," ~ ws ~ query)* ~ ws ~ "]" }
+must_not_clauses        = { "must_not" ~ ":" ~ "[" ~ ws ~ query ~ ("," ~ ws ~ query)* ~ ws ~ "]" }
+filter_clauses          = { "filter" ~ ":" ~ "[" ~ ws ~ filter ~ ("," ~ ws ~ filter)* ~ ws ~ "]" }
+filter_must_clauses     = { "must" ~ ":" ~ "[" ~ ws ~ filter ~ ("," ~ ws ~ filter)* ~ ws ~ "]" }
+filter_should_clauses   = { "should" ~ ":" ~ "[" ~ ws ~ filter ~ ("," ~ ws ~ filter)* ~ ws ~ "]" }
+filter_must_not_clauses = { "must_not" ~ ":" ~ "[" ~ ws ~ filter ~ ("," ~ ws ~ filter)* ~ ws ~ "]" }
+span_clause             = { "span_term" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "value" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+
+span_near_options           = { "," ~ ws ~ "slop" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "in_order" ~ ":" ~ ws ~ boolean }
+simple_query_string_options = { "," ~ ws ~ "default_operator" ~ ":" ~ ws ~ ("and" | "or") ~ "," ~ ws ~ "analyzer" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "flags" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "lenient" ~ ":" ~ ws ~ boolean ~ "," ~ ws ~ "minimum_should_match" ~ ":" ~ ws ~ quoted_string ~ "," ~ ws ~ "quote_field_suffix" ~ ":" ~ ws ~ quoted_string }
+dis_max_options             = { ",\"tie_breaker\"" ~ ":" ~ ws ~ number ~ ",\"boost\"" ~ ":" ~ ws ~ number }
+more_like_this_options      = { "," ~ ws ~ "min_term_freq" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "max_query_terms" ~ ":" ~ ws ~ number }
+
+scripted_metric_aggregation = { "scripted_metric" ~ ":" ~ ws ~ "{" ~ ws ~ (scripted_metric_params ~ ("," ~ ws ~ scripted_metric_params)*)? ~ ws ~ "}" }
+scripted_metric_params      = { "init_script" ~ ":" ~ ws ~ script | "map_script" ~ ":" ~ ws ~ script | "combine_script" ~ ":" ~ ws ~ script | "reduce_script" ~ ":" ~ ws ~ script }
+
+aggregation_type = {
+    terms_aggregation
+  | avg_aggregation
+  | max_aggregation
+  | min_aggregation
+  | sum_aggregation
+  | histogram_aggregation
+  | date_histogram_aggregation
+  | filters_aggregation
+  | significant_terms_aggregation
+  | geo_distance_aggregation
+  | scripted_metric_aggregation
+}
+
+aggregation                   = { fieldname ~ ":" ~ ws ~ "{" ~ ws ~ (aggregation_type | pipeline_aggregation_type) ~ ws ~ "}" }
+histogram_aggregation         = { "histogram" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "interval" ~ ":" ~ ws ~ number ~ ws ~ "}" }
+date_histogram_aggregation    = { "date_histogram" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "interval" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+filters_aggregation           = { "filters" ~ ":" ~ ws ~ "{" ~ ws ~ "filters" ~ ":" ~ ws ~ "{" ~ ws ~ (fieldname ~ ":" ~ ws ~ query ~ ("," ~ ws ~ query)*)? ~ ws ~ "}" ~ ws ~ "}" }
+significant_terms_aggregation = { "significant_terms" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+geo_distance_aggregation      = { "geo_distance" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ "," ~ ws ~ "ranges" ~ ":" ~ ws ~ "[" ~ ws ~ (range_expression ~ ("," ~ ws ~ range_expression)*)? ~ ws ~ "]" ~ ws ~ "}" }
+avg_aggregation               = { "avg" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+max_aggregation               = { "max" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+min_aggregation               = { "min" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+sum_aggregation               = { "sum" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+avg_bucket_aggregation        = { "avg_bucket" ~ ":" ~ ws ~ "{" ~ ws ~ "buckets_path" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+sum_bucket_aggregation        = { "sum_bucket" ~ ":" ~ ws ~ "{" ~ ws ~ "buckets_path" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+moving_avg_aggregation        = { "moving_avg" ~ ":" ~ ws ~ "{" ~ ws ~ "buckets_path" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+cumulative_sum_aggregation    = { "cumulative_sum" ~ ":" ~ ws ~ "{" ~ ws ~ "buckets_path" ~ ":" ~ ws ~ quoted_string ~ ws ~ "}" }
+
+terms_aggregation = {
+    "terms" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ("," ~ ws ~ terms_aggregation_option)* ~ ws ~ "}"
+}
+
+terms_aggregation_option = {
+    size_option
+  | order_option
+  | min_doc_count_option
+  | shard_size_option
+  | include_option
+  | exclude_option
+  | missing_option // ... potentially other options ...
+}
+
+size_option          = { "size" ~ ":" ~ ws ~ number }
+order_option         = { "order" ~ ":" ~ ws ~ "{" ~ ws ~ (order_key | order_subagg) ~ ws ~ "}" }
+min_doc_count_option = { "min_doc_count" ~ ":" ~ ws ~ number }
+shard_size_option    = { "shard_size" ~ ":" ~ ws ~ number }
+include_option       = { "include" ~ ":" ~ ws ~ string }
+exclude_option       = { "exclude" ~ ":" ~ ws ~ string }
+missing_option       = { "missing" ~ ":" ~ ws ~ value }
+
+order_key       = { "_key" ~ ":" ~ ws ~ order_direction }
+order_subagg    = { fieldname ~ ":" ~ ws ~ order_direction }
+order_direction = { "asc" | "desc" }
+
+pipeline_aggregation_type = {
+    avg_bucket_aggregation
+  | sum_bucket_aggregation
+  | moving_avg_aggregation
+  | cumulative_sum_aggregation
+}
+
+suggesters           = { fieldname ~ ":" ~ ws ~ "{" ~ ws ~ suggester_type ~ ws ~ "}" }
+suggester_type       = { term_suggester | phrase_suggester | completion_suggester }
+term_suggester       = { "term" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+phrase_suggester     = { "phrase" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+completion_suggester = { "completion" ~ ":" ~ ws ~ "{" ~ ws ~ "field" ~ ":" ~ ws ~ fieldname ~ ws ~ "}" }
+
+range_expression = { range_term ~ ("," ~ ws ~ range_term)* }
+range_term       = { (gte | lte | gt | lt) ~ ":" ~ ws ~ term_value }
+
+// We define "set_of_terms" for ast leaves given how Infino search works in code. It optimizes
+// a loop to iterate around a set of terms and sending invididual terms to the search
+// function would take a performance hit.
+set_of_terms = { term_value ~ ("," ~ ws ~ term_value)* }
+
+// Allow search on a particular field or search across multiple fields. _all was deprecated
+// in ElasticSearch 6.0 for performance reasons but in Infino OpenSearch we have made such searches
+// efficient so we will maintain this syntax
+field_part = { "field" ~ ":" ~ ws ~ fieldname }
+all_part   = { "_all" }
+
+object = { "{" ~ ws ~ (pair ~ ("," ~ ws ~ pair)*)? ~ ws ~ "}" }
+pair   = { string ~ ":" ~ ws ~ value }
+
+value = { string | number | object | array | boolean | "null" }
+
+// leaf definitions
+geo_point  = { "{" ~ ws ~ "lat" ~ ":" ~ ws ~ number ~ "," ~ ws ~ "lon" ~ ":" ~ ws ~ number ~ ws ~ "}" }
+boolean    = { "true" | "false" }
+term_value = { word | digits | quoted_string }
+gte        = { "\"gte\"" }
+lte        = { "\"lte\"" }
+gt         = { "\"gt\"" }
+lt         = { "\"lt\"" }
+
+array         =  { "[" ~ ws ~ (value ~ ("," ~ ws ~ value)*)? ~ ws ~ "]" }
+fieldname     = @{ alpha_num_char+ }
+word          = @{ alpha_num_char+ }
+quoted_string =  { "\"" ~ any_char* ~ "\"" }
+digits        = @{ ASCII_DIGIT+ }
+number        = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
+
+ws             = _{ " " | "\t" | "\n" | "\r" }
+alpha_num_char = _{ ASCII_ALPHANUMERIC | "_" }
+any_char       = _{ ANY }
+
+string = { "\"" ~ (escaped_char | normal_char)* ~ "\"" }
+
+escaped_char   = { "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
+normal_char    = { !("\"" | "\\") ~ ANY }
+unicode_escape = { "u" ~ HEX_DIGIT ~ HEX_DIGIT ~ HEX_DIGIT ~ HEX_DIGIT }
+
+// Represents a hexadecimal digit
+HEX_DIGIT = _{ ASCII_HEX_DIGIT }

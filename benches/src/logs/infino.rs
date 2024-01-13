@@ -4,7 +4,6 @@ use std::time::Instant;
 use chrono::Utc;
 use coredb::utils::config::Settings;
 use coredb::CoreDB;
-use serde_json::Value;
 
 use crate::utils::io;
 
@@ -65,12 +64,9 @@ impl InfinoEngine {
   pub fn search_logs(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let now = Instant::now();
 
-    // Passing an empty JSON object
-    let json_query = Value::Null;
-
     match self
       .coredb
-      .search_logs(query, json_query, range_start_time, range_end_time)
+      .search_logs(query, "", range_start_time, range_end_time)
     {
       Ok(result) => {
         let elapsed = now.elapsed().as_micros();

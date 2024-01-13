@@ -62,6 +62,7 @@ impl Metadata {
     }
   }
 
+  #[allow(dead_code)]
   /// Get segment id.
   pub fn get_id(&self) -> &str {
     &self.id
