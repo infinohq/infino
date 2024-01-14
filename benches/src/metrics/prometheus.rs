@@ -1,3 +1,6 @@
+// This code is licensed under Apache License 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+
 use prometheus::{Encoder, Gauge, Opts, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
 use serde_json;

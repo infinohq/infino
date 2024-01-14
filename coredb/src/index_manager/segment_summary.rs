@@ -1,9 +1,11 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 use std::cmp::Ordering;
 
 use serde::{Deserialize, Serialize};
 
 use crate::segment_manager::segment::Segment;
-use crate::utils::range::is_overlap;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SegmentSummary {
@@ -13,14 +15,8 @@ pub struct SegmentSummary {
   /// Segment number in this index.
   segment_number: u32,
 
-  /// Start time.
-  start_time: u64,
-
   /// Last modified time.
   end_time: u64,
-
-  /// Uncompressed size (i.e., size when the segment is loaded in memory)
-  uncompressed_size: u64,
 }
 
 impl SegmentSummary {
@@ -28,12 +24,11 @@ impl SegmentSummary {
     SegmentSummary {
       segment_id: segment.get_id().to_owned(),
       segment_number,
-      start_time: segment.get_start_time(),
       end_time: segment.get_end_time(),
-      uncompressed_size: segment.get_uncompressed_size(),
     }
   }
 
+  #[cfg(test)]
   pub fn get_segment_id(&self) -> &str {
     &self.segment_id
   }
@@ -42,31 +37,9 @@ impl SegmentSummary {
     self.segment_number
   }
 
-  pub fn get_start_time(&self) -> u64 {
-    self.start_time
-  }
-
+  #[cfg(test)]
   pub fn get_end_time(&self) -> u64 {
     self.end_time
-  }
-
-  pub fn get_uncompressed_size(&self) -> u64 {
-    self.uncompressed_size
-  }
-
-  pub fn update_start_end_time(&mut self, start_time: u64, end_time: u64) {
-    self.start_time = start_time;
-    self.end_time = end_time;
-  }
-
-  /// Returns true if this segment summary overlaps with the given range.
-  pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
-    is_overlap(
-      self.get_start_time(),
-      self.get_end_time(),
-      range_start_time,
-      range_end_time,
-    )
   }
 }
 
@@ -103,12 +76,7 @@ mod tests {
 
     assert_eq!(segment_summary.get_segment_id(), segment.get_id());
     assert_eq!(segment_summary.get_segment_number(), 1);
-    assert_eq!(segment_summary.get_start_time(), segment.get_start_time());
     assert_eq!(segment_summary.get_end_time(), segment.get_end_time());
-    assert_eq!(
-      segment_summary.get_uncompressed_size(),
-      segment.get_uncompressed_size()
-    );
   }
 
   #[test]

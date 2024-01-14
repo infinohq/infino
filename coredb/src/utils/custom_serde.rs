@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 /// Custom serde serialize and deserialize implementation for RwLock.
 pub mod rwlock_serde {
   use crate::utils::sync::RwLock;
