@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 /// Search a segment for matching document IDs
 use crate::log::postings_block::PostingsBlock;
 use crate::log::postings_block_compressed::PostingsBlockCompressed;

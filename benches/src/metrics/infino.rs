@@ -1,3 +1,6 @@
+// This code is licensed under Apache License 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+
 use chrono::Utc;
 use reqwest::StatusCode;
 use std::time::Instant;

@@ -1,3 +1,6 @@
+// This code is licensed under Apache License 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;

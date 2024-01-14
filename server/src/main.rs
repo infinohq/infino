@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 //! The Infino server application and interface.
 //!
 //! The Infino server is an [Axum](https://docs.rs/axum/latest/axum/) web application that handles all API
@@ -443,7 +446,7 @@ async fn search_logs(
   Query(logs_query): Query<LogsQuery>,
   json_body: String,
 ) -> Result<String, (StatusCode, String)> {
-  debug!(
+  info!(
     "Searching logs with URL query: {:?}, JSON body: {:?}",
     logs_query, json_body
   );
@@ -737,10 +740,6 @@ mod tests {
     );
 
     let uri = format!("/search_logs?{}", query_string);
-    info!("Checking for uri: {}", uri);
-
-    // Provide an empty JSON object as the body
-    let empty_json_body = serde_json::Value::Null;
 
     // Now call search to get the documents.
     let response = app
@@ -749,7 +748,7 @@ mod tests {
           .method(http::Method::GET)
           .uri(uri)
           .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-          .body(Body::from(serde_json::to_string(&empty_json_body).unwrap()))
+          .body(Body::from(""))
           .unwrap(),
       )
       .await
@@ -841,7 +840,6 @@ mod tests {
       .await
       .unwrap();
 
-    println!("Response is {:?}", response);
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -865,8 +863,8 @@ mod tests {
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }
 
-  // Only run the tests withour rabbitmq, as that is the use-case we are targeting.
-  //  #[test_case(true ; "use rabbitmq")]
+  // Only run the tests without rabbitmq, as that is the use-case we are targeting.
+  // #[test_case(true ; "use rabbitmq")]
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
   async fn test_basic(use_rabbitmq: bool) {

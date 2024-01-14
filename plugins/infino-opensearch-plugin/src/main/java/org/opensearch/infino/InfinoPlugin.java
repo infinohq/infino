@@ -1,9 +1,5 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- *
- * The OpenSearch Contributors require contributions made to
- * this file be licensed under the Apache-2.0 license or a
- * compatible open source license.
+/* This code is licensed under Apache License 2.0
+ * https://www.apache.org/licenses/LICENSE-2.0
  */
 
 package org.opensearch.infino;
@@ -24,21 +20,21 @@ import java.util.function.Supplier;
 import static java.util.Collections.singletonList;
 
 /**
- *  Implement both the REST API handler for client calls
- */ 
+ * Implement both the REST API handler for client calls
+ */
 public class InfinoPlugin extends Plugin implements ActionPlugin {
 
     // This methods overrides the method from the parent class to hand a list
     // of additional REST handlers to OpenSearch at pre-defined paths.
     @Override
     public List<RestHandler> getRestHandlers(
-        final Settings settings,
-        final RestController restController,
-        final ClusterSettings clusterSettings,
-        final IndexScopedSettings indexScopedSettings,
-        final SettingsFilter settingsFilter,
-        final IndexNameExpressionResolver indexNameExpressionResolver,
-        final Supplier nodesInCluster) {
+            final Settings settings,
+            final RestController restController,
+            final ClusterSettings clusterSettings,
+            final IndexScopedSettings indexScopedSettings,
+            final SettingsFilter settingsFilter,
+            final IndexNameExpressionResolver indexNameExpressionResolver,
+            final Supplier nodesInCluster) {
 
         return singletonList(new InfinoRestHandler());
     }

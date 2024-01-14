@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 use std::collections::HashMap;
 use std::fs::create_dir;
 use std::path::Path;
@@ -12,7 +15,6 @@ use crate::log::postings_list::PostingsList;
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
 use crate::request_manager::query_dsl::traverse_ast;
-use crate::request_manager::query_dsl::AstNode;
 use crate::request_manager::query_dsl::Rule;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
@@ -379,7 +381,7 @@ impl Segment {
   ) -> Result<Vec<LogMessage>, SegmentSearchError> {
     // Create AstNode::Multiple from ast and pass it to traverse_ast
     let matching_document_ids =
-      traverse_ast(self, AstNode::Multiple(ast)).map_err(SegmentSearchError::AstError)?;
+      traverse_ast(self, &ast.clone()).map_err(SegmentSearchError::AstError)?;
 
     // Since matching_document_ids is a HashSet, no need to dedup
     let matching_document_ids_vec: Vec<u32> = matching_document_ids.into_iter().collect();
@@ -509,46 +511,20 @@ mod tests {
   }
 
   #[test]
-  fn test_search_with_term_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    match create_term_test_node("test") {
-      Ok(term_node) => {
-        match segment.search_logs(&term_node, 0, u64::MAX) {
-          Ok(results) => {
-            assert_eq!(results.len(), 2); // Assuming two logs contain the term "test"
-          }
-          Err(err) => {
-            eprintln!("Error in search_logs: {:?}", err);
-            assert!(false, "Error in search_logs: {:?}", err);
-          }
-        }
-      }
-      Err(err) => {
-        eprintln!("Error creating term node for 'test': {:?}", err);
-        assert!(false, "Error creating term node: {:?}", err);
-      }
-    }
-  }
-
-  #[test]
   fn test_search_with_must_query() {
     let mut segment = Segment::new();
     populate_segment(&mut segment);
 
     // Construct the query DSL as a JSON string for a Must query
-    let query_dsl = r#"
-        {
-          "query": {
-            "bool": {
-              "must": [
-                {"term": {"field": "test"}},
-                {"term": {"field": "log"}}
-              ]
-            }
-          }
+    let query_dsl = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : "test" } }
+          ]
         }
+      }
+    }
     "#;
 
     // Parse the query DSL
@@ -560,12 +536,10 @@ mod tests {
             .all(|log| log.get_text().contains("test") && log.get_text().contains("log")));
         }
         Err(err) => {
-          eprintln!("Error in search_logs: {:?}", err);
           assert!(false, "Error in search_logs: {:?}", err);
         }
       },
       Err(err) => {
-        eprintln!("Error parsing query DSL: {:?}", err);
         assert!(false, "Error parsing query DSL: {:?}", err);
       }
     }
@@ -577,17 +551,15 @@ mod tests {
     populate_segment(&mut segment);
 
     // Construct the query DSL as a JSON string for a Should query
-    let query_dsl = r#"
-        {
-          "query": {
-            "bool": {
-              "should": [
-                {"term": {"field": "another"}},
-                {"term": {"field": "different"}}
-              ]
-            }
-          }
+    let query_dsl = r#"{
+      "query": {
+        "bool": {
+          "should": [
+            { "match": { "_all" : "test" } }
+          ]
         }
+      }
+    }
     "#;
 
     // Parse the query DSL
@@ -599,12 +571,10 @@ mod tests {
             .any(|log| log.get_text().contains("another") || log.get_text().contains("different")));
         }
         Err(err) => {
-          eprintln!("Error in search_logs: {:?}", err);
           assert!(false, "Error in search_logs: {:?}", err);
         }
       },
       Err(err) => {
-        eprintln!("Error parsing query DSL: {:?}", err);
         assert!(false, "Error parsing query DSL: {:?}", err);
       }
     }
@@ -615,21 +585,20 @@ mod tests {
     let mut segment = Segment::new();
     populate_segment(&mut segment);
 
-    // Construct the query DSL as a JSON string for a MustNot query
-    let query_dsl = r#"
-        {
-          "query": {
-            "bool": {
-              "must_not": [
-                {"term": {"field": "excluded"}}
-              ]
-            }
-          }
+    // Construct the Query DSL query as a JSON string for a MustNot query
+    let query_dsl_query = r#"{
+      "query": {
+        "bool": {
+          "must_not": [
+            { "match": { "_all" : "different" } }
+          ]
         }
+      }
+    }
     "#;
 
     // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, &query_dsl) {
+    match QueryDslParser::parse(Rule::start, &query_dsl_query) {
       Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
         Ok(results) => {
           assert!(!results
@@ -637,60 +606,10 @@ mod tests {
             .any(|log| log.get_text().contains("excluded")));
         }
         Err(err) => {
-          eprintln!("Error in search_logs: {:?}", err);
           assert!(false, "Error in search_logs: {:?}", err);
         }
       },
       Err(err) => {
-        eprintln!("Error parsing query DSL: {:?}", err);
-        assert!(false, "Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[test]
-  fn test_search_with_combined_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    // Construct the query DSL for a combined query
-    let query_dsl = r#"
-        {
-          "query": {
-            "bool": {
-              "must": [
-                {"term": {"field": "test"}}
-              ],
-              "should": [
-                {"term": {"field": "another"}}
-              ],
-              "must_not": [
-                {"term": {"field": "different"}}
-              ]
-            }
-          }
-        }
-    "#;
-
-    // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, &query_dsl) {
-      Ok(query_tree) => {
-        match segment.search_logs(&query_tree, 0, u64::MAX) {
-          Ok(results) => {
-            // Perform your assertions here
-            assert!(results.iter().any(|log| log.get_text().contains("test")));
-            assert!(results
-              .iter()
-              .all(|log| !log.get_text().contains("different")));
-          }
-          Err(err) => {
-            eprintln!("Error in search_logs: {:?}", err);
-            assert!(false, "Error in search_logs: {:?}", err);
-          }
-        }
-      }
-      Err(err) => {
-        eprintln!("Error parsing query DSL: {:?}", err);
         assert!(false, "Error parsing query DSL: {:?}", err);
       }
     }

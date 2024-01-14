@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 //! Executes Infino requests on an index
 //!
 //! Infino supports a wide range of OpenSearch and Lucene queries.

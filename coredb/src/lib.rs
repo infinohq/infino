@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 //! CoreDB is a telemetry database.
 //!
 //! It uses time-sharded segments and compressed blocks for data storage
@@ -139,7 +142,7 @@ impl CoreDB {
   /// Search the log messages for given query and range.
   pub fn search_logs(
     &self,
-    query: &str,
+    url_query: &str,
     json_body: &str,
     range_start_time: u64,
     range_end_time: u64,
@@ -149,9 +152,10 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .ok_or(SearchLogsError::NoQueryProvided)?;
 
-    let results = index
-      .value()
-      .search_logs(query, json_body, range_start_time, range_end_time)?;
+    let results =
+      index
+        .value()
+        .search_logs(url_query, json_body, range_start_time, range_end_time)?;
 
     Ok(results)
   }

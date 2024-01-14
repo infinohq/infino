@@ -1,9 +1,5 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- *
- * The OpenSearch Contributors require contributions made to
- * this file be licensed under the Apache-2.0 license or a
- * compatible open source license.
+/* This code is licensed under Apache License 2.0
+ * https://www.apache.org/licenses/LICENSE-2.0
  */
 
 package org.opensearch.bootstrap;
@@ -20,11 +16,22 @@ import java.util.Set;
  * https://github.com/opensearch-project/security/issues/1938
  */
 public class JarHell {
-    private JarHell() {}
-    public static void checkJarHell(Consumer<String> output) throws IOException, Exception {}
-    public static void checkJarHell(Set<URL> urls, Consumer<String> output) throws URISyntaxException, IOException {}
-    public static void checkVersionFormat(String targetVersion) {}
-    public static void checkJavaVersion(String resource, String targetVersion) {}
-    public static Set<URL> parseClassPath() {return new HashSet<URL>();}
-}
+    private JarHell() {
+    }
 
+    public static void checkJarHell(Consumer<String> output) throws IOException, Exception {
+    }
+
+    public static void checkJarHell(Set<URL> urls, Consumer<String> output) throws URISyntaxException, IOException {
+    }
+
+    public static void checkVersionFormat(String targetVersion) {
+    }
+
+    public static void checkJavaVersion(String resource, String targetVersion) {
+    }
+
+    public static Set<URL> parseClassPath() {
+        return new HashSet<URL>();
+    }
+}

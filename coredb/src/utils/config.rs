@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 use std::env;

@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -211,29 +214,39 @@ impl Index {
   pub fn search_logs(
     &self,
     url_query: &str,
-    json_query: &str,
+    json_body: &str, // Assuming this should be json_query
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SearchLogsError> {
     debug!(
       "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
-      url_query, json_query, range_start_time, range_end_time
+      url_query, json_body, range_start_time, range_end_time
     );
 
-    let mut json_query = json_query.to_string();
+    let mut json_query = json_body.to_string();
+
+    info!("JSON query is {}", &json_query);
 
     // Check if URL or JSON query is empty
     let is_url_empty = url_query.trim().is_empty();
     let is_json_empty = json_query.trim().is_empty();
 
     // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
-    // Note that query_string rules are parsed by the Lucene parser
     if is_json_empty {
       if is_url_empty {
         return Err(SearchLogsError::NoQueryProvided);
       } else {
+        // Update json_query with the constructed query from url_query
         json_query = format!(
-          r#"{{ "query": {{ "query_string": {{ "query": "{}" }} }} }}"#,
+          r#"{{
+                    "query": {{
+                        "bool": {{
+                            "must": [
+                                {{ "match": {{ "_all": "{}" }} }}
+                            ]
+                        }}
+                    }}
+                }}"#,
           url_query
         );
       }

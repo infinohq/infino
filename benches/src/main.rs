@@ -1,3 +1,6 @@
+// This code is licensed under Apache License 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+
 use crate::logs::clickhouse::ClickhouseEngine;
 use crate::logs::es::ElasticsearchEngine;
 use crate::logs::infino::InfinoEngine;

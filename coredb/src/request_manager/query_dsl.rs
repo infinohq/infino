@@ -1,6 +1,10 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 //! Execute an Infino query. Both Query DSL and Lucene Query Syntax are supported.
 //!
-//! Uses the Pest parser with Pest-formatted PEG grammars: https://pest.rs/
+//! Uses the Pest parser with Pest-formatted PEG grammars: https://pest.rs/,
+//! which is a cleaner and more optimized approach than building our own AST.
 
 use crate::segment_manager::search::get_matching_doc_ids;
 use crate::segment_manager::search::get_postings_lists;
@@ -21,67 +25,69 @@ use pest_derive::Parser;
 
 pub struct QueryDslParser;
 
-pub(crate) enum AstNode<'a> {
-  Single(&'a Pair<'a, Rule>),
-  Multiple(&'a Pairs<'a, Rule>),
-}
-
-pub fn traverse_ast(segment: &Segment, ast_node: AstNode) -> Result<HashSet<u32>, AstError> {
+pub fn traverse_ast(segment: &Segment, nodes: &Pairs<Rule>) -> Result<HashSet<u32>, AstError> {
   let mut results = HashSet::new();
-
-  match ast_node {
-    AstNode::Single(pair) => {
-      let partial_results = process_single_pair(segment, pair)?;
-      results.extend(partial_results);
-    }
-    AstNode::Multiple(pairs) => {
-      for pair in pairs.clone() {
-        let partial_results = process_single_pair(segment, &pair)?;
-        results.extend(partial_results);
-      }
-    }
+  for node in nodes.clone() {
+    let accumulated_results = process_ast_node(segment, &node)?;
+    results.extend(accumulated_results);
   }
 
   Ok(results)
 }
 
-fn process_single_pair(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
-  match pair.as_rule() {
-    Rule::set_of_terms => process_terms(segment, pair),
-    Rule::bool_query => process_boolean_query(segment, pair),
-    // Add other rules as needed
-    _ => Err(AstError::UnsupportedQuery(format!(
-      "Unsupported query: {:?}",
-      pair.as_rule()
-    ))),
+fn process_ast_node(segment: &Segment, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  if is_supported_rule(&node.as_rule()) {
+    match node.as_rule() {
+      Rule::quoted_string => process_terms(segment, node),
+      Rule::set_of_terms => process_terms(segment, node),
+      Rule::bool_query => process_boolean_query(segment, node),
+
+      // For rules that we support but are not operators, recursively process inner pairs
+      _ => node
+        .clone()
+        .into_inner()
+        .try_fold(HashSet::new(), |acc, p| {
+          process_ast_node(segment, &p).map(|set| acc.union(&set).cloned().collect())
+        }),
+    }
+  } else {
+    Err(AstError::UnsupportedQuery(format!(
+      "Unsupported query term: {:?}",
+      node.as_rule()
+    )))
   }
 }
 
-fn process_boolean_query(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+// Process the different parts of the boolean: must (AND), should (OR), and must not (NOT).
+// Filters are not yet supported.
+fn process_boolean_query(segment: &Segment, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
   let mut must_results = HashSet::new();
   let mut should_results = HashSet::new();
   let mut must_not_results = HashSet::new();
 
-  for inner_pair in pair.clone().into_inner() {
-    match inner_pair.as_rule() {
-      Rule::must_clauses => {
-        let results = handle_must_clauses(segment, &inner_pair)?;
-        must_results.extend(results);
+  for child_node in node.clone().into_inner() {
+    if is_supported_rule(&child_node.as_rule()) {
+      match child_node.as_rule() {
+        Rule::must_clauses => {
+          let results = process_must_clause(segment, &child_node)?;
+          must_results.extend(results);
+        }
+        Rule::should_clauses => {
+          let results = process_should_clause(segment, &child_node)?;
+          should_results.extend(results);
+        }
+        Rule::must_not_clauses => {
+          let results = process_must_not_clause(segment, &child_node, &must_results)?;
+          must_not_results.extend(results);
+        }
+        // Additional supported rules can be added here if needed
+        _ => continue, // Skip other supported but non-relevant rules
       }
-      Rule::should_clauses => {
-        let results = handle_should_clauses(segment, &inner_pair)?;
-        should_results.extend(results);
-      }
-      Rule::must_not_clauses => {
-        let results = handle_must_not_clauses(segment, &inner_pair, &must_results)?;
-        must_not_results.extend(results);
-      }
-      _ => {
-        return Err(AstError::UnsupportedQuery(format!(
-          "Unsupported query: {:?}",
-          inner_pair.as_rule()
-        )));
-      }
+    } else {
+      return Err(AstError::UnsupportedQuery(format!(
+        "Unsupported query term: {:?}",
+        child_node.as_rule()
+      )));
     }
   }
 
@@ -99,9 +105,9 @@ fn process_boolean_query(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet
   Ok(final_results)
 }
 
-fn process_terms(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+fn process_terms(segment: &Segment, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
   // Extract the terms and perform the search
-  let terms_lowercase = pair.as_str().to_lowercase();
+  let terms_lowercase = node.as_str().to_lowercase();
   let terms = tokenize(&terms_lowercase);
   let mut results = Vec::new();
 
@@ -127,12 +133,12 @@ fn process_terms(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet<u32>, A
   Ok(results.into_iter().collect())
 }
 
-fn handle_must_clauses(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+fn process_must_clause(segment: &Segment, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
   let mut results = HashSet::new();
   let mut first = true;
 
-  for clause in pair.clone().into_inner() {
-    let term_results = traverse_ast(segment, AstNode::Single(&clause))?;
+  for child_node in node.clone().into_inner() {
+    let term_results = process_ast_node(segment, &child_node)?;
 
     if first {
       results = term_results;
@@ -145,23 +151,23 @@ fn handle_must_clauses(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet<u
   Ok(results)
 }
 
-fn handle_should_clauses(segment: &Segment, pair: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+fn process_should_clause(segment: &Segment, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
   let mut results = HashSet::new();
-  for clause in pair.clone().into_inner() {
-    let term_results = traverse_ast(segment, AstNode::Single(&clause))?;
+  for child_node in node.clone().into_inner() {
+    let term_results = process_ast_node(segment, &child_node)?;
     results = results.union(&term_results).cloned().collect();
   }
   Ok(results)
 }
 
-fn handle_must_not_clauses(
+fn process_must_not_clause(
   segment: &Segment,
-  pair: &Pair<Rule>,
+  node: &Pair<Rule>,
   include_results: &HashSet<u32>,
 ) -> Result<HashSet<u32>, AstError> {
   let mut exclude_results = HashSet::new();
-  for clause in pair.clone().into_inner() {
-    let term_results = traverse_ast(segment, AstNode::Single(&clause))?;
+  for child_node in node.clone().into_inner() {
+    let term_results = process_ast_node(segment, &child_node)?;
     exclude_results = exclude_results.union(&term_results).cloned().collect();
   }
   Ok(
@@ -170,4 +176,32 @@ fn handle_must_not_clauses(
       .cloned()
       .collect(),
   )
+}
+
+// Ignore name similarity with parser functions
+#[allow(clippy::match_like_matches_macro)]
+fn is_supported_rule(rule: &Rule) -> bool {
+  match rule {
+    Rule::quoted_string
+    | Rule::set_of_terms
+    | Rule::should_clauses
+    | Rule::must_clauses
+    | Rule::must_not_clauses
+    | Rule::bool_query
+    | Rule::bracketed_query
+    | Rule::search_on_field
+    | Rule::end_brace
+    | Rule::end_bracket
+    | Rule::word
+    | Rule::fieldname
+    | Rule::start
+    | Rule::query
+    | Rule::query_section
+    | Rule::match_query
+    | Rule::search_on_all
+    | Rule::start_brace
+    | Rule::colon
+    | Rule::start_bracket => true,
+    _ => false,
+  }
 }
