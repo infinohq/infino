@@ -1,6 +1,3 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 use std::fs::File;
 use std::io::Write;
 

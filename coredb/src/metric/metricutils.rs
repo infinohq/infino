@@ -1,6 +1,3 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 use log::error;
 use tsz::decode::Error;
 use tsz::stream::{BufferedReader, BufferedWriter};

@@ -1,6 +1,3 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 //! The Infino server application and interface.
 //!
 //! The Infino server is an [Axum](https://docs.rs/axum/latest/axum/) web application that handles all API
@@ -444,9 +441,9 @@ async fn append_metric(
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
-  json_body: String,
+  Json(json_body): Json<serde_json::Value>,
 ) -> Result<String, (StatusCode, String)> {
-  info!(
+  debug!(
     "Searching logs with URL query: {:?}, JSON body: {:?}",
     logs_query, json_body
   );
@@ -454,7 +451,7 @@ async fn search_logs(
   // Pass the deserialized JSON object directly to coredb.search_logs
   let result = state.coredb.search_logs(
     &logs_query.text,
-    &json_body,
+    json_body,
     logs_query.start_time.unwrap_or(0),
     logs_query
       .end_time
@@ -492,7 +489,7 @@ async fn search_logs(
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
-  json_body: String,
+  Json(json_body): Json<Value>,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
     "Summarizing logs with URL query: {:?}, JSON body: {:?}",
@@ -505,7 +502,7 @@ async fn summarize(
   // Call search_logs and handle errors
   match state.coredb.search_logs(
     &summarize_query.text,
-    &json_body,
+    json_body, // Pass the deserialized JSON object directly
     summarize_query.start_time.unwrap_or(0),
     summarize_query
       .end_time
@@ -698,9 +695,7 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
-      file
-        .write_all(b"search_memory_budget_megabytes = 0.2\n")
-        .unwrap();
+      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
@@ -740,6 +735,10 @@ mod tests {
     );
 
     let uri = format!("/search_logs?{}", query_string);
+    info!("Checking for uri: {}", uri);
+
+    // Provide an empty JSON object as the body
+    let empty_json_body = serde_json::Value::Null;
 
     // Now call search to get the documents.
     let response = app
@@ -748,7 +747,7 @@ mod tests {
           .method(http::Method::GET)
           .uri(uri)
           .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-          .body(Body::from(""))
+          .body(Body::from(serde_json::to_string(&empty_json_body).unwrap()))
           .unwrap(),
       )
       .await
@@ -774,7 +773,12 @@ mod tests {
       .unwrap_or(Utc::now().timestamp_millis() as u64);
 
     // Handle errors from search_logs
-    let log_messages_result = refreshed_coredb.search_logs(search_text, "", start_time, end_time);
+    let log_messages_result = refreshed_coredb.search_logs(
+      search_text,
+      serde_json::json!(empty_json_body),
+      start_time,
+      end_time,
+    );
 
     match log_messages_result {
       Ok(log_messages_received) => {
@@ -840,6 +844,7 @@ mod tests {
       .await
       .unwrap();
 
+    println!("Response is {:?}", response);
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -863,8 +868,8 @@ mod tests {
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }
 
-  // Only run the tests without rabbitmq, as that is the use-case we are targeting.
-  // #[test_case(true ; "use rabbitmq")]
+  // Only run the tests withour rabbitmq, as that is the use-case we are targeting.
+  //  #[test_case(true ; "use rabbitmq")]
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
   async fn test_basic(use_rabbitmq: bool) {

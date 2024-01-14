@@ -1,6 +1,3 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 //! Manages indexes in CoreDB.
 //!
 //! A CoreDB index is an append-only data structure composed of time-sharded segments that

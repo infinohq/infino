@@ -1,6 +1,3 @@
-# This code is licensed under Elastic License 2.0
-# https://www.elastic.co/licensing/elastic-license
-
 import json
 import streamlit as st
 from st_keyup import st_keyup
