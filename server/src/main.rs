@@ -446,7 +446,7 @@ async fn search_logs(
   Query(logs_query): Query<LogsQuery>,
   json_body: String,
 ) -> Result<String, (StatusCode, String)> {
-  info!(
+  debug!(
     "Searching logs with URL query: {:?}, JSON body: {:?}",
     logs_query, json_body
   );
@@ -698,9 +698,7 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
-      file
-        .write_all(b"search_memory_budget_megabytes = 0.2\n")
-        .unwrap();
+      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();

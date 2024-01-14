@@ -80,7 +80,6 @@ impl Segment {
     }
   }
 
-  #[allow(dead_code)]
   /// Get id of this segment.
   pub fn get_id(&self) -> &str {
     self.metadata.get_id()
@@ -110,19 +109,21 @@ impl Segment {
     self.metadata.get_metric_point_count()
   }
 
-  #[allow(dead_code)]
   /// Get the earliest time in this segment.
   pub fn get_start_time(&self) -> u64 {
     self.metadata.get_start_time()
   }
 
-  #[allow(dead_code)]
   /// Get the latest time in this segment.
   pub fn get_end_time(&self) -> u64 {
     self.metadata.get_end_time()
   }
 
-  #[allow(dead_code)]
+  /// Get the uncompressed size.
+  pub fn get_uncompressed_size(&self) -> u64 {
+    self.metadata.get_uncompressed_size()
+  }
+
   /// Check if this segment is empty.
   pub fn is_empty(&self) -> bool {
     self.metadata.get_log_message_count() == 0
@@ -379,7 +380,6 @@ impl Segment {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SegmentSearchError> {
-    // Create AstNode::Multiple from ast and pass it to traverse_ast
     let matching_document_ids =
       traverse_ast(self, &ast.clone()).map_err(SegmentSearchError::AstError)?;
 
@@ -622,7 +622,6 @@ mod tests {
     let segment = Segment::new();
     assert!(segment.is_empty());
 
-    // Create an AstNode for the term "doesnotexist"
     let query_node_result = create_term_test_node("doesnotexist");
 
     if let Ok(query_node) = query_node_result {
@@ -643,7 +642,6 @@ mod tests {
     let segment = Segment::default();
     assert!(segment.is_empty());
 
-    // Create an AstNode for the term "doesnotexist"
     let query_node_result = create_term_test_node("doesnotexist");
 
     if let Ok(query_node) = query_node_result {

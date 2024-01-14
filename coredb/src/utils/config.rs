@@ -13,7 +13,10 @@ pub struct CoreDBSettings {
   index_dir_path: String,
   default_index_name: String,
   segment_size_threshold_megabytes: f32,
-  search_memory_budget_megabytes: f32,
+
+  // This has to be greater than 4*segment_size_threshold_megabytes. Otherwise,
+  // a ConfigError is raised while parsing.
+  memory_budget_megabytes: f32,
 }
 
 impl CoreDBSettings {
@@ -31,12 +34,18 @@ impl CoreDBSettings {
     DEFAULT_CONFIG_FILE_NAME
   }
 
-  pub fn get_segment_size_threshold_megabytes(&self) -> f32 {
-    self.segment_size_threshold_megabytes
+  pub fn get_segment_size_threshold_bytes(&self) -> u64 {
+    (self.segment_size_threshold_megabytes * 1024.0 * 1024.) as u64
   }
 
-  pub fn get_search_memory_budget_megabytes(&self) -> f32 {
-    self.search_memory_budget_megabytes
+  pub fn get_memory_budget_bytes(&self) -> u64 {
+    (self.memory_budget_megabytes * 1024.0 * 1024.0) as u64
+  }
+
+  pub fn get_search_memory_budget_bytes(&self) -> u64 {
+    // Search memory budget is total memory budget, minus the size of one segment (typically for insertions).
+    ((self.memory_budget_megabytes - self.segment_size_threshold_megabytes) * 1024.0 * 1024.0)
+      as u64
   }
 }
 
@@ -65,8 +74,19 @@ impl Settings {
       .add_source(Environment::with_prefix("coredb"))
       .build()?;
 
-    // You can deserialize (and thus freeze) the entire configuration as
-    config.try_deserialize()
+    // Deserialize (and thus freeze) the entire configuration.
+    let settings: Settings = config.try_deserialize()?;
+
+    // Run validation checks.
+    if settings.coredb.memory_budget_megabytes
+      < 4.0 * settings.coredb.segment_size_threshold_megabytes
+    {
+      return Err(ConfigError::Message(
+        "Memory budget should be at least 4 times the segment size threshold".to_owned(),
+      ));
+    }
+
+    Ok(settings)
   }
 
   /// Get coredb settings.
@@ -87,7 +107,7 @@ mod tests {
   use crate::utils::io::get_joined_path;
 
   #[test]
-  fn test_settings() {
+  fn test_new_settings() {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
 
@@ -108,9 +128,7 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
-      file
-        .write_all(b"search_memory_budget_megabytes = 2048\n")
-        .unwrap();
+      file.write_all(b"memory_budget_megabytes = 4096\n").unwrap();
     }
 
     let settings = Settings::new(&config_dir_path).unwrap();
@@ -118,12 +136,16 @@ mod tests {
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
     assert_eq!(coredb_settings.get_default_index_name(), ".default");
     assert_eq!(
-      coredb_settings.get_segment_size_threshold_megabytes(),
-      1024 as f32
+      coredb_settings.get_segment_size_threshold_bytes(),
+      1024 * 1024 * 1024
     );
     assert_eq!(
-      coredb_settings.get_search_memory_budget_megabytes(),
-      2048 as f32
+      coredb_settings.get_memory_budget_bytes(),
+      4096 * 1024 * 1024
+    );
+    assert_eq!(
+      coredb_settings.get_search_memory_budget_bytes(),
+      (4096 - 1024) * 1024 * 1024
     );
 
     // Check if we are running this test as part of a GitHub actions. We can't change environment variables
@@ -139,22 +161,48 @@ mod tests {
         file
           .write_all(b"segment_size_threshold_megabytes=1\n")
           .unwrap();
-        file
-          .write_all(b"search_memory_budget_megabytes=2\n")
-          .unwrap();
+        file.write_all(b"memory_budget_megabytes=4\n").unwrap();
       }
       let settings = Settings::new(&config_dir_path).unwrap();
       let coredb_settings = settings.get_coredb_settings();
       assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
       assert_eq!(
-        coredb_settings.get_segment_size_threshold_megabytes(),
-        1 as f32
+        coredb_settings.get_segment_size_threshold_bytes(),
+        1 * 1024 * 1024
       );
+      assert_eq!(coredb_settings.get_memory_budget_bytes(), 4 * 1024 * 1024);
       assert_eq!(
-        coredb_settings.get_search_memory_budget_megabytes(),
-        2 as f32
+        coredb_settings.get_search_memory_budget_bytes(),
+        3 * 1024 * 1024
       );
       assert_eq!(coredb_settings.get_default_index_name(), ".default");
     }
+  }
+
+  #[test]
+  fn test_settings_error() {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+
+    // Create a config where the memory budget is too low.
+    let config_file_path = get_joined_path(config_dir_path, DEFAULT_CONFIG_FILE_NAME);
+    {
+      let mut file = File::create(&config_file_path).unwrap();
+      file.write_all(b"[coredb]\n").unwrap();
+      file
+        .write_all(b"index_dir_path = \"/var/index\"\n")
+        .unwrap();
+      file
+        .write_all(b"default_index_name = \".default\"\n")
+        .unwrap();
+      file
+        .write_all(b"segment_size_threshold_megabytes = 1024\n")
+        .unwrap();
+      file.write_all(b"memory_budget_megabytes = 2048\n").unwrap();
+    }
+
+    // Make sure this config returns an error.
+    let result = Settings::new(&config_dir_path);
+    assert!(result.is_err());
   }
 }
