@@ -1,6 +1,3 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 use bitpacking::BitPacker;
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};

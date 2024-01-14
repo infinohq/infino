@@ -1,21 +1,22 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::create_dir;
 use std::path::Path;
 use std::vec::Vec;
 
-use log::debug;
+use log::{debug, error};
 
 use dashmap::DashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::log::log_message::LogMessage;
+use crate::log::postings_block::PostingsBlock;
+use crate::log::postings_block_compressed::PostingsBlockCompressed;
 use crate::log::postings_list::PostingsList;
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
-use crate::request_manager::query_dsl::traverse_ast;
-use crate::request_manager::query_dsl::Rule;
+use crate::utils::error::AstError;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
 use crate::utils::error::SegmentSearchError;
@@ -23,8 +24,7 @@ use crate::utils::range::is_overlap;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
 use crate::utils::sync::Mutex;
-
-use pest::iterators::Pairs;
+use crate::utils::tokenize::tokenize;
 
 use super::metadata::Metadata;
 
@@ -35,6 +35,39 @@ const FORWARD_MAP_FILE_NAME: &str = "forward_map.bin";
 const LABELS_FILE_NAME: &str = "labels.bin";
 const TIME_SERIES_FILE_NAME: &str = "time_series.bin";
 
+// Ast used for deconstructing queries for searches
+pub enum AstNode {
+  Match(String),
+  Must(Box<AstNode>, Box<AstNode>),
+  Should(Box<AstNode>, Box<AstNode>),
+  MustNot(Box<AstNode>),
+  None,
+}
+
+// Query condition to evaluate during Ast traversal
+#[derive(Serialize, Deserialize)]
+pub enum Condition {
+  Term(TermQuery),
+  Bool(BoolQuery),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TermQuery {
+  term: Option<String>,
+  field: Option<String>,
+  boost: Option<f32>,
+  fuzziness: Option<String>,
+}
+
+// A Boolean Query definition
+#[derive(Serialize, Deserialize)]
+pub struct BoolQuery {
+  must: Option<Vec<Condition>>,
+  must_not: Option<Vec<Condition>>,
+  should: Option<Vec<Condition>>,
+  filter: Option<Vec<Condition>>,
+}
+
 /// A segment with inverted map (term-ids to log-message-ids) as well
 /// as forward map (log-message-ids to log messages).
 #[derive(Debug)]
@@ -44,11 +77,11 @@ pub struct Segment {
 
   /// Terms present in this segment.
   /// Applicable only for log messages.
-  pub terms: DashMap<String, u32>,
+  terms: DashMap<String, u32>,
 
   /// Inverted map - term-id to a postings list.
   /// Applicable only for log messages.
-  pub inverted_map: DashMap<u32, PostingsList>,
+  inverted_map: DashMap<u32, PostingsList>,
 
   /// Forward map - log_message-id to the corresponding log message.
   /// Applicable only for log messages.
@@ -80,7 +113,6 @@ impl Segment {
     }
   }
 
-  #[allow(dead_code)]
   /// Get id of this segment.
   pub fn get_id(&self) -> &str {
     self.metadata.get_id()
@@ -110,16 +142,19 @@ impl Segment {
     self.metadata.get_metric_point_count()
   }
 
-  #[allow(dead_code)]
   /// Get the earliest time in this segment.
   pub fn get_start_time(&self) -> u64 {
     self.metadata.get_start_time()
   }
 
-  #[allow(dead_code)]
   /// Get the latest time in this segment.
   pub fn get_end_time(&self) -> u64 {
     self.metadata.get_end_time()
+  }
+
+  /// Get the uncompressed size.
+  pub fn get_uncompressed_size(&self) -> u64 {
+    self.metadata.get_uncompressed_size()
   }
 
   #[allow(dead_code)]
@@ -372,16 +407,295 @@ impl Segment {
     (segment, total_size)
   }
 
+  // Get the posting lists belonging to a set of matching terms in the query
+  #[allow(clippy::type_complexity)]
+  fn get_postings_lists(
+    &self,
+    terms: &[String],
+  ) -> Result<
+    (
+      Vec<Vec<PostingsBlockCompressed>>,
+      Vec<PostingsBlock>,
+      Vec<Vec<u32>>,
+      usize,
+    ),
+    AstError,
+  > {
+    let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
+    let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
+    let mut last_block_list: Vec<PostingsBlock> = Vec::new();
+    let mut shortest_list_index = 0;
+    let mut shortest_list_len = usize::MAX;
+
+    for (index, term) in terms.iter().enumerate() {
+      let term_id = match self.terms.get(term) {
+        Some(term_id_ref) => *term_id_ref,
+        None => {
+          return Err(AstError::PostingsListError(format!(
+            "Term not found: {}",
+            term
+          )))
+        }
+      };
+
+      let postings_list = match self.inverted_map.get(&term_id) {
+        Some(postings_list_ref) => postings_list_ref,
+        None => {
+          return Err(AstError::PostingsListError(format!(
+            "Postings list not found for term ID: {}",
+            term_id
+          )))
+        }
+      };
+
+      let initial_values = postings_list
+        .get_initial_values()
+        .read()
+        .map_err(|_| {
+          AstError::PostingsListError("Failed to acquire read lock on initial values".to_string())
+        })?
+        .clone();
+      initial_values_list.push(initial_values);
+
+      let postings_block_compressed_vec: Vec<PostingsBlockCompressed> = postings_list
+        .get_postings_list_compressed()
+        .read()
+        .map_err(|_| {
+          AstError::TraverseError(
+            "Failed to acquire read lock on postings list compressed".to_string(),
+          )
+        })?
+        .iter()
+        .cloned()
+        .collect();
+
+      let last_block = postings_list
+        .get_last_postings_block()
+        .read()
+        .map_err(|_| {
+          AstError::PostingsListError(
+            "Failed to acquire read lock on last postings block".to_string(),
+          )
+        })?
+        .clone();
+      last_block_list.push(last_block);
+
+      if postings_block_compressed_vec.len() < shortest_list_len {
+        shortest_list_len = postings_block_compressed_vec.len();
+        shortest_list_index = index;
+      }
+
+      postings_lists.push(postings_block_compressed_vec);
+    }
+
+    Ok((
+      postings_lists,
+      last_block_list,
+      initial_values_list,
+      shortest_list_index,
+    ))
+  }
+
+  // Get the matching doc IDs corresponding to a set of posting lists
+  fn get_matching_doc_ids(
+    &self,
+    postings_lists: &[Vec<PostingsBlockCompressed>],
+    last_block_list: &[PostingsBlock],
+    initial_values_list: &Vec<Vec<u32>>,
+    shortest_list_index: usize,
+    accumulator: &mut Vec<u32>,
+  ) -> Result<(), AstError> {
+    let first_posting_blocks = &postings_lists[shortest_list_index];
+    for posting_block in first_posting_blocks {
+      let posting_block = PostingsBlock::try_from(posting_block).map_err(|_| {
+        AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
+      })?;
+      let log_message_ids = posting_block.get_log_message_ids().read().map_err(|_| {
+        AstError::DocMatchingError("Failed to acquire read lock on log message IDs".to_string())
+      })?;
+      accumulator.append(&mut log_message_ids.clone());
+    }
+
+    let last_block_log_message_ids = last_block_list[shortest_list_index]
+      .get_log_message_ids()
+      .read()
+      .map_err(|_| {
+        AstError::DocMatchingError(
+          "Failed to acquire read lock on last block log message IDs".to_string(),
+        )
+      })?;
+    accumulator.append(&mut last_block_log_message_ids.clone());
+
+    if accumulator.is_empty() {
+      debug!("Posting list is empty. Loading accumulator from last_block_list.");
+      return Ok(());
+    }
+
+    for i in 0..initial_values_list.len() {
+      // Skip shortest posting list as it is already used to create accumulator
+      if i == shortest_list_index {
+        continue;
+      }
+      let posting_list = &postings_lists[i];
+      let initial_values = &initial_values_list[i];
+
+      let mut temp_result_set = Vec::new();
+      let mut acc_index = 0;
+      let mut posting_index = 0;
+      let mut initial_index = 0;
+
+      while acc_index < accumulator.len() && initial_index < initial_values.len() {
+        // If current accumulator element < initial_value element it means that
+        // accumulator value is smaller than what current posting_block will have
+        // so increment accumulator till this condition fails
+        while acc_index < accumulator.len()
+          && accumulator[acc_index] < initial_values[initial_index]
+        {
+          acc_index += 1;
+        }
+
+        if acc_index < accumulator.len() && accumulator[acc_index] > initial_values[initial_index] {
+          // If current accumulator element is in between current initial_value and next initial_value
+          // then check the existing posting block for matches with accumlator
+          // OR if it's the last accumulator is greater than last initial value, then check the last posting block
+          if (initial_index + 1 < initial_values.len()
+            && accumulator[acc_index] < initial_values[initial_index + 1])
+            || (initial_index == initial_values.len() - 1)
+          {
+            let mut _posting_block = Vec::new();
+
+            // posting_index == posting_list.len() means that we are at last_block
+            if posting_index < posting_list.len() {
+              _posting_block = PostingsBlock::try_from(&posting_list[posting_index])
+                .map_err(|_| {
+                  AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
+                })?
+                .get_log_message_ids()
+                .read()
+                .map_err(|_| {
+                  AstError::DocMatchingError(
+                    "Failed to acquire read lock on log message IDs".to_string(),
+                  )
+                })?
+                .clone();
+            } else {
+              _posting_block = last_block_list[i]
+                .get_log_message_ids()
+                .read()
+                .map_err(|_| {
+                  AstError::DocMatchingError(
+                    "Failed to acquire read lock on last block log message IDs".to_string(),
+                  )
+                })?
+                .clone();
+            }
+
+            // start from 1st element of posting_block as 0th element of posting_block is already checked as it was part of intial_values
+            let mut posting_block_index = 1;
+            while acc_index < accumulator.len() && posting_block_index < _posting_block.len() {
+              match accumulator[acc_index].cmp(&_posting_block[posting_block_index]) {
+                std::cmp::Ordering::Equal => {
+                  temp_result_set.push(accumulator[acc_index]);
+                  acc_index += 1;
+                  posting_block_index += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                  posting_block_index += 1;
+                }
+                std::cmp::Ordering::Less => {
+                  acc_index += 1;
+                }
+              }
+
+              // Try to see if we can skip remaining elements of the postings block
+              if initial_index + 1 < initial_values.len()
+                && acc_index < accumulator.len()
+                && accumulator[acc_index] >= initial_values[initial_index + 1]
+              {
+                break;
+              }
+            }
+          } else {
+            // go to next posting_block and correspodning initial_value
+            // done at end of the outer while loop
+          }
+        }
+
+        // If current accumulator and initial value are same, then add it to temporary accumulator
+        // and check remaining elements of the postings block
+        if acc_index < accumulator.len()
+          && initial_index < initial_values.len()
+          && accumulator[acc_index] == initial_values[initial_index]
+        {
+          temp_result_set.push(accumulator[acc_index]);
+          acc_index += 1;
+
+          let mut _posting_block = Vec::new();
+          // posting_index == posting_list.len() means that we are at last_block
+          if posting_index < posting_list.len() {
+            _posting_block = PostingsBlock::try_from(&posting_list[posting_index])
+              .unwrap()
+              .get_log_message_ids()
+              .read()
+              .unwrap()
+              .clone();
+          } else {
+            // posting block is last block
+            _posting_block = last_block_list[i]
+              .get_log_message_ids()
+              .read()
+              .unwrap()
+              .clone();
+          }
+
+          // Check the remaining elements of posting block
+          let mut posting_block_index = 1;
+          while acc_index < accumulator.len() && posting_block_index < _posting_block.len() {
+            match accumulator[acc_index].cmp(&_posting_block[posting_block_index]) {
+              std::cmp::Ordering::Equal => {
+                temp_result_set.push(accumulator[acc_index]);
+                acc_index += 1;
+                posting_block_index += 1;
+              }
+              std::cmp::Ordering::Greater => {
+                posting_block_index += 1;
+              }
+              std::cmp::Ordering::Less => {
+                acc_index += 1;
+              }
+            }
+
+            // Try to see if we can skip remaining elements of posting_block
+            if initial_index + 1 < initial_values.len()
+              && acc_index < accumulator.len()
+              && accumulator[acc_index] >= initial_values[initial_index + 1]
+            {
+              break;
+            }
+          }
+        }
+
+        initial_index += 1;
+        posting_index += 1;
+      }
+
+      *accumulator = temp_result_set;
+    }
+
+    Ok(())
+  }
+
   /// Search the segment for the given query.
   pub fn search_logs(
     &self,
-    ast: &Pairs<Rule>,
+    ast: &AstNode,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SegmentSearchError> {
-    // Create AstNode::Multiple from ast and pass it to traverse_ast
-    let matching_document_ids =
-      traverse_ast(self, &ast.clone()).map_err(SegmentSearchError::AstError)?;
+    // Get the set of matching doc IDs for the query
+    let matching_document_ids = self
+      .traverse_ast(ast)
+      .map_err(SegmentSearchError::AstError)?;
 
     // Since matching_document_ids is a HashSet, no need to dedup
     let matching_document_ids_vec: Vec<u32> = matching_document_ids.into_iter().collect();
@@ -392,6 +706,153 @@ impl Segment {
       .map_err(SegmentSearchError::LogError)?;
     log_messages.sort();
     Ok(log_messages)
+  }
+
+  // Helper function to combine two nodes using a specific AST combiner
+  fn combine_two_nodes<F>(
+    node1: Option<AstNode>,
+    node2: Option<AstNode>,
+    combiner: F,
+  ) -> Result<AstNode, AstError>
+  where
+    F: FnOnce(Box<AstNode>, Box<AstNode>) -> Result<AstNode, String>,
+  {
+    match (node1, node2) {
+      (Some(n1), Some(n2)) => {
+        // Call the combiner and handle potential errors
+        combiner(Box::new(n1), Box::new(n2)).map_err(AstError::CombinerFailure)
+      }
+      (Some(n), None) | (None, Some(n)) => Ok(n),
+      (None, None) => Err(AstError::InvalidNode),
+    }
+  }
+
+  // Helper function to combine AST nodes
+  fn combine_ast_nodes(
+    must_nodes: Option<Vec<AstNode>>,
+    must_not_nodes: Option<Vec<AstNode>>,
+    should_nodes: Option<Vec<AstNode>>,
+  ) -> Result<AstNode, AstError> {
+    let must_combined = must_nodes
+      .unwrap_or_default()
+      .into_iter()
+      .reduce(|a, b| AstNode::Must(Box::new(a), Box::new(b)));
+    let must_not_combined = must_not_nodes
+      .unwrap_or_default()
+      .into_iter()
+      .reduce(|a, b| AstNode::MustNot(Box::new(AstNode::Must(Box::new(a), Box::new(b)))));
+    let should_combined = should_nodes
+      .unwrap_or_default()
+      .into_iter()
+      .reduce(|a, b| AstNode::Should(Box::new(a), Box::new(b)));
+
+    // Handling the results of combine_two_nodes with proper combiner functions
+    let combined_must_must_not =
+      match Segment::combine_two_nodes(must_combined, must_not_combined, |a, b| {
+        Ok(AstNode::Must(a, b))
+      }) {
+        Ok(node) => Some(node),
+        Err(e) => return Err(e),
+      };
+
+    Segment::combine_two_nodes(combined_must_must_not, should_combined, |a, b| {
+      Ok(AstNode::Should(a, b))
+    })
+  }
+
+  // Helper function to evaluate query conditions
+  fn process_conditions(conditions: &Option<Vec<Condition>>) -> Vec<AstNode> {
+    conditions
+      .as_ref()
+      .unwrap_or(&Vec::new())
+      .iter()
+      .flat_map(|condition| Segment::traverse_condition(condition).unwrap_or_default())
+      .collect()
+  }
+
+  // Convert a JSON query to an AST
+  pub fn query_to_ast(query: &BoolQuery) -> Result<AstNode, AstError> {
+    let must_nodes = Some(Segment::process_conditions(&query.must));
+    let must_not_nodes = Some(Segment::process_conditions(&query.must_not));
+    let should_nodes = Some(Segment::process_conditions(&query.should));
+
+    Segment::combine_ast_nodes(must_nodes, must_not_nodes, should_nodes).map_err(|e| {
+      error!("Error combining AST nodes: {:?}", e);
+      e
+    })
+  }
+
+  // Traverse the boolean conditions in the AST
+  pub fn traverse_condition(condition: &Condition) -> Result<Vec<AstNode>, AstError> {
+    match condition {
+      Condition::Term(term_query) => Ok(
+        term_query
+          .term
+          .clone()
+          .map(AstNode::Match)
+          .into_iter()
+          .collect(),
+      ),
+      Condition::Bool(bool_query) => {
+        let ast_result = Segment::query_to_ast(bool_query)?;
+        Ok(vec![ast_result])
+      }
+    }
+  }
+
+  pub fn traverse_ast(&self, node: &AstNode) -> Result<HashSet<u32>, AstError> {
+    match node {
+      AstNode::Match(terms) => {
+        let terms_lowercase = terms.to_lowercase();
+        let terms = tokenize(&terms_lowercase);
+        let mut results = Vec::new();
+
+        // Get postings lists for the query terms
+        let (postings_lists, last_block_list, initial_values_list, shortest_list_index) = self
+          .get_postings_lists(&terms)
+          .map_err(|e| AstError::TraverseError(format!("Error getting postings lists: {:?}", e)))?;
+
+        if postings_lists.is_empty() {
+          debug!("No posting list found. Returning empty handed.");
+          return Ok(HashSet::new());
+        }
+
+        self
+          .get_matching_doc_ids(
+            &postings_lists,
+            &last_block_list,
+            &initial_values_list,
+            shortest_list_index,
+            &mut results,
+          )
+          .map_err(|e| AstError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
+
+        Ok(results.into_iter().collect())
+      }
+      AstNode::Must(left, right) => {
+        let left_results = self.traverse_ast(left)?;
+        let right_results = self.traverse_ast(right)?;
+
+        if matches!(**left, AstNode::None) {
+          return Ok(right_results);
+        } else if matches!(**right, AstNode::None) {
+          return Ok(left_results);
+        }
+
+        Ok(left_results.intersection(&right_results).cloned().collect())
+      }
+      AstNode::MustNot(node) => {
+        let node_results = self.traverse_ast(node)?;
+        let all_doc_ids: HashSet<u32> = self.forward_map.iter().map(|entry| *entry.key()).collect();
+        Ok(all_doc_ids.difference(&node_results).cloned().collect())
+      }
+      AstNode::Should(left, right) => {
+        let left_results = self.traverse_ast(left)?;
+        let right_results = self.traverse_ast(right)?;
+        Ok(left_results.union(&right_results).cloned().collect())
+      }
+      AstNode::None => Ok(HashSet::new()),
+    }
   }
 
   /// Return the log messages within the given time range corresponding to the given log message ids.
@@ -422,6 +883,7 @@ impl Segment {
   }
 
   /// Returns true if this segment overlaps with the given range.
+  #[allow(dead_code)]
   pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
     is_overlap(
       self.metadata.get_start_time(),
@@ -480,17 +942,10 @@ mod tests {
   use tempdir::TempDir;
 
   use super::*;
-  use crate::request_manager::query_dsl::{QueryDslParser, Rule};
-  use pest::Parser;
-
   use crate::utils::sync::{is_sync, thread};
 
-  fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, pest::error::Error<Rule>> {
-    // Create a test string that should parse as a single term according to your grammar
-    let test_string = term;
-
-    // Parse the test string and return the pairs
-    QueryDslParser::parse(Rule::start, &test_string)
+  fn create_term_test_node(term: &str) -> AstNode {
+    AstNode::Match(term.to_string())
   }
 
   // Populate segment with log messages for testing
@@ -511,111 +966,6 @@ mod tests {
   }
 
   #[test]
-  fn test_search_with_must_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    // Construct the query DSL as a JSON string for a Must query
-    let query_dsl = r#"{
-      "query": {
-        "bool": {
-          "must": [
-            { "match": { "_all" : "test" } }
-          ]
-        }
-      }
-    }
-    "#;
-
-    // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, &query_dsl) {
-      Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
-        Ok(results) => {
-          assert!(results
-            .iter()
-            .all(|log| log.get_text().contains("test") && log.get_text().contains("log")));
-        }
-        Err(err) => {
-          assert!(false, "Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        assert!(false, "Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[test]
-  fn test_search_with_should_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    // Construct the query DSL as a JSON string for a Should query
-    let query_dsl = r#"{
-      "query": {
-        "bool": {
-          "should": [
-            { "match": { "_all" : "test" } }
-          ]
-        }
-      }
-    }
-    "#;
-
-    // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, &query_dsl) {
-      Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
-        Ok(results) => {
-          assert!(results
-            .iter()
-            .any(|log| log.get_text().contains("another") || log.get_text().contains("different")));
-        }
-        Err(err) => {
-          assert!(false, "Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        assert!(false, "Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[test]
-  fn test_search_with_must_not_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    // Construct the Query DSL query as a JSON string for a MustNot query
-    let query_dsl_query = r#"{
-      "query": {
-        "bool": {
-          "must_not": [
-            { "match": { "_all" : "different" } }
-          ]
-        }
-      }
-    }
-    "#;
-
-    // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, &query_dsl_query) {
-      Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
-        Ok(results) => {
-          assert!(!results
-            .iter()
-            .any(|log| log.get_text().contains("excluded")));
-        }
-        Err(err) => {
-          assert!(false, "Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        assert!(false, "Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[test]
   fn test_new_segment() {
     is_sync::<Segment>();
 
@@ -623,18 +973,13 @@ mod tests {
     assert!(segment.is_empty());
 
     // Create an AstNode for the term "doesnotexist"
-    let query_node_result = create_term_test_node("doesnotexist");
+    let query_node = create_term_test_node("doesnotexist");
 
-    if let Ok(query_node) = query_node_result {
-      // Assuming query_node is of the correct type expected by search_logs (e.g., Pair<Rule> or Pairs<Rule>)
-      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
-        eprintln!("Error in search_logs: {:?}", err);
-      } else {
-        let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
-        assert!(results.is_empty());
-      }
+    if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
     } else {
-      eprintln!("Error parsing the query.");
+      let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
+      assert!(results.is_empty());
     }
   }
 
@@ -644,18 +989,155 @@ mod tests {
     assert!(segment.is_empty());
 
     // Create an AstNode for the term "doesnotexist"
-    let query_node_result = create_term_test_node("doesnotexist");
+    let query_node = create_term_test_node("doesnotexist");
 
-    if let Ok(query_node) = query_node_result {
-      // Assuming query_node is of the correct type expected by search_logs (e.g., Pair<Rule> or Pairs<Rule>)
-      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
-        eprintln!("Error in search_logs: {:?}", err);
-      } else {
-        let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
-        assert!(results.is_empty());
-      }
+    if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
     } else {
-      eprintln!("Error parsing the query.");
+      let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
+      assert!(results.is_empty());
+    }
+  }
+
+  // Test searching with a simple term query
+  #[test]
+  fn test_search_with_term_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let term_node = create_term_test_node("test");
+
+    if let Err(err) = segment.search_logs(&term_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
+      assert!(false, "Error in search_logs: {:?}", err);
+    } else {
+      let results = segment.search_logs(&term_node, 0, u64::MAX).unwrap();
+      assert_eq!(results.len(), 2); // Assuming two logs contain the term "test"
+    }
+  }
+
+  // Test searching with a Must (AND) query with single term
+  #[test]
+  fn test_search_with_must_query_single_term() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let ast = AstNode::None;
+    let right_node = create_term_test_node("another");
+    let must_node = AstNode::Must(Box::new(ast), Box::new(right_node));
+
+    if let Err(err) = segment.search_logs(&must_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
+      assert!(false, "Error in search_logs: {:?}", err);
+    } else {
+      let results = segment.search_logs(&must_node, 0, u64::MAX).unwrap();
+      assert_eq!(results.len(), 1); // Assuming only one log contains "another"
+    }
+  }
+
+  // Test searching with a Must (AND) query
+  #[test]
+  fn test_search_with_must_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let left_node = create_term_test_node("this");
+    let right_node = create_term_test_node("another");
+    let must_node = AstNode::Must(Box::new(left_node), Box::new(right_node));
+
+    if let Err(err) = segment.search_logs(&must_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
+      assert!(false, "Error in search_logs: {:?}", err);
+    } else {
+      let results = segment.search_logs(&must_node, 0, u64::MAX).unwrap();
+      assert_eq!(results.len(), 1); // Assuming only one log contains both "this" and "another"
+    }
+  }
+
+  // Test searching with a MustNot (NOT) query
+  #[test]
+  fn test_search_with_must_not_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let node = create_term_test_node("another");
+    let must_not_node = AstNode::MustNot(Box::new(node));
+
+    if let Err(err) = segment.search_logs(&must_not_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
+      assert!(false, "Error in search_logs: {:?}", err);
+    } else {
+      let results = segment.search_logs(&must_not_node, 0, u64::MAX).unwrap();
+      assert_eq!(results.len(), 2);
+      assert!(results
+        .iter()
+        .all(|log| !log.get_text().contains("another")));
+    }
+  }
+
+  // Test searching with a Should (OR) query
+  #[test]
+  fn test_search_with_should_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let left_node = create_term_test_node("different");
+    let right_node = create_term_test_node("this");
+    let should_node = AstNode::Should(Box::new(left_node), Box::new(right_node));
+
+    if let Err(err) = segment.search_logs(&should_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
+      assert!(false, "Error in search_logs: {:?}", err);
+    } else {
+      let results = segment.search_logs(&should_node, 0, u64::MAX).unwrap();
+      assert_eq!(results.len(), 3); // Assuming all logs contain either "this" or "different"
+    }
+  }
+
+  // Test searching with a complex query combining Must and MustNot
+  #[test]
+  fn test_search_with_complex_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    let term_node_test = create_term_test_node("test");
+    let term_node_different = create_term_test_node("different");
+    let must_not_node = AstNode::MustNot(Box::new(term_node_different));
+    let complex_query = AstNode::Must(Box::new(term_node_test), Box::new(must_not_node));
+
+    // Call search_logs and handle errors
+    if let Err(err) = segment.search_logs(&complex_query, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
+      assert!(false, "Error in search_logs: {:?}", err);
+    } else {
+      let results = segment.search_logs(&complex_query, 0, u64::MAX).unwrap();
+      assert_eq!(results.len(), 1); // Assuming only one log contains "test" but not "different"
+    }
+  }
+
+  #[test]
+  fn test_search_with_nested_query() {
+    let mut segment = Segment::new();
+    populate_segment(&mut segment);
+
+    // Construct a nested AST
+    let term_node_test = create_term_test_node("test");
+    let term_node_this = create_term_test_node("this");
+    let term_node_different = create_term_test_node("different");
+    let term_node_another = create_term_test_node("another");
+
+    let should_node = AstNode::Should(Box::new(term_node_this), Box::new(term_node_another));
+    let must_not_node = AstNode::MustNot(Box::new(term_node_different));
+    let complex_query = AstNode::Must(Box::new(term_node_test), Box::new(must_not_node));
+    let nested_query = AstNode::Should(Box::new(should_node), Box::new(complex_query));
+
+    // Call search_logs and handle errors
+    if let Err(err) = segment.search_logs(&nested_query, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
+      assert!(false, "Error in search_logs: {:?}", err);
+    } else {
+      let results = segment.search_logs(&nested_query, 0, u64::MAX).unwrap();
+      assert_eq!(results.len(), 2);
     }
   }
 
@@ -749,43 +1231,32 @@ mod tests {
     );
 
     // Test search for "this".
-    let query_node_result_for_this = create_term_test_node("this");
-
-    if let Ok(query_node_for_this) = query_node_result_for_this {
-      let results = from_disk_segment.search_logs(&query_node_for_this, 0, u64::MAX);
-      match &results {
-        Ok(logs) => {
-          assert_eq!(logs.len(), 1);
-          assert_eq!(
-            logs.get(0).unwrap().get_text(),
-            "this is my 1st log message"
-          );
-        }
-        Err(err) => {
-          eprintln!("Error in search_logs for 'this': {:?}", err);
-          // Handle the error as needed, e.g., assert an expected error code
-        }
+    let query_node_for_this = create_term_test_node("this");
+    let results = from_disk_segment.search_logs(&query_node_for_this, 0, u64::MAX);
+    match &results {
+      Ok(logs) => {
+        assert_eq!(logs.len(), 1);
+        assert_eq!(
+          logs.get(0).unwrap().get_text(),
+          "this is my 1st log message"
+        );
       }
-    } else {
-      eprintln!("Error parsing the query for 'this'.");
-      // Handle the parsing error as needed, e.g., assert an expected error code
+      Err(err) => {
+        eprintln!("Error in search_logs for 'this': {:?}", err);
+        // Handle the error as needed, e.g., assert an expected error code
+      }
     }
 
     // Test search for "blah".
-    let query_node_result_for_blah = create_term_test_node("blah");
-
-    if let Ok(query_node_for_blah) = query_node_result_for_blah {
-      let results = from_disk_segment.search_logs(&query_node_for_blah, 0, u64::MAX);
-      match results {
-        Ok(logs) => {
-          assert!(logs.is_empty());
-        }
-        Err(err) => {
-          eprintln!("Error in search_logs for 'blah': {:?}", err);
-        }
+    let query_node_for_blah = create_term_test_node("blah");
+    let results = from_disk_segment.search_logs(&query_node_for_blah, 0, u64::MAX);
+    match results {
+      Ok(logs) => {
+        assert!(logs.is_empty());
       }
-    } else {
-      eprintln!("Error parsing the query for 'blah'.");
+      Err(err) => {
+        eprintln!("Error in search_logs for 'blah': {:?}", err);
+      }
     }
 
     // Test metadata for labels.
@@ -944,29 +1415,25 @@ mod tests {
     assert!(segment.terms.contains_key("message"));
 
     // Test search.
-    let query_node_result = create_term_test_node("hello");
+    let query_node = create_term_test_node("hello");
 
-    if let Ok(query_node) = query_node_result {
-      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
-        eprintln!("Error in search_logs: {:?}", err);
-      } else {
-        // Sort the expected results to match the sorted results from the function.
-        let mut expected_results = vec!["hello world", "hello world hello world"];
-        expected_results.sort();
-
-        // Sort the actual results.
-        let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
-        let mut actual_results: Vec<String> = results
-          .iter()
-          .map(|log| log.get_text().to_owned())
-          .collect();
-        actual_results.sort();
-
-        // Test the sorted results.
-        assert_eq!(actual_results, expected_results);
-      }
+    if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
+      eprintln!("Error in search_logs: {:?}", err);
     } else {
-      eprintln!("Error parsing the query for 'hello'.");
+      // Sort the expected results to match the sorted results from the function.
+      let mut expected_results = vec!["hello world", "hello world hello world"];
+      expected_results.sort();
+
+      // Sort the actual results.
+      let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
+      let mut actual_results: Vec<String> = results
+        .iter()
+        .map(|log| log.get_text().to_owned())
+        .collect();
+      actual_results.sort();
+
+      // Test the sorted results.
+      assert_eq!(actual_results, expected_results);
     }
   }
 }

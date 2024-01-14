@@ -1,6 +1,3 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 use crossbeam::atomic::AtomicCell;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -65,7 +62,6 @@ impl Metadata {
     }
   }
 
-  #[allow(dead_code)]
   /// Get segment id.
   pub fn get_id(&self) -> &str {
     &self.id

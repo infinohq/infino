@@ -1,6 +1,3 @@
-// This code is licensed under Elastic License 2.0
-// https://www.elastic.co/licensing/elastic-license
-
 use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -42,12 +39,11 @@ pub enum CoreDBError {
 
 #[derive(Debug)]
 pub enum AstError {
-  InvalidQuery,
+  InvalidNode,
   CombinerFailure(String),
   TraverseError(String),
   PostingsListError(String),
   DocMatchingError(String),
-  UnsupportedQuery(String),
 }
 
 #[derive(Debug)]
@@ -74,7 +70,7 @@ pub enum SummaryError {
 
 #[derive(Debug)]
 pub enum SearchLogsError {
-  JsonParseError(String),
+  JsonParseError(serde_json::Error),
   SegmentSearchError(SegmentSearchError),
   SegmentError(SegmentError),
   NoQueryProvided,

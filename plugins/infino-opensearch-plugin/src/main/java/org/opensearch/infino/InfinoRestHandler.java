@@ -1,6 +1,10 @@
-/* This code is licensed under Apache License 2.0
- * https://www.apache.org/licenses/LICENSE-2.0
- */
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+*/
 
 package org.opensearch.infino;
 
@@ -43,15 +47,14 @@ import org.opensearch.rest.RestRequest;
 
 import static org.opensearch.rest.RestRequest.Method.*;
 
+
 /**
  * Handle REST calls for the /infino index.
  * This effectively serves as the public API for Infino.
  *
  * Notes:
- * 1. Search window defaults to the past 30 days if not specified by the
- * request.
- * 2. To access Infino indexes, the REST caller must prefix the index name with
- * '/infino/'.
+ * 1. Search window defaults to the past 30 days if not specified by the request.
+ * 2. To access Infino indexes, the REST caller must prefix the index name with '/infino/'.
  * 3. Index creation or deletion is mirrored on Infino and in OpenSarch.
  * 4. We use our own thread pool to manage Infino requests.
  *
@@ -65,8 +68,8 @@ public class InfinoRestHandler extends BaseRestHandler {
     private static final HttpClient httpClient = HttpClient.newHttpClient();
     private static final Logger logger = LogManager.getLogger(InfinoRestHandler.class);
 
-    /**
-     * Get get a new instance of the class
+    /** 
+     * Get get a new instance of the class 
      * 
      * @param request - the REST request to serialize
      * 
@@ -79,8 +82,7 @@ public class InfinoRestHandler extends BaseRestHandler {
     // List of futures we need to clear on close
     private static List<CompletableFuture<?>> futures = new ArrayList<>();
 
-    /**
-     * Get the HTTP Client
+    /** Get the HTTP Client 
      *
      * @return the httpclient member from this class
      */
@@ -98,15 +100,16 @@ public class InfinoRestHandler extends BaseRestHandler {
         return "rest_handler_infino";
     }
 
-    private static final ScheduledExecutorService infinoThreadPool = Executors.newScheduledThreadPool(THREADPOOLSIZE,
-            new CustomThreadFactory("InfinoPluginThread"));
+    private static final ScheduledExecutorService infinoThreadPool =
+        Executors.newScheduledThreadPool(THREADPOOLSIZE, new CustomThreadFactory("InfinoPluginThread"));
 
-    /**
-     * Get thread pool
+
+    /** 
+     * Get thread pool 
      * 
      * @return the thread pool to use for the requests
      */
-    protected ExecutorService getInfinoThreadPool() {
+    protected ExecutorService getInfinoThreadPool () {
         return infinoThreadPool;
     }
 
@@ -126,8 +129,8 @@ public class InfinoRestHandler extends BaseRestHandler {
         infinoThreadPool.shutdown();
     }
 
-    /**
-     * Use a privileged custom thread factory since Security Manager blocks
+    /** 
+     * Use a privileged custom thread factory since Security Manager blocks 
      * access to thread groups.
      *
      * https://github.com/opensearch-project/OpenSearch/issues/5359
@@ -153,10 +156,8 @@ public class InfinoRestHandler extends BaseRestHandler {
         public Thread newThread(Runnable r) {
             return AccessController.doPrivileged((PrivilegedAction<Thread>) () -> {
                 Thread t = new Thread(r, namePrefix + threadNumber.getAndIncrement());
-                if (t.isDaemon())
-                    t.setDaemon(false);
-                if (t.getPriority() != Thread.NORM_PRIORITY)
-                    t.setPriority(Thread.NORM_PRIORITY);
+                if (t.isDaemon()) t.setDaemon(false);
+                if (t.getPriority() != Thread.NORM_PRIORITY) t.setPriority(Thread.NORM_PRIORITY);
                 return t;
             });
         }
@@ -170,7 +171,7 @@ public class InfinoRestHandler extends BaseRestHandler {
      */
     protected void deleteLuceneIndexIfExists(NodeClient client, String rawIndexName) {
         String indexName = "infino-" + rawIndexName;
-        IndicesExistsRequest getIndexRequest = new IndicesExistsRequest(new String[] { indexName });
+        IndicesExistsRequest getIndexRequest = new IndicesExistsRequest(new String[]{indexName});
 
         logger.info("Deleting Lucene mirror index for Infino: " + indexName);
 
@@ -201,15 +202,14 @@ public class InfinoRestHandler extends BaseRestHandler {
     }
 
     /**
-     * Create a Lucene index with the same name as the Infino index if it doesn't
-     * exist.
+     * Create a Lucene index with the same name as the Infino index if it doesn't exist.
      *
-     * @param client       - client for the current OpenSearch node
+     * @param client - client for the current OpenSearch node
      * @param rawIndexName - name of the index to create
      */
     protected void createLuceneIndexIfNeeded(NodeClient client, String rawIndexName) {
         String indexName = "infino-" + rawIndexName;
-        IndicesExistsRequest getIndexRequest = new IndicesExistsRequest(new String[] { indexName });
+        IndicesExistsRequest getIndexRequest = new IndicesExistsRequest(new String[]{indexName});
 
         logger.info("Creating Lucene mirror index for Infino: " + indexName);
 
@@ -220,8 +220,9 @@ public class InfinoRestHandler extends BaseRestHandler {
                     // Create the index if it doesn't exist
                     CreateIndexRequest createIndexRequest = new CreateIndexRequest(indexName);
                     createIndexRequest.settings(Settings.builder()
-                            .put("index.number_of_shards", 1)
-                            .put("index.number_of_replicas", 1));
+                        .put("index.number_of_shards", 1)
+                        .put("index.number_of_replicas", 1)
+                    );
                     client.admin().indices().create(createIndexRequest, new ActionListener<>() {
                         @Override
                         public void onResponse(CreateIndexResponse createResponse) {
@@ -243,6 +244,7 @@ public class InfinoRestHandler extends BaseRestHandler {
         });
     }
 
+
     /**
      * Handle REST routes for the /infino index.
      *
@@ -261,26 +263,23 @@ public class InfinoRestHandler extends BaseRestHandler {
     @Override
     public List<Route> routes() {
         return unmodifiableList(asList(
-                new Route(GET, "/infino/{infinoIndex}/{infinoPath}"), // Search a collection
-                new Route(GET, "/infino/{infinoIndex}/logs/{infinoPath}"), // Search logs on a collection
-                new Route(GET, "/infino/{infinoIndex}/metrics/{infinoPath}"), // Search metrics on a collection
-                new Route(GET, "/_cat/infino/{infinoIndex}"), // Get stats about a collection
-                new Route(HEAD, "/infino/{infinoIndex}/{infinoPath}"), // Get specific info about a collection
-                new Route(POST, "/infino/{infinoIndex}/{infinoPath}"), // Add data to a collection
-                new Route(PUT, "/infino/{infinoIndex}"), // Create a collection
-                new Route(DELETE, "/infino/{infinoIndex}"), // Delete a collection
-                new Route(HEAD, "/infino/{infinoIndex}") // Get info about a collection
+            new Route(GET, "/infino/{infinoIndex}/{infinoPath}"), // Search a collection
+            new Route(GET, "/infino/{infinoIndex}/logs/{infinoPath}"), // Search logs on a collection
+            new Route(GET, "/infino/{infinoIndex}/metrics/{infinoPath}"), // Search metrics on a collection
+            new Route(GET, "/_cat/infino/{infinoIndex}"), // Get stats about a collection
+            new Route(HEAD, "/infino/{infinoIndex}/{infinoPath}"), // Get specific info about a collection
+            new Route(POST, "/infino/{infinoIndex}/{infinoPath}"), // Add data to a collection
+            new Route(PUT, "/infino/{infinoIndex}"), // Create a collection
+            new Route(DELETE, "/infino/{infinoIndex}"), // Delete a collection
+            new Route(HEAD, "/infino/{infinoIndex}") // Get info about a collection
         ));
     }
 
     /**
-     * Implement the request, creating or deleting Lucene index mirrors on the local
-     * node.
+     * Implement the request, creating or deleting Lucene index mirrors on the local node.
      *
-     * The first half of the method (before the thread executor) is parallellized by
-     * OpenSearch's
-     * REST thread pool so we can serialize in parallel. However network calls use
-     * our own
+     * The first half of the method (before the thread executor) is parallellized by OpenSearch's
+     * REST thread pool so we can serialize in parallel. However network calls use our own
      * privileged thread factory.
      *
      * We exponentially backoff for 429, 503, and 504 responses
@@ -288,8 +287,7 @@ public class InfinoRestHandler extends BaseRestHandler {
      * @param request the request to execute
      * @param client  client for executing actions on the local node
      * @return the action to execute
-     * @throws IOException if an I/O exception occurred parsing the request and
-     *                     preparing for execution
+     * @throws IOException if an I/O exception occurred parsing the request and preparing for execution
      */
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
 
@@ -315,15 +313,13 @@ public class InfinoRestHandler extends BaseRestHandler {
         logger.info("Serialized REST request for Infino to " + infinoSerializeRequestURI.getFinalUrl());
 
         // Create Lucene mirror index for the Infino collection if it doesn't exist
-        if (method == PUT)
-            createLuceneIndexIfNeeded(client, infinoSerializeRequestURI.getIndexName());
+        if (method == PUT) createLuceneIndexIfNeeded(client, infinoSerializeRequestURI.getIndexName());
 
         // Create the HTTP request to forward to Infino Server
         HttpRequest forwardRequest = HttpRequest.newBuilder()
-                .uri(URI.create(infinoSerializeRequestURI.getFinalUrl()))
-                .method(infinoSerializeRequestURI.getMethod().toString(),
-                        HttpRequest.BodyPublishers.ofString(request.content().utf8ToString()))
-                .build();
+            .uri(URI.create(infinoSerializeRequestURI.getFinalUrl()))
+            .method(infinoSerializeRequestURI.getMethod().toString(), HttpRequest.BodyPublishers.ofString(request.content().utf8ToString()))
+            .build();
 
         logger.info("Sending HTTP Request to Infino: " + infinoSerializeRequestURI.getFinalUrl());
 
@@ -336,8 +332,7 @@ public class InfinoRestHandler extends BaseRestHandler {
         };
     }
 
-    private void sendRequestWithBackoff(HttpClient backoffHttpClient, HttpRequest request, RestChannel channel,
-            NodeClient client, String indexName, RestRequest.Method method, int attempt) {
+    private void sendRequestWithBackoff(HttpClient backoffHttpClient, HttpRequest request, RestChannel channel, NodeClient client, String indexName, RestRequest.Method method, int attempt) {
         if (attempt >= MAX_RETRIES) {
             logger.error("Max retries exceeded for request: " + request.uri());
             channel.sendResponse(new BytesRestResponse(RestStatus.SERVICE_UNAVAILABLE, "Max retries exceeded"));
@@ -345,9 +340,8 @@ public class InfinoRestHandler extends BaseRestHandler {
         }
 
         CompletableFuture<Void> future = backoffHttpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenAccept(response -> processResponse(backoffHttpClient, response, channel, client, indexName, method,
-                        attempt, request))
-                .exceptionally(e -> handleException(e, channel, client, indexName, method));
+            .thenAccept(response -> processResponse(backoffHttpClient, response, channel, client, indexName, method, attempt, request))
+            .exceptionally(e -> handleException(e, channel, client, indexName, method));
 
         // Add the future to the list of futures to clear, protected by a thread lock
         synchronized (futures) {
@@ -355,14 +349,12 @@ public class InfinoRestHandler extends BaseRestHandler {
         }
     }
 
-    private void processResponse(HttpClient processHttpClient, HttpResponse<String> response, RestChannel channel,
-            NodeClient client, String indexName, RestRequest.Method method, int attempt, HttpRequest request) {
+    private void processResponse(HttpClient processHttpClient, HttpResponse<String> response, RestChannel channel, NodeClient client, String indexName, RestRequest.Method method, int attempt, HttpRequest request) {
         int statusCode = response.statusCode();
         if (shouldRetry(statusCode)) {
             long retryAfter = getRetryAfter(response, attempt);
             // Use schedule method to retry after a delay
-            infinoThreadPool.schedule(() -> sendRequestWithBackoff(processHttpClient, request, channel, client,
-                    indexName, method, attempt + 1), retryAfter, TimeUnit.MILLISECONDS);
+            infinoThreadPool.schedule(() -> sendRequestWithBackoff(processHttpClient, request, channel, client, indexName, method, attempt + 1), retryAfter, TimeUnit.MILLISECONDS);
         } else {
             handleResponse(channel, response, client, indexName, method);
         }
@@ -376,26 +368,22 @@ public class InfinoRestHandler extends BaseRestHandler {
         return response.headers().firstValueAsLong("Retry-After").orElse((long) Math.pow(2, attempt) * 1000L);
     }
 
-    private Void handleException(Throwable e, RestChannel channel, NodeClient client, String indexName,
-            RestRequest.Method method) {
+    private Void handleException(Throwable e, RestChannel channel, NodeClient client, String indexName, RestRequest.Method method) {
         logger.error("Error in async HTTP call", e);
-        if (method == PUT)
-            deleteLuceneIndexIfExists(client, indexName);
+        if (method == PUT) deleteLuceneIndexIfExists(client, indexName);
         channel.sendResponse(new BytesRestResponse(RestStatus.INTERNAL_SERVER_ERROR, e.getMessage()));
         return null;
     }
 
-    private void handleResponse(RestChannel channel, HttpResponse<String> response, NodeClient client, String indexName,
-            RestRequest.Method method) {
+    private void handleResponse(RestChannel channel, HttpResponse<String> response, NodeClient client, String indexName, RestRequest.Method method) {
         if (Thread.currentThread().isInterrupted()) {
-            if (method == PUT)
-                deleteLuceneIndexIfExists(client, indexName);
+            if (method == PUT) deleteLuceneIndexIfExists(client, indexName);
             logger.debug("Infino Plugin Rest handler thread interrupted. Exiting...");
             return;
         }
         try {
-            int statusCode = response.statusCode(); // Get the status code as an integer
-            RestStatus restStatus = RestStatus.fromCode(statusCode); // Convert to RestStatus
+            int statusCode = response.statusCode();  // Get the status code as an integer
+            RestStatus restStatus = RestStatus.fromCode(statusCode);  // Convert to RestStatus
             logger.info("Received HTTP response from Infino: " + response.body().toString());
 
             // Send the response back to the OpenSearch Rest Channel
@@ -407,8 +395,7 @@ public class InfinoRestHandler extends BaseRestHandler {
             }
         } catch (Exception e) {
             logger.error("Error sending response", e);
-            if (method == PUT)
-                deleteLuceneIndexIfExists(client, indexName);
+            if (method == PUT) deleteLuceneIndexIfExists(client, indexName);
 
             // Send an internal server error response back to the OpenSearch Rest Channel
             channel.sendResponse(new BytesRestResponse(RestStatus.INTERNAL_SERVER_ERROR, e.getMessage()));
