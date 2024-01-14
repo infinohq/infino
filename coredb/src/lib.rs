@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 //! CoreDB is a telemetry database.
 //!
 //! It uses time-sharded segments and compressed blocks for data storage
@@ -6,6 +9,7 @@
 pub(crate) mod index_manager;
 pub mod log;
 pub mod metric;
+pub(crate) mod request_manager;
 pub(crate) mod segment_manager;
 pub mod utils;
 
@@ -38,8 +42,8 @@ impl CoreDB {
         let coredb_settings = settings.get_coredb_settings();
         let index_dir_path = coredb_settings.get_index_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
-        let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
-        let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+        let segment_size_threshold_megabytes =
+          coredb_settings.get_segment_size_threshold_megabytes();
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
@@ -61,8 +65,7 @@ impl CoreDB {
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
               let index = Index::new_with_threshold_params(
                 &default_index_dir_path,
-                segment_size_threshold_bytes,
-                search_memory_budget_bytes,
+                segment_size_threshold_megabytes,
               )?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
@@ -70,7 +73,7 @@ impl CoreDB {
                 let entry = entry.unwrap();
                 let index_name = entry.file_name().into_string().unwrap();
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
-                let index = Index::refresh(&full_index_path_name, search_memory_budget_bytes)?;
+                let index = Index::refresh(&full_index_path_name)?;
                 index_map.insert(index_name, index);
               }
             }
@@ -83,8 +86,7 @@ impl CoreDB {
             let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
             let index = Index::new_with_threshold_params(
               &default_index_dir_path,
-              segment_size_threshold_bytes,
-              search_memory_budget_bytes,
+              segment_size_threshold_megabytes,
             )?;
             index_map.insert(default_index_name.to_string(), index);
           }
@@ -140,8 +142,8 @@ impl CoreDB {
   /// Search the log messages for given query and range.
   pub fn search_logs(
     &self,
-    query: &str,
-    json_body: serde_json::Value,
+    url_query: &str,
+    json_body: &str,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SearchLogsError> {
@@ -150,9 +152,10 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .ok_or(SearchLogsError::NoQueryProvided)?;
 
-    let results = index
-      .value()
-      .search_logs(query, json_body, range_start_time, range_end_time)?;
+    let results =
+      index
+        .value()
+        .search_logs(url_query, json_body, range_start_time, range_end_time)?;
 
     Ok(results)
   }
@@ -193,12 +196,9 @@ impl CoreDB {
     let index_dir_path = settings.get_coredb_settings().get_index_dir_path();
     let default_index_name = settings.get_coredb_settings().get_default_index_name();
     let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
-    let search_memory_budget_bytes = settings
-      .get_coredb_settings()
-      .get_search_memory_budget_bytes();
 
     // Refresh the index.
-    let index = Index::refresh(&default_index_dir_path, search_memory_budget_bytes).unwrap();
+    let index = Index::refresh(&default_index_dir_path).unwrap();
 
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
@@ -227,21 +227,14 @@ impl CoreDB {
   /// Create a new index.
   pub fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let index_dir_path = self.settings.get_coredb_settings().get_index_dir_path();
-    let segment_size_threshold_bytes = self
+    let segment_size_threshold_megabytes = self
       .settings
       .get_coredb_settings()
-      .get_segment_size_threshold_bytes();
-    let search_memory_budget_bytes = self
-      .settings
-      .get_coredb_settings()
-      .get_search_memory_budget_bytes();
+      .get_segment_size_threshold_megabytes();
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
-    let index = Index::new_with_threshold_params(
-      &index_dir_path,
-      segment_size_threshold_bytes,
-      search_memory_budget_bytes,
-    )?;
+    let index =
+      Index::new_with_threshold_params(&index_dir_path, segment_size_threshold_megabytes)?;
 
     self.index_map.insert(index_name.to_string(), index);
     Ok(())
@@ -299,7 +292,9 @@ mod tests {
       file
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 0.2\n")
+        .unwrap();
     }
   }
 
@@ -348,15 +343,12 @@ mod tests {
 
     let end = Utc::now().timestamp_millis() as u64;
 
-    // Prepare an empty JSON body for the query
-    let json_body = serde_json::Value::Null;
-
     // Search for log messages. The order of results should be reverse chronological order.
-    if let Err(err) = coredb.search_logs("message", json_body.clone(), start, end) {
+    if let Err(err) = coredb.search_logs("message", "", start, end) {
       eprintln!("Error in search_logs: {:?}", err);
     } else {
       let results = coredb
-        .search_logs("message", json_body.clone(), start, end)
+        .search_logs("message", "", start, end)
         .expect("Error in search_logs");
       assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
       assert_eq!(results.get(1).unwrap().get_text(), "log message 1");

@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 use crossbeam::atomic::AtomicCell;
 use serde::{Deserialize, Serialize};
 
@@ -17,10 +20,10 @@ pub struct Metadata {
   #[serde(with = "atomic_cell_serde")]
   current_segment_number: AtomicCell<u32>,
 
-  /// Threshold size of a segment in bytes. If the size of a segment exceeds this, a new segment
+  /// Threshold size of a segment in megabytes. If the size of a segment exceeds this, a new segment
   /// will be created in the next commit operation.
   #[serde(with = "atomic_cell_serde")]
-  segment_size_threshold_bytes: AtomicCell<u64>,
+  segment_size_threshold_megabytes: AtomicCell<f32>,
 }
 
 impl Metadata {
@@ -28,12 +31,12 @@ impl Metadata {
   pub fn new(
     segment_count: u32,
     current_segment_number: u32,
-    segment_size_threshold_bytes: u64,
+    segment_size_threshold_megabytes: f32,
   ) -> Metadata {
     Metadata {
       segment_count: AtomicCell::new(segment_count),
       current_segment_number: AtomicCell::new(current_segment_number),
-      segment_size_threshold_bytes: AtomicCell::new(segment_size_threshold_bytes),
+      segment_size_threshold_megabytes: AtomicCell::new(segment_size_threshold_megabytes),
     }
   }
 
@@ -58,14 +61,14 @@ impl Metadata {
     self.current_segment_number.store(value);
   }
 
-  /// Get the segment size threshold in bytes.
-  pub fn get_segment_size_threshold_bytes(&self) -> u64 {
-    self.segment_size_threshold_bytes.load()
+  /// Get the segment size threshold in megabytes.
+  pub fn get_segment_size_threshold_megabytes(&self) -> f32 {
+    self.segment_size_threshold_megabytes.load()
   }
 
   /// Update the current segment number to the given value.
-  pub fn update_segment_size_threshold_bytes(&self, value: u64) {
-    self.segment_size_threshold_bytes.store(value);
+  pub fn update_segment_size_threshold_megabytes(&self, value: f32) {
+    self.segment_size_threshold_megabytes.store(value);
   }
 }
 
@@ -80,17 +83,17 @@ mod tests {
     is_sync::<Metadata>();
 
     // Check a newly created Metadata.
-    let m: Metadata = Metadata::new(10, 5, 1000);
+    let m: Metadata = Metadata::new(10, 5, 1000 as f32);
 
     assert_eq!(m.get_segment_count(), 10);
     assert_eq!(m.get_current_segment_number(), 5);
-    assert_eq!(m.get_segment_size_threshold_bytes(), 1000);
+    assert_eq!(m.get_segment_size_threshold_megabytes(), 1000 as f32);
   }
 
   #[test]
   pub fn test_increment_and_update() {
     // Check the increment and update operations on Metadata.
-    let m: Metadata = Metadata::new(10, 5, 1000);
+    let m: Metadata = Metadata::new(10, 5, 1000 as f32);
     assert_eq!(m.fetch_increment_segment_count(), 10);
     m.update_current_segment_number(7);
     assert_eq!(m.get_segment_count(), 11);
