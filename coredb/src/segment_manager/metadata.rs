@@ -5,8 +5,8 @@ use crossbeam::atomic::AtomicCell;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::storage_manager::storage::COMPRESSION_LEVEL;
 use crate::utils::custom_serde::atomic_cell_serde;
-use crate::utils::serialize::COMPRESSION_LEVEL;
 
 #[derive(Debug, Deserialize, Serialize)]
 /// Metadata for a segment.

@@ -21,7 +21,6 @@ use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::SearchLogsError;
 use crate::utils::io;
-use crate::utils::serialize;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, Mutex, RwLock};
 
@@ -424,36 +423,34 @@ impl Index {
   }
 
   /// Get the summaries of the segments in this index.
-  pub fn get_all_segments_summaries(
-    index_dir_path: &str,
-  ) -> Result<Vec<SegmentSummary>, CoreDBError> {
+  pub async fn get_all_segments_summaries(&self) -> Result<Vec<SegmentSummary>, CoreDBError> {
     info!(
       "Getting segment summaries of index from index_dir_path: {}",
-      index_dir_path
+      self.index_dir_path
     );
 
     // Check if the directory exists.
-    if !Path::new(&index_dir_path).is_dir() {
+    if !Path::new(&self.index_dir_path).is_dir() {
       return Err(CoreDBError::CannotReadDirectory(String::from(
-        index_dir_path,
+        &self.index_dir_path,
       )));
     }
 
     // Read all segments summaries from disk.
-    let all_segments_file = io::get_joined_path(index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
     if !Path::new(&all_segments_file).is_file() {
       return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
-        String::from(index_dir_path),
+        String::from(&self.index_dir_path),
       ));
     }
 
     let (all_segments_summaries_vec, _): (Vec<SegmentSummary>, _) =
-      serialize::read(&all_segments_file);
+      self.storage.read(&all_segments_file).await;
 
     info!(
       "Number of segment summaries in index dir path {}: {}",
-      index_dir_path,
+      self.index_dir_path,
       all_segments_summaries_vec.len()
     );
 
@@ -549,10 +546,16 @@ impl Index {
     let summaries: &Vec<SegmentSummary> = write_lock_summaries.as_ref();
 
     // Write the summaries to disk.
-    serialize::write(summaries, all_segments_file.as_str(), sync_after_write);
+    self
+      .storage
+      .write(summaries, all_segments_file.as_str(), sync_after_write)
+      .await;
 
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
-    serialize::write(&self.metadata, metadata_path.as_str(), sync_after_write);
+    self
+      .storage
+      .write(&self.metadata, metadata_path.as_str(), sync_after_write)
+      .await;
   }
 
   /// Reads a segment from memory and insert it in memory_segments_map.
@@ -575,13 +578,8 @@ impl Index {
     info!("Refreshing index from index_dir_path: {}", index_dir_path);
 
     let storage = Storage::new();
-    let all_segments_summaries_vec = Self::get_all_segments_summaries(index_dir_path)?;
 
-    if all_segments_summaries_vec.is_empty() {
-      // No segment summary present - so this may not be an index directory. Return an error.
-      return Err(CoreDBError::NotAnIndexDirectory(index_dir_path.to_string()));
-    }
-
+    // Read metadata.
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let (metadata, _): (Metadata, _) = storage.read(metadata_path.as_str()).await;
 
@@ -597,6 +595,13 @@ impl Index {
       search_memory_budget_bytes,
       storage,
     };
+
+    let all_segments_summaries_vec = index.get_all_segments_summaries().await?;
+
+    if all_segments_summaries_vec.is_empty() {
+      // No segment summary present - so this may not be an index directory. Return an error.
+      return Err(CoreDBError::NotAnIndexDirectory(index_dir_path.to_string()));
+    }
 
     // Populate the segment summaries and memory_segments_map.
     let memory_segments_map: DashMap<u32, Segment> = DashMap::new();
