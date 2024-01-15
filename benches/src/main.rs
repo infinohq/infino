@@ -74,13 +74,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   let config_path = format!("{}/{}", &curr_dir.to_str().unwrap(), "config");
 
-  let mut infino = InfinoEngine::new(&config_path);
+  let mut infino = InfinoEngine::new(&config_path).await;
   let cell_infino_index_time = infino.index_lines(input_data_path, max_docs).await;
   let cell_infino_index_size = get_directory_size(infino.get_index_dir_path());
   println!("Infino index size = {} bytes", cell_infino_index_size);
 
   // Perform search on infino index
-  let cell_infino_search_time = infino.search_multiple_queries(INFINO_SEARCH_QUERIES);
+  let cell_infino_search_time = infino.search_multiple_queries(INFINO_SEARCH_QUERIES).await;
 
   let _ = fs::remove_dir_all(format! {"{}/index", &curr_dir.to_str().unwrap()});
 

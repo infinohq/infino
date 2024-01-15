@@ -119,7 +119,7 @@ async fn app(
   let settings = Settings::new(config_dir_path).unwrap();
 
   // Create a new coredb.
-  let coredb = match CoreDB::new(config_dir_path) {
+  let coredb = match CoreDB::new(config_dir_path).await {
     Ok(coredb) => coredb,
     Err(err) => panic!("Unable to initialize coredb with err {}", err),
   };
@@ -452,16 +452,19 @@ async fn search_logs(
   );
 
   // Pass the deserialized JSON object directly to coredb.search_logs
-  let result = state.coredb.search_logs(
-    &logs_query.text,
-    &json_body,
-    logs_query.start_time.unwrap_or(0),
-    logs_query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64),
-  );
+  let results = state
+    .coredb
+    .search_logs(
+      &logs_query.text,
+      &json_body,
+      logs_query.start_time.unwrap_or(0),
+      logs_query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64),
+    )
+    .await;
 
-  match result {
+  match results {
     Ok(log_messages) => {
       let result_json =
         serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
@@ -503,14 +506,19 @@ async fn summarize(
   let k = summarize_query.k.unwrap_or(100);
 
   // Call search_logs and handle errors
-  match state.coredb.search_logs(
-    &summarize_query.text,
-    &json_body,
-    summarize_query.start_time.unwrap_or(0),
-    summarize_query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64),
-  ) {
+  let results = state
+    .coredb
+    .search_logs(
+      &summarize_query.text,
+      &json_body,
+      summarize_query.start_time.unwrap_or(0),
+      summarize_query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64),
+    )
+    .await;
+
+  match results {
     Ok(results) => {
       // Call openai_helper.summarize and handle errors
       match state.openai_helper.summarize(&results, k) {
@@ -558,16 +566,19 @@ async fn search_metrics(
 ) -> String {
   debug!("Searching metrics: {:?}", metrics_query);
 
-  let results = state.coredb.get_metrics(
-    &metrics_query.label_name,
-    &metrics_query.label_value,
-    // The default for range start time is 0.
-    metrics_query.start_time.unwrap_or(0_u64),
-    // The default for range end time is the current time.
-    metrics_query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64),
-  );
+  let results = state
+    .coredb
+    .get_metrics(
+      &metrics_query.label_name,
+      &metrics_query.label_value,
+      // The default for range start time is 0.
+      metrics_query.start_time.unwrap_or(0_u64),
+      // The default for range end time is the current time.
+      metrics_query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64),
+    )
+    .await;
 
   serde_json::to_string(&results).expect("Could not convert search results to json")
 }
@@ -597,7 +608,7 @@ async fn create_index(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Creating index {}", index_name);
 
-  let result = state.coredb.create_index(&index_name);
+  let result = state.coredb.create_index(&index_name).await;
 
   if result.is_err() {
     let msg = format!("Could not create index {}", index_name);
@@ -765,14 +776,16 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path);
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
 
     // Handle errors from search_logs
-    let log_messages_result = refreshed_coredb.search_logs(search_text, "", start_time, end_time);
+    let log_messages_result = refreshed_coredb
+      .search_logs(search_text, "", start_time, end_time)
+      .await;
 
     match log_messages_result {
       Ok(log_messages_received) => {
@@ -850,13 +863,14 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path);
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    metric_points_received =
-      refreshed_coredb.get_metrics(&query.label_name, &query.label_value, start_time, end_time);
+    metric_points_received = refreshed_coredb
+      .get_metrics(&query.label_name, &query.label_value, start_time, end_time)
+      .await;
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }

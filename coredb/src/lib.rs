@@ -8,6 +8,7 @@ pub mod log;
 pub mod metric;
 pub(crate) mod request_manager;
 pub(crate) mod segment_manager;
+pub(crate) mod storage_manager;
 pub mod utils;
 
 use std::collections::HashMap;
@@ -31,7 +32,7 @@ pub struct CoreDB {
 impl CoreDB {
   /// Create a new CoreDB at the directory path specified in the config,
   /// creating a default index if none already exists.
-  pub fn new(config_dir_path: &str) -> Result<Self, CoreDBError> {
+  pub async fn new(config_dir_path: &str) -> Result<Self, CoreDBError> {
     let result = Settings::new(config_dir_path);
 
     match result {
@@ -64,14 +65,16 @@ impl CoreDB {
                 &default_index_dir_path,
                 segment_size_threshold_bytes,
                 search_memory_budget_bytes,
-              )?;
+              )
+              .await?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
               for entry in std::fs::read_dir(index_dir_path).unwrap() {
                 let entry = entry.unwrap();
                 let index_name = entry.file_name().into_string().unwrap();
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
-                let index = Index::refresh(&full_index_path_name, search_memory_budget_bytes)?;
+                let index =
+                  Index::refresh(&full_index_path_name, search_memory_budget_bytes).await?;
                 index_map.insert(index_name, index);
               }
             }
@@ -86,7 +89,8 @@ impl CoreDB {
               &default_index_dir_path,
               segment_size_threshold_bytes,
               search_memory_budget_bytes,
-            )?;
+            )
+            .await?;
             index_map.insert(default_index_name.to_string(), index);
           }
         }
@@ -139,7 +143,7 @@ impl CoreDB {
   }
 
   /// Search the log messages for given query and range.
-  pub fn search_logs(
+  pub async fn search_logs(
     &self,
     query: &str,
     json_body: &str,
@@ -153,13 +157,14 @@ impl CoreDB {
 
     let results = index
       .value()
-      .search_logs(query, json_body, range_start_time, range_end_time)?;
+      .search_logs(query, json_body, range_start_time, range_end_time)
+      .await?;
 
     Ok(results)
   }
 
   /// Get the metric points for given label and range.
-  pub fn get_metrics(
+  pub async fn get_metrics(
     &self,
     label_name: &str,
     label_value: &str,
@@ -172,23 +177,25 @@ impl CoreDB {
       .unwrap()
       .value()
       .get_metrics(label_name, label_value, range_start_time, range_end_time)
+      .await
   }
 
   /// Commit the index to disk. If the flag sync_after_commit is set to true,
   /// the directory is sync'd immediately instead of relying on the OS to do so,
   /// hence this flag is usually set to true only in tests.
-  pub fn commit(&self, sync_after_commit: bool) {
+  pub async fn commit(&self, sync_after_commit: bool) {
     self
       .index_map
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .commit(sync_after_commit);
+      .commit(sync_after_commit)
+      .await;
   }
 
   /// Refresh the default index from the given directory path.
   // TODO: what to do if there are multiple indices?
-  pub fn refresh(config_dir_path: &str) -> Self {
+  pub async fn refresh(config_dir_path: &str) -> Self {
     // Read the settings and the index directory path.
     let settings = Settings::new(config_dir_path).unwrap();
     let index_dir_path = settings.get_coredb_settings().get_index_dir_path();
@@ -199,7 +206,9 @@ impl CoreDB {
       .get_search_memory_budget_bytes();
 
     // Refresh the index.
-    let index = Index::refresh(&default_index_dir_path, search_memory_budget_bytes).unwrap();
+    let index = Index::refresh(&default_index_dir_path, search_memory_budget_bytes)
+      .await
+      .unwrap();
 
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
@@ -226,7 +235,7 @@ impl CoreDB {
   }
 
   /// Create a new index.
-  pub fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
+  pub async fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let index_dir_path = self.settings.get_coredb_settings().get_index_dir_path();
     let segment_size_threshold_bytes = self
       .settings
@@ -242,7 +251,8 @@ impl CoreDB {
       &index_dir_path,
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
-    )?;
+    )
+    .await?;
 
     self.index_map.insert(index_name.to_string(), index);
     Ok(())
@@ -304,8 +314,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_basic() {
+  #[tokio::test]
+  async fn test_basic() {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
@@ -314,7 +324,9 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create a new coredb instance.
-    let coredb = CoreDB::new(config_dir_path).expect("Could not create coredb");
+    let coredb = CoreDB::new(config_dir_path)
+      .await
+      .expect("Could not create coredb");
 
     let start = Utc::now().timestamp_millis() as u64;
 
@@ -344,24 +356,27 @@ mod tests {
       2.0,
     );
 
-    coredb.commit(true);
-    let coredb = CoreDB::refresh(config_dir_path);
+    coredb.commit(true).await;
+    let coredb = CoreDB::refresh(config_dir_path).await;
 
     let end = Utc::now().timestamp_millis() as u64;
 
     // Search for log messages. The order of results should be reverse chronological order.
-    if let Err(err) = coredb.search_logs("message", "", start, end) {
+    if let Err(err) = coredb.search_logs("message", "", start, end).await {
       eprintln!("Error in search_logs: {:?}", err);
     } else {
       let results = coredb
         .search_logs("message", "", start, end)
+        .await
         .expect("Error in search_logs");
       assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
       assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
     }
 
     // Search for metric points.
-    let results = coredb.get_metrics(&"__name__", &"some_metric", start, end);
+    let results = coredb
+      .get_metrics(&"__name__", &"some_metric", start, end)
+      .await;
     assert_eq!(results.get(0).unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
   }

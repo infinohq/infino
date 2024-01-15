@@ -17,13 +17,13 @@ use crate::metric::metric_point::MetricPoint;
 use crate::request_manager::query_dsl::QueryDslParser;
 use crate::request_manager::query_dsl::Rule;
 use crate::segment_manager::segment::Segment;
+use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::SearchLogsError;
 use crate::utils::io;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
-use crate::utils::sync::RwLock;
-use crate::utils::sync::{Arc, Mutex};
+use crate::utils::sync::{Arc, Mutex, RwLock};
 
 #[allow(unused_imports)]
 use pest::Parser;
@@ -40,10 +40,13 @@ const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
 /// File name to store index metadata.
 const METADATA_FILE_NAME: &str = "metadata.bin";
 
-/// Default threshold for size of segment. A new segment will be created in the next commit when a segment exceeds this size.
+/// Default threshold for size of segmen used in some tests.
+/// A new segment will be created in the next commit when a segment exceeds this size.
+#[cfg(test)]
 const DEFAULT_SEGMENT_SIZE_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024; // 256MB
 
-/// Default memory budget for search in bytes.
+/// Default memory budget for search in bytes used in some tests.
+#[cfg(test)]
 const DEFAULT_SEARCH_MEMORY_BUDGET_BYTES: u64 = 1024 * 1024 * 1024; // 1GB
 
 #[derive(Debug)]
@@ -68,6 +71,9 @@ pub struct Index {
 
   /// Memory budget for searching this index.
   search_memory_budget_bytes: u64,
+
+  /// Storage for this index.
+  storage: Storage,
 }
 
 impl Index {
@@ -75,19 +81,21 @@ impl Index {
   /// However, if a directory with the same path already exists and has a metadata file in it,
   /// the function will refresh the existing index instead of creating a new one.
   /// If the refresh process fails, an error will be thrown to indicate the issue.
-  pub fn new(index_dir_path: &str) -> Result<Self, CoreDBError> {
+  #[cfg(test)]
+  pub async fn new(index_dir_path: &str) -> Result<Self, CoreDBError> {
     Index::new_with_threshold_params(
       index_dir_path,
       DEFAULT_SEGMENT_SIZE_THRESHOLD_BYTES,
       DEFAULT_SEARCH_MEMORY_BUDGET_BYTES,
     )
+    .await
   }
 
   /// Creates a new index at a specified directory path with customizable parameter for the segment size threshold.
   /// If a directory with the same path already exists and has a metadata
   /// file in it, the existing index will be refreshed instead of creating a new one. If the refresh
   /// process fails, an error will be thrown to indicate the issue.
-  pub fn new_with_threshold_params(
+  pub async fn new_with_threshold_params(
     index_dir: &str,
     segment_size_threshold_bytes: u64,
     search_memory_budget_bytes: u64,
@@ -103,7 +111,7 @@ impl Index {
       std::fs::create_dir_all(index_dir_path).unwrap();
     } else if Path::new(&io::get_joined_path(index_dir, METADATA_FILE_NAME)).is_file() {
       // index_dir_path has metadata file, refresh the index instead of creating new one
-      match Self::refresh(index_dir, search_memory_budget_bytes) {
+      match Self::refresh(index_dir, search_memory_budget_bytes).await {
         Ok(mut index) => {
           index
             .metadata
@@ -151,6 +159,8 @@ impl Index {
 
     let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
 
+    let storage = Storage::new();
+
     let index = Index {
       metadata,
       all_segments_summaries,
@@ -158,10 +168,11 @@ impl Index {
       index_dir_path: index_dir.to_owned(),
       index_dir_lock,
       search_memory_budget_bytes,
+      storage,
     };
 
     // Commit the empty index so that the index directory will be created.
-    index.commit(false);
+    index.commit(false).await;
 
     Ok(index)
   }
@@ -296,7 +307,7 @@ impl Index {
   /// Note that while the query terms are not required in the URL, the query parameters
   /// "start_time" and "end_time" are indeed required in the URL. They are always added by the
   /// OpenSearch plugin that calls Infino.
-  pub fn search_logs(
+  pub async fn search_logs(
     &self,
     url_query: &str,
     json_body: &str, // Assuming this should be json_query
@@ -357,7 +368,7 @@ impl Index {
           .search_logs(&ast, range_start_time, range_end_time)
           .unwrap_or_else(|_| Vec::new()),
         None => {
-          let segment = Self::refresh_segment(&self.index_dir_path, segment_number);
+          let segment = self.refresh_segment(segment_number).await;
           segment
             .search_logs(&ast, range_start_time, range_end_time)
             .unwrap_or_else(|_| Vec::new())
@@ -373,7 +384,7 @@ impl Index {
 
   /// Helper function to commit a segment with given segment_number to disk.
   /// Returns the (id, start_time, end_time, uncompressed_size, compressed_size) for the segment.
-  fn commit_segment(
+  async fn commit_segment(
     &self,
     segment_number: u32,
     sync_after_write: bool,
@@ -399,7 +410,9 @@ impl Index {
     let segment_dir_path =
       io::get_joined_path(&self.index_dir_path, segment_number.to_string().as_str());
 
-    let (uncompressed, compressed) = segment.commit(segment_dir_path.as_str(), sync_after_write);
+    let (uncompressed, compressed) = segment
+      .commit(&self.storage, segment_dir_path.as_str(), sync_after_write)
+      .await;
 
     (
       segment_id.to_owned(),
@@ -452,7 +465,7 @@ impl Index {
   /// If sync_after_write is set to true, make sure that the OS buffers are flushed to
   /// disk before returning (typically sync_after_write should be set to true in tests that refresh the index
   /// immediately after committing).
-  pub fn commit(&self, sync_after_write: bool) {
+  pub async fn commit(&self, sync_after_write: bool) {
     info!("Committing index at {}", chrono::Utc::now());
 
     // Lock to make sure only one thread calls commit at a time.
@@ -470,7 +483,9 @@ impl Index {
     // Commit the current segment. This also updates the start and end times in the corresponding segment summary.
     let original_current_segment_number = self.metadata.get_current_segment_number();
     let (segment_id, start_time, end_time, uncompressed_segment_size, _compressed_segment_size) =
-      self.commit_segment(original_current_segment_number, sync_after_write);
+      self
+        .commit_segment(original_current_segment_number, sync_after_write)
+        .await;
 
     // Update the start and end time in the summary for this segment.
     // We don't update these in append_* methods for performance, and update only in commit.
@@ -491,7 +506,13 @@ impl Index {
       );
 
       // Write the new (empty) segment to disk.
-      new_segment.commit(new_segment_dir_path.as_str(), sync_after_write);
+      new_segment
+        .commit(
+          &self.storage,
+          new_segment_dir_path.as_str(),
+          sync_after_write,
+        )
+        .await;
 
       // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
       let summary = SegmentSummary::new(new_segment_number, &new_segment);
@@ -509,11 +530,15 @@ impl Index {
 
       // Commit the new_segment again as there might be more documents added after making it the
       // current segment.
-      self.commit_segment(new_segment_number, sync_after_write);
+      self
+        .commit_segment(new_segment_number, sync_after_write)
+        .await;
 
       // Commit the original segment again to commit any updates from the previous commit till the
       // time of changing the current_sgement_number above.
-      self.commit_segment(original_current_segment_number, sync_after_write);
+      self
+        .commit_segment(original_current_segment_number, sync_after_write)
+        .await;
 
       // We created a new segment - possibly exceeding the memory budget. So, evict older segments if needed.
       self.evict_from_memory_segments_map();
@@ -531,43 +556,57 @@ impl Index {
   }
 
   /// Reads a segment from memory and insert it in memory_segments_map.
-  fn refresh_segment(index_dir_path: &str, segment_number: u32) -> Segment {
-    let segment_dir_path = io::get_joined_path(index_dir_path, &segment_number.to_string());
+  async fn refresh_segment(&self, segment_number: u32) -> Segment {
+    let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
     debug!(
       "Loading segment with segment number {} and path {}",
       segment_number, segment_dir_path
     );
-    let (segment, _) = Segment::refresh(&segment_dir_path);
+    let (segment, _) = Segment::refresh(&self.storage, &segment_dir_path).await;
 
     segment
   }
 
   /// Read the index from the given index_dir_path.
-  pub fn refresh(
+  pub async fn refresh(
     index_dir_path: &str,
     search_memory_budget_bytes: u64,
   ) -> Result<Self, CoreDBError> {
     info!("Refreshing index from index_dir_path: {}", index_dir_path);
 
+    let storage = Storage::new();
     let all_segments_summaries_vec = Self::get_all_segments_summaries(index_dir_path)?;
 
     if all_segments_summaries_vec.is_empty() {
-      // No segment summary present - so this may not be an index directory. Return an empty index.
-      return Ok(Index::new(index_dir_path).unwrap());
+      // No segment summary present - so this may not be an index directory. Return an error.
+      return Err(CoreDBError::NotAnIndexDirectory(index_dir_path.to_string()));
     }
 
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
-    let (metadata, _): (Metadata, _) = serialize::read(metadata_path.as_str());
+    let (metadata, _): (Metadata, _) = storage.read(metadata_path.as_str()).await;
 
+    let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
+
+    // Create an index with empty segment summaries and empry memory_segments_map.
+    let mut index = Index {
+      metadata,
+      all_segments_summaries: Arc::new(RwLock::new(Vec::new())),
+      memory_segments_map: DashMap::new(),
+      index_dir_path: index_dir_path.to_owned(),
+      index_dir_lock,
+      search_memory_budget_bytes,
+      storage,
+    };
+
+    // Populate the segment summaries and memory_segments_map.
     let memory_segments_map: DashMap<u32, Segment> = DashMap::new();
-
     let mut search_memory_budget_consumed_bytes = 0;
     for segment_summary in &all_segments_summaries_vec {
       let uncompressed_size = segment_summary.get_uncompressed_size();
       search_memory_budget_consumed_bytes += uncompressed_size;
       if search_memory_budget_consumed_bytes <= search_memory_budget_bytes {
         let segment_number = segment_summary.get_segment_number();
-        let segment = Self::refresh_segment(index_dir_path, segment_number);
+        let segment = index.refresh_segment(segment_number).await;
         memory_segments_map.insert(segment_number, segment);
       } else {
         // We have reached the memory budget - so do not load any more segments.
@@ -575,18 +614,13 @@ impl Index {
       }
     }
 
-    info!("Read index with metadata {:?}", metadata);
-
-    let index_dir_lock = Arc::new(Mutex::new(thread::current().id()));
+    // Update the index.
     let all_segments_summaries = Arc::new(RwLock::new(all_segments_summaries_vec));
-    Ok(Index {
-      metadata,
-      all_segments_summaries,
-      memory_segments_map,
-      index_dir_path: index_dir_path.to_owned(),
-      index_dir_lock,
-      search_memory_budget_bytes,
-    })
+    index.all_segments_summaries = all_segments_summaries;
+    index.memory_segments_map = memory_segments_map;
+
+    info!("Read index with metadata {:?}", index.metadata);
+    Ok(index)
   }
 
   /// Returns segment numbers of segments, in reverse chronological order, that overlap with the given time range.
@@ -621,7 +655,7 @@ impl Index {
 
   /// Get metric points corresponding to given label name and value, within the
   /// given range (inclusive of both start and end time).
-  pub fn get_metrics(
+  pub async fn get_metrics(
     &self,
     label_name: &str,
     label_value: &str,
@@ -641,7 +675,7 @@ impl Index {
           segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
         }
         None => {
-          let segment = Self::refresh_segment(&self.index_dir_path, segment_number);
+          let segment = self.refresh_segment(segment_number).await;
           segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
         }
       };
@@ -676,8 +710,8 @@ mod tests {
   use super::*;
   use crate::utils::sync::is_sync;
 
-  #[test]
-  fn test_empty_index() {
+  #[tokio::test]
+  async fn test_empty_index() {
     is_sync::<Index>();
 
     let index_dir = TempDir::new("index_test").unwrap();
@@ -687,7 +721,7 @@ mod tests {
       "test_empty_index"
     );
 
-    let index = Index::new(&index_dir_path).unwrap();
+    let index = Index::new(&index_dir_path).await.unwrap();
     let segment_ref = index.get_current_segment_ref();
     let segment = segment_ref.value();
     assert_eq!(segment.get_log_message_count(), 0);
@@ -709,8 +743,8 @@ mod tests {
       .is_dir());
   }
 
-  #[test]
-  fn test_commit_refresh() {
+  #[tokio::test]
+  async fn test_commit_refresh() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -718,7 +752,7 @@ mod tests {
       "test_commit_refresh"
     );
 
-    let expected = Index::new(&index_dir_path).unwrap();
+    let expected = Index::new(&index_dir_path).await.unwrap();
     let num_log_messages = 5;
     let message_prefix = "content#";
     let num_metric_points = 5;
@@ -746,8 +780,8 @@ mod tests {
       );
     }
 
-    expected.commit(false);
-    let received = Index::refresh(&index_dir_path, 1024).unwrap();
+    expected.commit(false).await;
+    let received = Index::refresh(&index_dir_path, 1024).await.unwrap();
 
     assert_eq!(&expected.index_dir_path, &received.index_dir_path);
     assert_eq!(
@@ -769,8 +803,8 @@ mod tests {
     );
   }
 
-  #[test]
-  fn test_basic_search_logs() {
+  #[tokio::test]
+  async fn test_basic_search_logs() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -778,7 +812,7 @@ mod tests {
       "test_basic_search"
     );
 
-    let index = Index::new(&index_dir_path).unwrap();
+    let index = Index::new(&index_dir_path).await.unwrap();
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -800,7 +834,7 @@ mod tests {
     );
 
     // For the query "message", handle errors from search_logs
-    let results = if let Ok(results) = index.search_logs("message", "", 0, u64::MAX) {
+    let results = if let Ok(results) = index.search_logs("message", "", 0, u64::MAX).await {
       results
     } else {
       eprintln!("Error in search_logs");
@@ -818,7 +852,7 @@ mod tests {
     assert_eq!(expected_log_messages, received_log_messages);
 
     // For the query "thisisunique", we should expect only 1 result.
-    let results = if let Ok(results) = index.search_logs("thisisunique", "", 0, u64::MAX) {
+    let results = if let Ok(results) = index.search_logs("thisisunique", "", 0, u64::MAX).await {
       results
     } else {
       eprintln!("Error in search_logs");
@@ -828,8 +862,8 @@ mod tests {
     assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
   }
 
-  #[test]
-  fn test_basic_time_series() {
+  #[tokio::test]
+  async fn test_basic_time_series() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -837,7 +871,7 @@ mod tests {
       "test_basic_time_series"
     );
 
-    let index = Index::new(&index_dir_path).unwrap();
+    let index = Index::new(&index_dir_path).await.unwrap();
     let num_metric_points = 1000;
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
@@ -848,7 +882,9 @@ mod tests {
     }
 
     let metric_name_label = "__name__";
-    let received_metric_points = index.get_metrics(metric_name_label, "some_name", 0, u64::MAX);
+    let received_metric_points = index
+      .get_metrics(metric_name_label, "some_name", 0, u64::MAX)
+      .await;
 
     assert_eq!(expected_metric_points, received_metric_points);
   }
@@ -856,7 +892,8 @@ mod tests {
   #[test_case(true, false; "when only logs are appended")]
   #[test_case(false, true; "when only metric points are appended")]
   #[test_case(true, true; "when both logs and metric points are appended")]
-  fn test_two_segments(append_log: bool, append_metric_point: bool) {
+  #[tokio::test]
+  async fn test_two_segments(append_log: bool, append_metric_point: bool) {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
     for _ in 0..10 {
       let index_dir = TempDir::new("index_test").unwrap();
@@ -867,7 +904,9 @@ mod tests {
       );
 
       // Create an index with a small segment size threshold.
-      let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
+      let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+        .await
+        .unwrap();
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
@@ -898,12 +937,12 @@ mod tests {
 
       // Force commit and then refresh the index.
       // This will write one segment to disk and create a new empty segment.
-      index.commit(true);
+      index.commit(true).await;
 
       // Read the index from disk and see that it has expected number of log messages and metric points.
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
+      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
       let (original_segment, original_segment_size) =
-        Segment::refresh(&original_segment_path.to_str().unwrap());
+        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap()).await;
       assert_eq!(
         original_segment.get_log_message_count(),
         original_segment_num_log_messages
@@ -948,10 +987,10 @@ mod tests {
       }
 
       // Force a commit and refresh. The index should still have only 2 segments.
-      index.commit(true);
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
+      index.commit(true).await;
+      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
       let (mut original_segment, original_segment_size) =
-        Segment::refresh(&original_segment_path.to_str().unwrap());
+        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap()).await;
       assert_eq!(index.memory_segments_map.len(), 2);
 
       assert_eq!(
@@ -1001,9 +1040,10 @@ mod tests {
       }
 
       // Force a commit and refresh.
-      index.commit(false);
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
-      (original_segment, _) = Segment::refresh(&original_segment_path.to_str().unwrap());
+      index.commit(false).await;
+      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
+      (original_segment, _) =
+        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap()).await;
 
       let current_segment_log_message_count;
       let current_segment_metric_point_count;
@@ -1037,12 +1077,12 @@ mod tests {
       );
 
       // Commit and refresh a few times. The index should not change.
-      index.commit(false);
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
-      index.commit(false);
-      index.commit(false);
-      Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
-      let index_final = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
+      index.commit(false).await;
+      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
+      index.commit(false).await;
+      index.commit(false).await;
+      Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
+      let index_final = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
       let index_final_current_segment_ref = index_final.get_current_segment_ref();
       let index_final_current_segment = index_final_current_segment_ref.value();
 
@@ -1062,8 +1102,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_multiple_segments_logs() {
+  #[tokio::test]
+  async fn test_multiple_segments_logs() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -1073,7 +1113,9 @@ mod tests {
     let start_time = Utc::now().timestamp_millis() as u64;
 
     // Create a new index with a low threshold for the segment size.
-    let mut index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
+    let mut index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+      .await
+      .unwrap();
 
     let message_prefix = "message";
     let num_log_messages = 10000;
@@ -1092,20 +1134,20 @@ mod tests {
       // Commit after indexing more than commit_after messages.
       num_log_messages_from_last_commit += 1;
       if num_log_messages_from_last_commit > commit_after {
-        index.commit(false);
+        index.commit(false).await;
         num_log_messages_from_last_commit = 0;
         sleep(Duration::from_millis(1000));
       }
     }
 
     // Commit and sleep to ensure the index is written to disk.
-    index.commit(true);
+    index.commit(true).await;
     sleep(Duration::from_millis(1000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
 
     // Read the index from disk.
-    index = match Index::refresh(&index_dir_path, 1024 * 1024) {
+    index = match Index::refresh(&index_dir_path, 1024 * 1024).await {
       Ok(index) => index,
       Err(err) => {
         eprintln!("Error refreshing index: {:?}", err);
@@ -1130,7 +1172,10 @@ mod tests {
     }
 
     // Ensure the prefix is in every log message.
-    let results = match index.search_logs(message_prefix, "", start_time, end_time) {
+    let results = match index
+      .search_logs(message_prefix, "", start_time, end_time)
+      .await
+    {
       Ok(results) => results,
       Err(err) => {
         eprintln!("Error searching logs: {:?}", err);
@@ -1142,7 +1187,7 @@ mod tests {
     // Ensure the suffix is in exactly one log message.
     for i in 1..=num_log_messages {
       let suffix = &format!("{}", i);
-      let results = match index.search_logs(suffix, "", start_time, end_time) {
+      let results = match index.search_logs(suffix, "", start_time, end_time).await {
         Ok(results) => results,
         Err(err) => {
           eprintln!("Error searching logs: {:?}", err);
@@ -1155,7 +1200,7 @@ mod tests {
     // Ensure the prefix+suffix is in exactly one log message.
     for i in 1..=num_log_messages {
       let message = &format!("{} {}", message_prefix, i);
-      let results = match index.search_logs(message, "", start_time, end_time) {
+      let results = match index.search_logs(message, "", start_time, end_time).await {
         Ok(results) => results,
         Err(err) => {
           eprintln!("Error searching logs: {:?}", err);
@@ -1166,8 +1211,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_logs_count() {
+  #[tokio::test]
+  async fn test_search_logs_count() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -1175,7 +1220,9 @@ mod tests {
       "test_search_logs_count"
     );
 
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+      .await
+      .unwrap();
     let message_prefix = "message";
     let num_message_suffixes = 20;
 
@@ -1190,13 +1237,15 @@ mod tests {
           &message,
         );
       }
-      index.commit(false);
+      index.commit(false).await;
     }
 
     for i in 1..num_message_suffixes {
       let message = &format!("{}{}", message_prefix, i);
       let expected_count = 2u32.pow(i);
-      let results = index.search_logs(message, "", 0, Utc::now().timestamp_millis() as u64);
+      let results = index
+        .search_logs(message, "", 0, Utc::now().timestamp_millis() as u64)
+        .await;
 
       match results {
         Ok(logs) => {
@@ -1209,8 +1258,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_multiple_segments_metric_points() {
+  #[tokio::test]
+  async fn test_multiple_segments_metric_points() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -1219,7 +1268,9 @@ mod tests {
     );
 
     // Create an index with a low threshold for segment size.
-    let mut index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
+    let mut index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+      .await
+      .unwrap();
     let num_metric_points = 10000;
     let mut num_metric_points_from_last_commit = 0;
     let commit_after = 1000;
@@ -1239,18 +1290,18 @@ mod tests {
 
       // Commit after we have indexed more than commit_after messages.
       if num_metric_points_from_last_commit >= commit_after {
-        index.commit(false);
+        index.commit(false).await;
         num_metric_points_from_last_commit = 0;
       }
     }
     // Commit and sleep to make sure the index is written to disk.
-    index.commit(true);
+    index.commit(true).await;
     sleep(Duration::from_millis(10000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
 
     // Refresh the segment from disk.
-    index = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
+    index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
     let current_segment_ref = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
@@ -1268,51 +1319,53 @@ mod tests {
     }
 
     // The number of metric points in the index should be equal to the number of metric points we indexed.
-    let ts = index.get_metrics(
-      "label_name_1",
-      "label_value_1",
-      start_time - 100,
-      end_time + 100,
-    );
+    let ts = index
+      .get_metrics(
+        "label_name_1",
+        "label_value_1",
+        start_time - 100,
+        end_time + 100,
+      )
+      .await;
     assert_eq!(num_metric_points, ts.len() as u32)
   }
 
-  #[test]
-  fn test_index_dir_does_not_exist() {
+  #[tokio::test]
+  async fn test_index_dir_does_not_exist() {
     let index_dir = TempDir::new("index_test").unwrap();
 
     // Create a path within index_dir that does not exist.
     let temp_path_buf = index_dir.path().join("-doesnotexist");
-    let index = Index::new(&temp_path_buf.to_str().unwrap()).unwrap();
+    let index = Index::new(&temp_path_buf.to_str().unwrap()).await.unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
-    index.commit(false);
+    index.commit(false).await;
   }
 
-  #[test]
-  fn test_refresh_does_not_exist() {
+  #[tokio::test]
+  async fn test_refresh_does_not_exist() {
     let index_dir = TempDir::new("index_test").unwrap();
     let temp_path_buf = index_dir.path().join("-doesnotexist");
 
     // Expect an error when directory isn't present.
-    let mut result = Index::refresh(temp_path_buf.to_str().unwrap(), 1024 * 1024);
+    let mut result = Index::refresh(temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
     assert!(result.is_err());
 
     // Expect an error when metadata file is not present in the directory.
     std::fs::create_dir(temp_path_buf.to_str().unwrap()).unwrap();
-    result = Index::refresh(temp_path_buf.to_str().unwrap(), 1024 * 1024);
+    result = Index::refresh(temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
     assert!(result.is_err());
   }
 
-  #[test]
-  fn test_overlap_one_segment() {
+  #[tokio::test]
+  async fn test_overlap_one_segment() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
       index_dir.path().to_str().unwrap(),
       "test_overlap_one_segment"
     );
-    let index = Index::new(&index_dir_path).unwrap();
+    let index = Index::new(&index_dir_path).await.unwrap();
     index.append_log_message(1000, &HashMap::new(), "message_1");
     index.append_log_message(2000, &HashMap::new(), "message_2");
 
@@ -1323,8 +1376,8 @@ mod tests {
     assert!(index.get_overlapping_segments(2500, 2600).is_empty());
   }
 
-  #[test]
-  fn test_overlap_multiple_segments() {
+  #[tokio::test]
+  async fn test_overlap_multiple_segments() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -1337,6 +1390,7 @@ mod tests {
       (0.0003 * 1024.0 * 1024.0) as u64,
       1024 * 1024,
     )
+    .await
     .unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
@@ -1348,7 +1402,7 @@ mod tests {
       let start = i * 2 * 1000;
       index.append_log_message(start, &HashMap::new(), "message_1");
       index.append_log_message(start + 500, &HashMap::new(), "message_2");
-      index.commit(false);
+      index.commit(false).await;
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
@@ -1378,7 +1432,8 @@ mod tests {
   #[test_case(16; "search_memory_budget = 16 * segment_size_threshold")]
   #[test_case(8; "search_memory_budget = 8 * segment_size_threshold")]
   #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
-  fn test_concurrent_append(num_segments_in_memory: u64) {
+  #[tokio::test]
+  async fn test_concurrent_append(num_segments_in_memory: u64) {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -1392,26 +1447,31 @@ mod tests {
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
     )
+    .await
     .unwrap();
 
     let arc_index = Arc::new(index);
     let num_threads = 20;
     let num_appends_per_thread = 5000;
 
-    let mut handles = Vec::new();
+    let mut commit_handles = Vec::new();
 
     // Start a thread to commit the index periodically.
     let arc_index_clone = arc_index.clone();
     let ten_millis = Duration::from_millis(10);
     let handle = thread::spawn(move || {
-      for _ in 0..100 {
-        arc_index_clone.commit(true);
-        sleep(ten_millis);
-      }
+      let rt = tokio::runtime::Runtime::new().unwrap();
+      rt.block_on(async {
+        for _ in 0..100 {
+          arc_index_clone.commit(true).await;
+          sleep(ten_millis);
+        }
+      });
     });
-    handles.push(handle);
+    commit_handles.push(handle);
 
     // Start threads to append to the index.
+    let mut append_handles = Vec::new();
     for i in 0..num_threads {
       let arc_index_clone = arc_index.clone();
       let start = i * num_appends_per_thread;
@@ -1425,20 +1485,26 @@ mod tests {
           arc_index_clone.append_metric_point("some_name", &label_map, time as u64, 1.0);
         }
       });
-      handles.push(handle);
+      append_handles.push(handle);
     }
 
-    for handle in handles {
+    for handle in append_handles {
+      handle.join().unwrap();
+    }
+
+    for handle in commit_handles {
       handle.join().unwrap();
     }
 
     // Commit again to cover the scenario that append threads run for more time than the commit thread
-    arc_index.commit(true);
+    arc_index.commit(true).await;
 
-    let index = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
+    let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
     let expected_len = num_threads * num_appends_per_thread;
 
-    let results = index.search_logs("message", "", 0, expected_len as u64);
+    let results = index
+      .search_logs("message", "", 0, expected_len as u64)
+      .await;
     match results {
       Ok(logs) => {
         let received_logs_len = logs.len();
@@ -1449,15 +1515,17 @@ mod tests {
       }
     }
 
-    let results = index.get_metrics("label1", "value1", 0, expected_len as u64);
+    let results = index
+      .get_metrics("label1", "value1", 0, expected_len as u64)
+      .await;
     let received_metric_points_len = results.len();
 
     assert_eq!(expected_len, results.len());
     assert_eq!(expected_len, received_metric_points_len);
   }
 
-  #[test]
-  fn test_reusing_index_when_available() {
+  #[tokio::test]
+  async fn test_reusing_index_when_available() {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -1467,20 +1535,26 @@ mod tests {
 
     let start_time = Utc::now().timestamp_millis();
     // Create a new index
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+      .await
+      .unwrap();
     index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
-    index.commit(true);
+    index.commit(true).await;
 
     // Create one more new index using same dir location
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
+    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+      .await
+      .unwrap();
 
     // Call search_logs and handle errors
-    let search_result = index.search_logs(
-      "some_message_1",
-      "",
-      start_time as u64,
-      Utc::now().timestamp_millis() as u64,
-    );
+    let search_result = index
+      .search_logs(
+        "some_message_1",
+        "",
+        start_time as u64,
+        Utc::now().timestamp_millis() as u64,
+      )
+      .await;
 
     // Check if there was an error calling search_logs.
     if let Err(err) = search_result {
@@ -1491,12 +1565,12 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_directory_without_metadata() {
+  #[tokio::test]
+  async fn test_directory_without_metadata() {
     // Create a new index in an empty directory - this should work.
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024);
+    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).await;
     assert!(index.is_ok());
 
     // Create a new index in an non-empty directory that does not have metadata - this should give an error.
@@ -1504,7 +1578,7 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let file_path = index_dir.path().join("my_file.txt");
     let _ = File::create(&file_path).unwrap();
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024);
+    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).await;
     assert!(index.is_err());
   }
 
@@ -1513,7 +1587,8 @@ mod tests {
   #[test_case(16; "search_memory_budget = 16 * segment_size_threshold")]
   #[test_case(8; "search_memory_budget = 8 * segment_size_threshold")]
   #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
-  fn test_limited_memory(num_segments_in_memory: u64) {
+  #[tokio::test]
+  async fn test_limited_memory(num_segments_in_memory: u64) {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!(
       "{}/{}",
@@ -1528,6 +1603,7 @@ mod tests {
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
     )
+    .await
     .unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
@@ -1543,7 +1619,7 @@ mod tests {
       let message_end = &format!("message_{}", end);
       index.append_log_message(start, &HashMap::new(), message_start);
       index.append_log_message(end, &HashMap::new(), message_end);
-      index.commit(false);
+      index.commit(false).await;
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
@@ -1566,6 +1642,7 @@ mod tests {
       assert_eq!(
         index
           .search_logs(&message_start, "", 0, u64::MAX)
+          .await
           .unwrap()
           .len(),
         1
@@ -1573,6 +1650,7 @@ mod tests {
       assert_eq!(
         index
           .search_logs(&message_end, "", 0, u64::MAX)
+          .await
           .unwrap()
           .len(),
         1
@@ -1582,6 +1660,7 @@ mod tests {
       assert_eq!(
         index
           .search_logs(&message_start, "", start, end)
+          .await
           .unwrap()
           .len(),
         1
@@ -1589,6 +1668,7 @@ mod tests {
       assert_eq!(
         index
           .search_logs(&message_end, "", start, end)
+          .await
           .unwrap()
           .len(),
         1
