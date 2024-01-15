@@ -40,6 +40,20 @@ impl PostingsList {
     }
   }
 
+  // This constructor is only used in tests.
+  #[cfg(test)]
+  pub fn new_with_params(
+    compressed_blocks: Vec<PostingsBlockCompressed>,
+    last_block: PostingsBlock,
+    initial_values: Vec<u32>,
+  ) -> Self {
+    PostingsList {
+      postings_list_compressed: RwLock::new(compressed_blocks),
+      last_block: RwLock::new(last_block),
+      initial_values: RwLock::new(initial_values),
+    }
+  }
+
   /// Append a log message id to the postings list.
   pub fn append(&self, log_message_id: u32) {
     trace!("Appending log message id {}", log_message_id);
