@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -5,21 +8,31 @@ use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use log::{debug, error, info};
 
+use pest::error::Error as PestError;
+
 use crate::index_manager::metadata::Metadata;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
 use crate::metric::metric_point::MetricPoint;
-use crate::segment_manager::segment::AstNode;
-use crate::segment_manager::segment::BoolQuery;
+use crate::request_manager::query_dsl::QueryDslParser;
+use crate::request_manager::query_dsl::Rule;
 use crate::segment_manager::segment::Segment;
-use crate::utils::error::AstError;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::SearchLogsError;
 use crate::utils::io;
 use crate::utils::serialize;
 use crate::utils::sync::thread;
-use crate::utils::sync::{Arc, Mutex, RwLock};
-use crate::utils::tokenize::tokenize;
+use crate::utils::sync::RwLock;
+use crate::utils::sync::{Arc, Mutex};
+
+#[allow(unused_imports)]
+use pest::Parser;
+
+impl From<PestError<Rule>> for SearchLogsError {
+  fn from(error: PestError<Rule>) -> Self {
+    SearchLogsError::JsonParseError(error.to_string())
+  }
+}
 
 /// File name where the information about all segements is stored.
 const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
@@ -274,19 +287,19 @@ impl Index {
 
   /// Search for given query in the given time range.
   ///
-  /// Infino log searches support simple AND queries with URL parameters:
-  /// http://infino-endpoint?terms="term1 term2"&start_time=blah&end_time=blah"
+  /// Infino log searches support Lucene Query Syntax: https://lucene.apache.org/core/2_9_4/queryparsersyntax.html
+  /// http://infino-endpoint?"my lucene query"&start_time=blah&end_time=blah
   ///
-  /// but these can be overridden by a far more complex query dsl in the
+  /// but these can be overridden by a Query DSL in the
   /// json body sent with the query: https://opensearch.org/docs/latest/query-dsl/.
   ///
   /// Note that while the query terms are not required in the URL, the query parameters
-  /// "start_time" and "end_time" are required in the URL. They are always added by the
+  /// "start_time" and "end_time" are indeed required in the URL. They are always added by the
   /// OpenSearch plugin that calls Infino.
   pub fn search_logs(
     &self,
     url_query: &str,
-    json_body: serde_json::Value,
+    json_body: &str, // Assuming this should be json_query
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SearchLogsError> {
@@ -295,48 +308,45 @@ impl Index {
       url_query, json_body, range_start_time, range_end_time
     );
 
-    // Check if JSON body is null or an empty object
-    let is_json_empty = match json_body {
-      serde_json::Value::Null => true,
-      serde_json::Value::Object(ref obj) => obj.is_empty(),
-      _ => false,
-    };
+    let mut json_query = json_body.to_string();
 
-    // Check if URL query is empty
+    info!("JSON query is {}", &json_query);
+
+    // Check if URL or JSON query is empty
     let is_url_empty = url_query.trim().is_empty();
+    let is_json_empty = json_query.trim().is_empty();
 
-    // Return an error if no query is provided
-    if is_json_empty && is_url_empty {
-      return Err(SearchLogsError::NoQueryProvided);
+    // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
+    if is_json_empty {
+      if is_url_empty {
+        return Err(SearchLogsError::NoQueryProvided);
+      } else {
+        // Update json_query with the constructed query from url_query
+        json_query = format!(
+          r#"{{
+                    "query": {{
+                        "bool": {{
+                            "must": [
+                                {{ "match": {{ "_all": "{}" }} }}
+                            ]
+                        }}
+                    }}
+                }}"#,
+          url_query
+        );
+      }
     }
 
-    let ast_result: Result<AstNode, AstError> = if !is_json_empty {
-      let bool_query: BoolQuery =
-        serde_json::from_value(json_body).map_err(SearchLogsError::JsonParseError)?;
+    // Parse the query and create an abstract syntax tree,
+    // returning a SearchLogsError::JsonParseError if the parse fails
+    let ast = QueryDslParser::parse(Rule::start, &json_query)
+      .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))?;
 
-      Segment::query_to_ast(&bool_query)
-    } else if !is_url_empty {
-      let url_terms = tokenize(url_query);
-      Ok(
-        url_terms
-          .into_iter()
-          .map(AstNode::Match)
-          .reduce(|a, b| AstNode::Must(Box::new(a), Box::new(b)))
-          .unwrap_or(AstNode::None),
-      )
-    } else {
-      Ok(AstNode::None)
-    };
-
-    let ast = ast_result.unwrap_or_else(|e| {
-      error!("Error building AST: {:?}", e);
-      AstNode::None
-    });
-
-    // Get the segments overlapping with the given time range. This is in the reverse chronological order.
-    let segment_numbers = self.get_overlapping_segments(range_start_time, range_end_time);
-
+    // Now start the search
     let mut retval = Vec::new();
+
+    // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
+    let segment_numbers = self.get_overlapping_segments(range_start_time, range_end_time);
 
     // Search in each of the segments. Note these these are in reverse chronological order - so when we add a
     // limit to the number of results, one can break out of the loop when desired number of results are retrieved.
@@ -789,12 +799,8 @@ mod tests {
       "thisisunique",
     );
 
-    // Prepare an empty JSON body for the query
-    let json_body = serde_json::Value::Null;
-
     // For the query "message", handle errors from search_logs
-    let results = if let Ok(results) = index.search_logs("message", json_body.clone(), 0, u64::MAX)
-    {
+    let results = if let Ok(results) = index.search_logs("message", "", 0, u64::MAX) {
       results
     } else {
       eprintln!("Error in search_logs");
@@ -812,13 +818,12 @@ mod tests {
     assert_eq!(expected_log_messages, received_log_messages);
 
     // For the query "thisisunique", we should expect only 1 result.
-    let results =
-      if let Ok(results) = index.search_logs("thisisunique", json_body.clone(), 0, u64::MAX) {
-        results
-      } else {
-        eprintln!("Error in search_logs");
-        Vec::new()
-      };
+    let results = if let Ok(results) = index.search_logs("thisisunique", "", 0, u64::MAX) {
+      results
+    } else {
+      eprintln!("Error in search_logs");
+      Vec::new()
+    };
     assert_eq!(results.len(), 1);
     assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
   }
@@ -1095,7 +1100,7 @@ mod tests {
 
     // Commit and sleep to ensure the index is written to disk.
     index.commit(true);
-    sleep(Duration::from_millis(10000));
+    sleep(Duration::from_millis(1000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
 
@@ -1124,11 +1129,8 @@ mod tests {
       }
     }
 
-    // Prepare an empty JSON body for the queries.
-    let json_body = serde_json::Value::Null;
-
     // Ensure the prefix is in every log message.
-    let results = match index.search_logs(message_prefix, json_body.clone(), start_time, end_time) {
+    let results = match index.search_logs(message_prefix, "", start_time, end_time) {
       Ok(results) => results,
       Err(err) => {
         eprintln!("Error searching logs: {:?}", err);
@@ -1140,7 +1142,7 @@ mod tests {
     // Ensure the suffix is in exactly one log message.
     for i in 1..=num_log_messages {
       let suffix = &format!("{}", i);
-      let results = match index.search_logs(suffix, json_body.clone(), start_time, end_time) {
+      let results = match index.search_logs(suffix, "", start_time, end_time) {
         Ok(results) => results,
         Err(err) => {
           eprintln!("Error searching logs: {:?}", err);
@@ -1153,7 +1155,7 @@ mod tests {
     // Ensure the prefix+suffix is in exactly one log message.
     for i in 1..=num_log_messages {
       let message = &format!("{} {}", message_prefix, i);
-      let results = match index.search_logs(message, json_body.clone(), start_time, end_time) {
+      let results = match index.search_logs(message, "", start_time, end_time) {
         Ok(results) => results,
         Err(err) => {
           eprintln!("Error searching logs: {:?}", err);
@@ -1191,18 +1193,10 @@ mod tests {
       index.commit(false);
     }
 
-    // Prepare an empty JSON body for the queries
-    let json_body = serde_json::Value::Null;
-
     for i in 1..num_message_suffixes {
       let message = &format!("{}{}", message_prefix, i);
       let expected_count = 2u32.pow(i);
-      let results = index.search_logs(
-        message,
-        json_body.clone(),
-        0,
-        Utc::now().timestamp_millis() as u64,
-      );
+      let results = index.search_logs(message, "", 0, Utc::now().timestamp_millis() as u64);
 
       match results {
         Ok(logs) => {
@@ -1251,7 +1245,7 @@ mod tests {
     }
     // Commit and sleep to make sure the index is written to disk.
     index.commit(true);
-    sleep(Duration::from_millis(1000));
+    sleep(Duration::from_millis(10000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
 
@@ -1444,10 +1438,7 @@ mod tests {
     let index = Index::refresh(&index_dir_path, 1024 * 1024).unwrap();
     let expected_len = num_threads * num_appends_per_thread;
 
-    // Prepare an empty JSON body for the query
-    let json_body = serde_json::Value::Null;
-
-    let results = index.search_logs("message", json_body.clone(), 0, expected_len as u64);
+    let results = index.search_logs("message", "", 0, expected_len as u64);
     match results {
       Ok(logs) => {
         let received_logs_len = logs.len();
@@ -1483,13 +1474,10 @@ mod tests {
     // Create one more new index using same dir location
     let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).unwrap();
 
-    // Prepare an empty JSON body for the query
-    let json_body = serde_json::Value::Null;
-
     // Call search_logs and handle errors
     let search_result = index.search_logs(
       "some_message_1",
-      json_body,
+      "",
       start_time as u64,
       Utc::now().timestamp_millis() as u64,
     );
@@ -1577,14 +1565,14 @@ mod tests {
       // Check that the queries for unique messages across the entire time range returns exactly one result.
       assert_eq!(
         index
-          .search_logs(&message_start, serde_json::Value::Null, 0, u64::MAX)
+          .search_logs(&message_start, "", 0, u64::MAX)
           .unwrap()
           .len(),
         1
       );
       assert_eq!(
         index
-          .search_logs(&message_end, serde_json::Value::Null, 0, u64::MAX)
+          .search_logs(&message_end, "", 0, u64::MAX)
           .unwrap()
           .len(),
         1
@@ -1593,14 +1581,14 @@ mod tests {
       // Check that the queries for unique messages across the specific time range returns exactly one result.
       assert_eq!(
         index
-          .search_logs(&message_start, serde_json::Value::Null, start, end)
+          .search_logs(&message_start, "", start, end)
           .unwrap()
           .len(),
         1
       );
       assert_eq!(
         index
-          .search_logs(&message_end, serde_json::Value::Null, start, end)
+          .search_logs(&message_end, "", start, end)
           .unwrap()
           .len(),
         1

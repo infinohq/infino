@@ -6,6 +6,7 @@
 pub(crate) mod index_manager;
 pub mod log;
 pub mod metric;
+pub(crate) mod request_manager;
 pub(crate) mod segment_manager;
 pub mod utils;
 
@@ -141,7 +142,7 @@ impl CoreDB {
   pub fn search_logs(
     &self,
     query: &str,
-    json_body: serde_json::Value,
+    json_body: &str,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SearchLogsError> {
@@ -348,15 +349,12 @@ mod tests {
 
     let end = Utc::now().timestamp_millis() as u64;
 
-    // Prepare an empty JSON body for the query
-    let json_body = serde_json::Value::Null;
-
     // Search for log messages. The order of results should be reverse chronological order.
-    if let Err(err) = coredb.search_logs("message", json_body.clone(), start, end) {
+    if let Err(err) = coredb.search_logs("message", "", start, end) {
       eprintln!("Error in search_logs: {:?}", err);
     } else {
       let results = coredb
-        .search_logs("message", json_body.clone(), start, end)
+        .search_logs("message", "", start, end)
         .expect("Error in search_logs");
       assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
       assert_eq!(results.get(1).unwrap().get_text(), "log message 1");

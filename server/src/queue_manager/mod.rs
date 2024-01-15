@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 //! Manages the ingestion queue for Infino.
 //!
 //! The ingestion queue manager uses [RabbitMQ](https://github.com/rabbitmq)

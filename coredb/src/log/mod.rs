@@ -1,3 +1,6 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 //! Store and retrieve log messages from CoreDB.
 //!
 //! Log messages are stored in time-sharded segments.
