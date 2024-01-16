@@ -80,6 +80,21 @@ impl Segment {
     }
   }
 
+  #[allow(dead_code)]
+  pub fn get_terms(&self) -> &DashMap<String, u32> {
+    &self.terms
+  }
+
+  #[allow(dead_code)]
+  pub fn get_inverted_map(&self) -> &DashMap<u32, PostingsList> {
+    &self.inverted_map
+  }
+
+  #[allow(dead_code)]
+  pub fn get_forward_map(&self) -> &DashMap<u32, LogMessage> {
+    &self.forward_map
+  }
+
   /// Get id of this segment.
   pub fn get_id(&self) -> &str {
     self.metadata.get_id()
@@ -499,14 +514,10 @@ mod tests {
   use crate::utils::sync::{is_sync, thread};
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, pest::error::Error<Rule>> {
-    // Create a test string that should parse as a single term according to your grammar
     let test_string = term;
-
-    // Parse the test string and return the pairs
     QueryDslParser::parse(Rule::start, &test_string)
   }
 
-  // Populate segment with log messages for testing
   fn populate_segment(segment: &mut Segment) {
     let log_messages = vec![
       ("log 1", "this is a test log message"),
@@ -528,7 +539,6 @@ mod tests {
     let mut segment = Segment::new();
     populate_segment(&mut segment);
 
-    // Construct the query DSL as a JSON string for a Must query
     let query_dsl = r#"{
       "query": {
         "bool": {
@@ -540,7 +550,6 @@ mod tests {
     }
     "#;
 
-    // Parse the query DSL
     match QueryDslParser::parse(Rule::start, &query_dsl) {
       Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
         Ok(results) => {
@@ -598,7 +607,6 @@ mod tests {
     let mut segment = Segment::new();
     populate_segment(&mut segment);
 
-    // Construct the Query DSL query as a JSON string for a MustNot query
     let query_dsl_query = r#"{
       "query": {
         "bool": {
@@ -638,7 +646,6 @@ mod tests {
     let query_node_result = create_term_test_node("doesnotexist");
 
     if let Ok(query_node) = query_node_result {
-      // Assuming query_node is of the correct type expected by search_logs (e.g., Pair<Rule> or Pairs<Rule>)
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
         eprintln!("Error in search_logs: {:?}", err);
       } else {
@@ -658,7 +665,6 @@ mod tests {
     let query_node_result = create_term_test_node("doesnotexist");
 
     if let Ok(query_node) = query_node_result {
-      // Assuming query_node is of the correct type expected by search_logs (e.g., Pair<Rule> or Pairs<Rule>)
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
         eprintln!("Error in search_logs: {:?}", err);
       } else {
@@ -762,7 +768,6 @@ mod tests {
       100.0
     );
 
-    // Test search for "this".
     let query_node_result_for_this = create_term_test_node("this");
 
     if let Ok(query_node_for_this) = query_node_result_for_this {
@@ -777,12 +782,10 @@ mod tests {
         }
         Err(err) => {
           eprintln!("Error in search_logs for 'this': {:?}", err);
-          // Handle the error as needed, e.g., assert an expected error code
         }
       }
     } else {
       eprintln!("Error parsing the query for 'this'.");
-      // Handle the parsing error as needed, e.g., assert an expected error code
     }
 
     // Test search for "blah".
