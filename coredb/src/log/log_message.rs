@@ -101,11 +101,11 @@ impl PartialOrd for LogMessage {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   fn check_new() {
-    is_sync::<LogMessage>();
+    is_sync_send::<LogMessage>();
 
     // Check default log message.
     let mut log = LogMessage::default();

@@ -16,10 +16,10 @@ pub struct InfinoEngine {
 }
 
 impl InfinoEngine {
-  pub fn new(config_path: &str) -> InfinoEngine {
+  pub async fn new(config_path: &str) -> InfinoEngine {
     let setting = Settings::new(config_path).unwrap();
     let index_dir_path = String::from(setting.get_coredb_settings().get_index_dir_path());
-    let coredb = CoreDB::new(config_path).unwrap();
+    let coredb = CoreDB::new(config_path).await.unwrap();
 
     InfinoEngine {
       index_dir_path,
@@ -53,7 +53,11 @@ impl InfinoEngine {
         }
       }
 
-      self.coredb.commit(false);
+      self
+        .coredb
+        .commit(false)
+        .await
+        .expect("Could not commit coredb");
     }
     let elapsed = now.elapsed().as_micros();
     println!(
@@ -64,12 +68,13 @@ impl InfinoEngine {
   }
 
   /// Searches the given term and returns the time required in microseconds
-  pub fn search_logs(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
+  pub async fn search_logs(&self, query: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let now = Instant::now();
 
     match self
       .coredb
       .search_logs(query, "", range_start_time, range_end_time)
+      .await
     {
       Ok(result) => {
         let elapsed = now.elapsed().as_micros();
@@ -93,10 +98,13 @@ impl InfinoEngine {
   }
 
   /// Runs multiple queries and returns the sum of time needed to run them in microseconds.
-  pub fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
-    queries
-      .iter()
-      .map(|query| self.search_logs(query, 0, u64::MAX))
-      .sum()
+  pub async fn search_multiple_queries(&self, queries: &[&str]) -> u128 {
+    let mut total_time = 0;
+
+    for query in queries {
+      total_time += self.search_logs(query, 0, u64::MAX).await;
+    }
+
+    total_time
   }
 }

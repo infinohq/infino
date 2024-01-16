@@ -2,12 +2,12 @@
 // https://www.elastic.co/licensing/elastic-license
 
 #[cfg(not(loom))]
-pub(crate) use std::sync::{Arc, Mutex};
+pub(crate) use std::sync::Arc;
 #[cfg(not(loom))]
 pub(crate) use std::thread;
 
 #[cfg(loom)]
-pub(crate) use loom::sync::{Arc, Mutex};
+pub(crate) use loom::sync::Arc;
 #[cfg(loom)]
 pub(crate) use loom::thread;
 
@@ -18,11 +18,17 @@ pub(crate) use loom::thread;
 // when the configuration isn't loom).
 pub(crate) use std::sync::RwLock;
 
+// Tokio Mutex and RwLock - needed when we need lock to be Send + Sync.
+pub(crate) use tokio::sync::Mutex as TokioMutex;
+pub(crate) use tokio::sync::RwLock as TokioRwLock;
+
 // A call to this function will compile only if T is Send + Sync.
 #[cfg(test)]
-pub fn is_sync<T: Send + Sync>() {}
+pub fn is_sync_send<T: Send + Sync>() {}
 
 #[test]
-fn test_u32_is_sync() {
-  is_sync::<u32>();
+fn test_is_sync_send() {
+  is_sync_send::<u32>();
+  is_sync_send::<TokioMutex<u32>>();
+  is_sync_send::<TokioRwLock<u32>>();
 }

@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query};
 use axum::routing::{delete, put};
-use axum::{extract::State, routing::get, routing::post, Json, Router};
+use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
 use log::{debug, error, info};
@@ -40,7 +40,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
-use coredb::utils::error::SearchLogsError;
+use coredb::utils::error::{CoreDBError, SearchLogsError};
 use coredb::CoreDB;
 use utils::error::InfinoError;
 
@@ -98,11 +98,15 @@ async fn commit_in_loop(
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
   loop {
-    state.coredb.commit(true);
+    let result = state.coredb.commit(true).await;
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
       break;
+    }
+
+    if let Err(e) = result {
+      error!("Error committing to coredb: {}", e);
     }
 
     sleep(Duration::from_secs(commit_interval_in_seconds as u64)).await;
@@ -119,7 +123,7 @@ async fn app(
   let settings = Settings::new(config_dir_path).unwrap();
 
   // Create a new coredb.
-  let coredb = match CoreDB::new(config_dir_path) {
+  let coredb = match CoreDB::new(config_dir_path).await {
     Ok(coredb) => coredb,
     Err(err) => panic!("Unable to initialize coredb with err {}", err),
   };
@@ -452,38 +456,49 @@ async fn search_logs(
   );
 
   // Pass the deserialized JSON object directly to coredb.search_logs
-  let result = state.coredb.search_logs(
-    &logs_query.text,
-    &json_body,
-    logs_query.start_time.unwrap_or(0),
-    logs_query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64),
-  );
+  let results = state
+    .coredb
+    .search_logs(
+      &logs_query.text,
+      &json_body,
+      logs_query.start_time.unwrap_or(0),
+      logs_query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64),
+    )
+    .await;
 
-  match result {
+  match results {
     Ok(log_messages) => {
       let result_json =
         serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
       Ok(result_json)
     }
-    Err(search_logs_error) => {
-      // Handle the error and return an appropriate status code and error message.
-      match search_logs_error {
-        SearchLogsError::JsonParseError(_) => {
-          Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+    Err(codedb_error) => {
+      match codedb_error {
+        CoreDBError::SearchLogsError(search_logs_error) => {
+          // Handle the error and return an appropriate status code and error message.
+          match search_logs_error {
+            SearchLogsError::JsonParseError(_) => {
+              Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+            }
+            SearchLogsError::SegmentSearchError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::SegmentError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::NoQueryProvided => {
+              Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
+            }
+          }
         }
-        SearchLogsError::SegmentSearchError(_) => Err((
+        _ => Err((
           StatusCode::INTERNAL_SERVER_ERROR,
           "Internal server error".to_string(),
         )),
-        SearchLogsError::SegmentError(_) => Err((
-          StatusCode::INTERNAL_SERVER_ERROR,
-          "Internal server error".to_string(),
-        )),
-        SearchLogsError::NoQueryProvided => {
-          Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
-        }
       }
     }
   }
@@ -503,14 +518,19 @@ async fn summarize(
   let k = summarize_query.k.unwrap_or(100);
 
   // Call search_logs and handle errors
-  match state.coredb.search_logs(
-    &summarize_query.text,
-    &json_body,
-    summarize_query.start_time.unwrap_or(0),
-    summarize_query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64),
-  ) {
+  let results = state
+    .coredb
+    .search_logs(
+      &summarize_query.text,
+      &json_body,
+      summarize_query.start_time.unwrap_or(0),
+      summarize_query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64),
+    )
+    .await;
+
+  match results {
     Ok(results) => {
       // Call openai_helper.summarize and handle errors
       match state.openai_helper.summarize(&results, k) {
@@ -532,21 +552,32 @@ async fn summarize(
         }
       }
     }
-    Err(search_logs_error) => {
-      // Handle the error when calling search_logs
-      Err(match search_logs_error {
-        // Map SearchLogsError to appropriate StatusCode and error message
-        SearchLogsError::JsonParseError(_) => {
-          (StatusCode::BAD_REQUEST, "Invalid JSON input".to_string())
+    Err(codedb_error) => {
+      match codedb_error {
+        CoreDBError::SearchLogsError(search_logs_error) => {
+          // Handle the error and return an appropriate status code and error message.
+          match search_logs_error {
+            SearchLogsError::JsonParseError(_) => {
+              Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+            }
+            SearchLogsError::SegmentSearchError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::SegmentError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::NoQueryProvided => {
+              Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
+            }
+          }
         }
-        SearchLogsError::SegmentSearchError(_) | SearchLogsError::SegmentError(_) => (
+        _ => Err((
           StatusCode::INTERNAL_SERVER_ERROR,
           "Internal server error".to_string(),
-        ),
-        SearchLogsError::NoQueryProvided => {
-          (StatusCode::BAD_REQUEST, "No query provided".to_string())
-        }
-      })
+        )),
+      }
     }
   }
 }
@@ -555,29 +586,50 @@ async fn summarize(
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
-) -> String {
+) -> Result<String, (StatusCode, String)> {
   debug!("Searching metrics: {:?}", metrics_query);
 
-  let results = state.coredb.get_metrics(
-    &metrics_query.label_name,
-    &metrics_query.label_value,
-    // The default for range start time is 0.
-    metrics_query.start_time.unwrap_or(0_u64),
-    // The default for range end time is the current time.
-    metrics_query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64),
-  );
+  let results = state
+    .coredb
+    .get_metrics(
+      &metrics_query.label_name,
+      &metrics_query.label_value,
+      // The default for range start time is 0.
+      metrics_query.start_time.unwrap_or(0_u64),
+      // The default for range end time is the current time.
+      metrics_query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64),
+    )
+    .await;
 
-  serde_json::to_string(&results).expect("Could not convert search results to json")
+  match results {
+    Ok(metrics) => {
+      Ok(serde_json::to_string(&metrics).expect("Could not convert search results to json"))
+    }
+
+    // TODO: separate between user triggered errors and internal errors.
+    Err(_) => Err((
+      StatusCode::INTERNAL_SERVER_ERROR,
+      "Internal server error".to_string(),
+    )),
+  }
 }
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
   // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
-  state.coredb.commit(true);
+  let result = state.coredb.commit(true).await;
 
-  Ok(())
+  match result {
+    Ok(result) => Ok(result),
+
+    // TODO: separate between user triggered errors and internal errors.
+    Err(_) => Err((
+      StatusCode::INTERNAL_SERVER_ERROR,
+      "Internal server error".to_string(),
+    )),
+  }
 }
 
 /// Get index directory used by CoreDB.
@@ -591,13 +643,14 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
 }
 
 /// Create a new index in CoreDB with the given name.
+#[debug_handler]
 async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,
 ) -> Result<(), (StatusCode, String)> {
   debug!("Creating index {}", index_name);
 
-  let result = state.coredb.create_index(&index_name);
+  let result = state.coredb.create_index(&index_name).await;
 
   if result.is_err() {
     let msg = format!("Could not create index {}", index_name);
@@ -765,14 +818,16 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path);
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
 
     // Handle errors from search_logs
-    let log_messages_result = refreshed_coredb.search_logs(search_text, "", start_time, end_time);
+    let log_messages_result = refreshed_coredb
+      .search_logs(search_text, "", start_time, end_time)
+      .await;
 
     match log_messages_result {
       Ok(log_messages_received) => {
@@ -850,13 +905,15 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path);
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    metric_points_received =
-      refreshed_coredb.get_metrics(&query.label_name, &query.label_value, start_time, end_time);
+    metric_points_received = refreshed_coredb
+      .get_metrics(&query.label_name, &query.label_value, start_time, end_time)
+      .await
+      .expect("Could not get metrics");
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }

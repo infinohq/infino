@@ -94,10 +94,15 @@ impl Ord for SegmentSummary {
 mod tests {
   use std::collections::HashMap;
 
+  use crate::utils::sync::is_sync_send;
+
   use super::*;
 
   #[test]
   pub fn test_new_segment_summary() {
+    // Check if the SegmentSummary implements Sync + Send.
+    is_sync_send::<SegmentSummary>();
+
     let segment = Segment::new();
     let segment_summary = SegmentSummary::new(1, &segment);
 

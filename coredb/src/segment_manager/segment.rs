@@ -16,13 +16,13 @@ use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
 use crate::request_manager::query_dsl::traverse_ast;
 use crate::request_manager::query_dsl::Rule;
+use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
 use crate::utils::error::SegmentSearchError;
 use crate::utils::range::is_overlap;
-use crate::utils::serialize;
 use crate::utils::sync::thread;
-use crate::utils::sync::Mutex;
+use crate::utils::sync::TokioMutex;
 
 use pest::iterators::Pairs;
 
@@ -63,7 +63,7 @@ pub struct Segment {
   time_series: DashMap<u32, TimeSeries>,
 
   // Mutex for only one thread to commit this segment at a time.
-  commit_lock: Mutex<thread::ThreadId>,
+  commit_lock: TokioMutex<thread::ThreadId>,
 }
 
 impl Segment {
@@ -76,7 +76,7 @@ impl Segment {
       inverted_map: DashMap::new(),
       labels: DashMap::new(),
       time_series: DashMap::new(),
-      commit_lock: Mutex::new(thread::current().id()),
+      commit_lock: TokioMutex::new(thread::current().id()),
     }
   }
 
@@ -140,6 +140,7 @@ impl Segment {
   }
 
   /// Check if this segment is empty.
+  #[allow(dead_code)]
   pub fn is_empty(&self) -> bool {
     self.metadata.get_log_message_count() == 0
       && self.metadata.get_term_count() == 0
@@ -246,8 +247,13 @@ impl Segment {
   }
 
   /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
-  pub fn commit(&self, dir: &str, sync_after_write: bool) -> (u64, u64) {
-    let mut lock = self.commit_lock.lock().unwrap();
+  pub async fn commit(
+    &self,
+    storage: &Storage,
+    dir: &str,
+    sync_after_write: bool,
+  ) -> Result<(u64, u64), CoreDBError> {
+    let mut lock = self.commit_lock.lock().await;
     *lock = thread::current().id();
 
     let dir_path = Path::new(dir);
@@ -264,48 +270,57 @@ impl Segment {
     let labels_path = dir_path.join(LABELS_FILE_NAME);
     let time_series_path = dir_path.join(TIME_SERIES_FILE_NAME);
 
-    let (uncompressed_terms_size, compressed_terms_size) =
-      serialize::write(&self.terms, terms_path.to_str().unwrap(), sync_after_write);
+    let (uncompressed_terms_size, compressed_terms_size) = storage
+      .write(&self.terms, terms_path.to_str().unwrap(), sync_after_write)
+      .await?;
     debug!(
       "Serialized terms to {} bytes uncompressed, {} bytes compressed",
       uncompressed_terms_size, compressed_terms_size
     );
 
-    let (uncompressed_inverted_map_size, compressed_inverted_map_size) = serialize::write(
-      &self.inverted_map,
-      inverted_map_path.to_str().unwrap(),
-      sync_after_write,
-    );
+    let (uncompressed_inverted_map_size, compressed_inverted_map_size) = storage
+      .write(
+        &self.inverted_map,
+        inverted_map_path.to_str().unwrap(),
+        sync_after_write,
+      )
+      .await?;
     debug!(
       "Serialized inverted map to {} bytes uncompressed, {} bytes compressed",
       uncompressed_inverted_map_size, compressed_inverted_map_size
     );
 
-    let (uncompressed_forward_map_size, compressed_forward_map_size) = serialize::write(
-      &self.forward_map,
-      forward_map_path.to_str().unwrap(),
-      sync_after_write,
-    );
+    let (uncompressed_forward_map_size, compressed_forward_map_size) = storage
+      .write(
+        &self.forward_map,
+        forward_map_path.to_str().unwrap(),
+        sync_after_write,
+      )
+      .await?;
     debug!(
       "Serialized forward map to {} bytes uncompressed, {} bytes compressed",
       uncompressed_forward_map_size, compressed_forward_map_size
     );
 
-    let (uncompressed_labels_size, compressed_labels_size) = serialize::write(
-      &self.labels,
-      labels_path.to_str().unwrap(),
-      sync_after_write,
-    );
+    let (uncompressed_labels_size, compressed_labels_size) = storage
+      .write(
+        &self.labels,
+        labels_path.to_str().unwrap(),
+        sync_after_write,
+      )
+      .await?;
     debug!(
       "Serialized labels to {} bytes uncompressed, {} bytes compressed",
       uncompressed_labels_size, compressed_labels_size
     );
 
-    let (uncompressed_time_series_size, compressed_time_series_size) = serialize::write(
-      &self.time_series,
-      time_series_path.to_str().unwrap(),
-      sync_after_write,
-    );
+    let (uncompressed_time_series_size, compressed_time_series_size) = storage
+      .write(
+        &self.time_series,
+        time_series_path.to_str().unwrap(),
+        sync_after_write,
+      )
+      .await?;
     debug!(
       "Serialized time series to {} bytes uncompressed, {} bytes compressed",
       uncompressed_time_series_size, compressed_time_series_size
@@ -331,22 +346,24 @@ impl Segment {
       .update_segment_size(uncompressed_segment_size, compressed_segment_size);
 
     // Write the metadata at the end - so that its segment size is updated
-    serialize::write(
-      &self.metadata,
-      metadata_path.to_str().unwrap(),
-      sync_after_write,
-    );
+    storage
+      .write(
+        &self.metadata,
+        metadata_path.to_str().unwrap(),
+        sync_after_write,
+      )
+      .await?;
 
     debug!(
       "Serialized segment to {} bytes uncompressed, {} bytes compressed",
       uncompressed_segment_size, compressed_segment_size
     );
 
-    (uncompressed_segment_size, compressed_segment_size)
+    Ok((uncompressed_segment_size, compressed_segment_size))
   }
 
   /// Read the segment from the specified directory.
-  pub fn refresh(dir: &str) -> (Segment, u64) {
+  pub async fn refresh(storage: &Storage, dir: &str) -> Result<(Segment, u64), CoreDBError> {
     let dir_path = Path::new(dir);
     let metadata_path = dir_path.join(METADATA_FILE_NAME);
     let terms_path = dir_path.join(TERMS_FILE_NAME);
@@ -355,18 +372,19 @@ impl Segment {
     let labels_path = dir_path.join(LABELS_FILE_NAME);
     let time_series_path = dir_path.join(TIME_SERIES_FILE_NAME);
 
-    let (metadata, metadata_size): (Metadata, _) = serialize::read(metadata_path.to_str().unwrap());
+    let (metadata, metadata_size): (Metadata, _) =
+      storage.read(metadata_path.to_str().unwrap()).await?;
     let (terms, terms_size): (DashMap<String, u32>, _) =
-      serialize::read(terms_path.to_str().unwrap());
+      storage.read(terms_path.to_str().unwrap()).await?;
     let (inverted_map, inverted_map_size): (DashMap<u32, PostingsList>, _) =
-      serialize::read(inverted_map_path.to_str().unwrap());
+      storage.read(inverted_map_path.to_str().unwrap()).await?;
     let (forward_map, forward_map_size): (DashMap<u32, LogMessage>, _) =
-      serialize::read(forward_map_path.to_str().unwrap());
+      storage.read(forward_map_path.to_str().unwrap()).await?;
     let (labels, labels_size): (DashMap<String, u32>, _) =
-      serialize::read(labels_path.to_str().unwrap());
+      storage.read(labels_path.to_str().unwrap()).await?;
     let (time_series, time_series_size): (DashMap<u32, TimeSeries>, _) =
-      serialize::read(time_series_path.to_str().unwrap());
-    let commit_lock = Mutex::new(thread::current().id());
+      storage.read(time_series_path.to_str().unwrap()).await?;
+    let commit_lock = TokioMutex::new(thread::current().id());
 
     let total_size = metadata_size
       + terms_size
@@ -385,7 +403,7 @@ impl Segment {
       commit_lock,
     };
 
-    (segment, total_size)
+    Ok((segment, total_size))
   }
 
   /// Search the segment for the given query.
@@ -498,7 +516,7 @@ mod tests {
   use crate::request_manager::query_dsl::{QueryDslParser, Rule};
   use pest::Parser;
 
-  use crate::utils::sync::{is_sync, thread};
+  use crate::utils::sync::{is_sync_send, thread};
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, pest::error::Error<Rule>> {
     let test_string = term;
@@ -625,7 +643,7 @@ mod tests {
 
   #[test]
   fn test_new_segment() {
-    is_sync::<Segment>();
+    is_sync_send::<Segment>();
 
     let segment = Segment::new();
     assert!(segment.is_empty());
@@ -663,11 +681,12 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_commit_refresh() {
+  #[tokio::test]
+  async fn test_commit_refresh() {
     let original_segment = Segment::new();
     let segment_dir = TempDir::new("segment_test").unwrap();
     let segment_dir_path = segment_dir.path().to_str().unwrap();
+    let storage = Storage::new();
 
     original_segment
       .append_log_message(
@@ -692,12 +711,16 @@ mod tests {
       .unwrap();
 
     // Commit so that the segment is serialized to disk, and refresh it from disk.
-    let (uncompressed_original_segment_size, compressed_original_segment_size) =
-      original_segment.commit(segment_dir_path, false);
+    let (uncompressed_original_segment_size, compressed_original_segment_size) = original_segment
+      .commit(&storage, segment_dir_path, false)
+      .await
+      .expect("Error while commmiting segment");
     assert!(uncompressed_original_segment_size > 0);
     assert!(compressed_original_segment_size > 0);
 
-    let (from_disk_segment, from_disk_segment_size) = Segment::refresh(segment_dir_path);
+    let (from_disk_segment, from_disk_segment_size) = Segment::refresh(&storage, segment_dir_path)
+      .await
+      .expect("Error while refreshing segment");
 
     // Verify that both the segments are equal.
     assert_eq!(

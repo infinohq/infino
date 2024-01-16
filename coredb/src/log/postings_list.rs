@@ -154,12 +154,12 @@ impl Eq for PostingsList {}
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   fn test_empty_postings() {
     // Check if the PostingsList implements sync.
-    is_sync::<PostingsList>();
+    is_sync_send::<PostingsList>();
 
     // Check if a newly created postings list is empty.
     let pl = PostingsList::new();
