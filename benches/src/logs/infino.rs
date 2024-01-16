@@ -53,7 +53,7 @@ impl InfinoEngine {
         }
       }
 
-      self.coredb.commit(false);
+      self.coredb.commit(false).await;
     }
     let elapsed = now.elapsed().as_micros();
     println!(
