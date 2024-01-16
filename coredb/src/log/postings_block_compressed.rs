@@ -270,9 +270,9 @@ mod tests {
     assert_eq!(pbc.log_message_ids_compressed.read().unwrap().len(), 16);
     assert_eq!(*pbc.log_message_ids_compressed.read().unwrap(), expected);
 
-    let mem_pb_log_message_ids = size_of_val(&*pb.get_log_message_ids().read().unwrap().as_slice());
+    let mem_pb_log_message_ids = size_of_val(pb.get_log_message_ids().read().unwrap().as_slice());
     let mem_pbc_log_message_ids_compressed =
-      size_of_val(&*pbc.log_message_ids_compressed.read().unwrap().as_slice());
+      size_of_val(pbc.log_message_ids_compressed.read().unwrap().as_slice());
 
     // The memory consumed by log_message_ids for uncompressed block should be equal to sizeof(u32)*128,
     // as there are 128 integers, each occupying 4 bytes.
@@ -280,7 +280,7 @@ mod tests {
 
     // The memory consumed by log_message_ids for compressed block should be equal to sizeof(u8)*16,
     // as there are 16 integers, each occupying 1 byte.
-    assert_eq!(mem_pbc_log_message_ids_compressed, 1 * 16);
+    assert_eq!(mem_pbc_log_message_ids_compressed, 16);
   }
 
   #[test]
@@ -292,12 +292,11 @@ mod tests {
     let pb = PostingsBlock::new_with_log_message_ids(increasing_by_one);
     let pbc = PostingsBlockCompressed::try_from(&pb).unwrap();
 
-    let pbc_clone = pbc.clone();
-    assert_eq!(pbc, pbc_clone);
+    assert_eq!(pbc, pbc.clone());
 
     assert_eq!(
       *pbc.log_message_ids_compressed.read().unwrap(),
-      *pbc_clone.log_message_ids_compressed.read().unwrap()
+      *pbc.clone().log_message_ids_compressed.read().unwrap()
     );
   }
 }

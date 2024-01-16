@@ -301,7 +301,7 @@ mod tests {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let default_index_name_line = format!("default_index_name = \"{}\"\n", ".default");
 
-      let mut file = File::create(&config_file_path).unwrap();
+      let mut file = File::create(config_file_path).unwrap();
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name_line.as_bytes()).unwrap();
@@ -367,16 +367,16 @@ mod tests {
         .search_logs("message", "", start, end)
         .await
         .expect("Error in search_logs");
-      assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
+      assert_eq!(results.first().unwrap().get_text(), "log message 2");
       assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
     }
 
     // Search for metric points.
     let results = coredb
-      .get_metrics(&"__name__", &"some_metric", start, end)
+      .get_metrics("__name__", "some_metric", start, end)
       .await
       .expect("Error in get_metrics");
-    assert_eq!(results.get(0).unwrap().get_value(), 1.0);
+    assert_eq!(results.first().unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
   }
 }

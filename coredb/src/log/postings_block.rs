@@ -244,13 +244,12 @@ mod tests {
     pb.append(1000).unwrap();
     pb.append(2000).unwrap();
     pb.append(3000).unwrap();
-    let pb_clone = pb.clone();
-    assert_eq!(pb, pb_clone);
+    assert_eq!(pb, pb.clone());
 
     // Assert log message ids are same but not the same pointer
     assert_ne!(
       pb.get_log_message_ids().read().unwrap().as_ptr(),
-      pb_clone.get_log_message_ids().read().unwrap().as_ptr()
+      pb.clone().get_log_message_ids().read().unwrap().as_ptr()
     );
   }
 }

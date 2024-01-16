@@ -165,7 +165,7 @@ mod tests {
 
     // Each metric points takes 16 bytes, so the memory requirement would be BLOCK_SIZE_FOR_TIME_SERIES*16.
     let received_metric_points = received.get_metrics_metric_points().read().unwrap();
-    let mem_decompressed = size_of_val(&*received_metric_points.as_slice());
+    let mem_decompressed = size_of_val(received_metric_points.as_slice());
     assert_eq!(mem_decompressed, BLOCK_SIZE_FOR_TIME_SERIES * 16);
 
     // Make sure that the compressed data is at least 1/10th of the original data size.

@@ -79,6 +79,10 @@ impl PartialEq for SegmentSummary {
 impl Eq for SegmentSummary {}
 
 impl PartialOrd for SegmentSummary {
+  // Suppress custom ordering warning - which happens in some Clippy versions.
+  // However, the specific warning can't be suppressed as older Clippy versions
+  // do not know about it.
+  #[allow(clippy::all)]
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     other.end_time.partial_cmp(&self.end_time)
   }

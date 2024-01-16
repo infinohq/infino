@@ -20,7 +20,7 @@ run-debug:
 rust-check:
 	cargo fmt --all -- --check
 	cargo check
-	cargo clippy
+	cargo clippy --all-targets --all-features -- -D warnings
 
 docker-check:
 	@docker ps > /dev/null 2>&1 || (echo "Docker is not running. Please start Docker to run all tests." && exit 1)

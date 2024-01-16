@@ -172,7 +172,13 @@ mod tests {
     tsb.append(1000, 1.0).unwrap();
     assert_eq!(tsb.metric_points.read().unwrap().len(), 1);
     assert_eq!(
-      tsb.metric_points.read().unwrap().get(0).unwrap().get_time(),
+      tsb
+        .metric_points
+        .read()
+        .unwrap()
+        .first()
+        .unwrap()
+        .get_time(),
       1000
     );
     assert_eq!(
@@ -180,7 +186,7 @@ mod tests {
         .metric_points
         .read()
         .unwrap()
-        .get(0)
+        .first()
         .unwrap()
         .get_value(),
       1.0

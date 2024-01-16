@@ -86,7 +86,7 @@ mod tests {
       .await
       .expect("Could not read from storage");
     for i in 1..=num_keys {
-      assert!(received.get(&String::from(format!("{prefix}{i}"))).unwrap() == &i);
+      assert!(received.get(&format!("{prefix}{i}")).unwrap() == &i);
     }
     // The number of bytes read is uncompressed - so it should be equal to the uncompressed number of bytes written.
     assert!(num_bytes_read == uncompressed);
@@ -146,7 +146,7 @@ mod tests {
       .read(file_path)
       .await
       .expect("Could not read from storage");
-    assert!(received.len() == 0);
+    assert!(received.is_empty());
 
     // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
     assert!(num_bytes_read == uncompressed);
