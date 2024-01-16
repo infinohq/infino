@@ -106,6 +106,11 @@ pub fn get_matching_doc_ids(
   shortest_list_index: usize,
   accumulator: &mut Vec<u32>,
 ) -> Result<(), AstError> {
+  if postings_lists.is_empty() {
+    debug!("No postings lists. Returning");
+    return Ok(());
+  }
+
   let first_posting_blocks = &postings_lists[shortest_list_index];
   for posting_block in first_posting_blocks {
     let posting_block = PostingsBlock::try_from(posting_block)
@@ -282,4 +287,296 @@ pub fn get_matching_doc_ids(
   }
 
   Ok(())
+}
+
+// TODO: We should probably test read locks.
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::{log::postings_list::PostingsList, segment_manager::segment::Segment};
+
+  fn create_mock_compressed_block(
+    initial: u32,
+    num_bits: u8,
+    log_message_ids_compressed: &[u8],
+  ) -> PostingsBlockCompressed {
+    let mut valid_compressed_data = vec![0; 128];
+    valid_compressed_data[..log_message_ids_compressed.len()]
+      .copy_from_slice(log_message_ids_compressed);
+
+    PostingsBlockCompressed::new_with_params(initial, num_bits, &valid_compressed_data)
+  }
+
+  fn create_mock_postings_block(log_message_ids: Vec<u32>) -> PostingsBlock {
+    PostingsBlock::new_with_log_message_ids(log_message_ids)
+  }
+
+  fn create_mock_postings_list(
+    compressed_blocks: Vec<PostingsBlockCompressed>,
+    last_block: PostingsBlock,
+    initial_values: Vec<u32>,
+  ) -> PostingsList {
+    PostingsList::new_with_params(compressed_blocks, last_block, initial_values)
+  }
+
+  fn create_mock_segment() -> Segment {
+    let segment = Segment::new();
+
+    segment.terms.insert("term1".to_string(), 1);
+    segment.terms.insert("term2".to_string(), 2);
+
+    let mock_compressed_block1 = create_mock_compressed_block(123, 8, &[0x1A, 0x2B, 0x3C, 0x4D]);
+    let mock_compressed_block2 = create_mock_compressed_block(124, 8, &[0x5E, 0x6F, 0x7D, 0x8C]);
+
+    let mock_postings_block1 = create_mock_postings_block(vec![100, 200, 300]);
+    let mock_postings_block2 = create_mock_postings_block(vec![400, 500, 600]);
+
+    let postings_list1 = create_mock_postings_list(
+      vec![mock_compressed_block1],
+      mock_postings_block1,
+      vec![1, 2, 3],
+    );
+    let postings_list2 = create_mock_postings_list(
+      vec![mock_compressed_block2],
+      mock_postings_block2,
+      vec![4, 5, 6],
+    );
+
+    segment.inverted_map.insert(1, postings_list1);
+    segment.inverted_map.insert(2, postings_list2);
+
+    segment
+  }
+
+  #[test]
+  fn test_get_postings_lists_success() {
+    let segment = create_mock_segment();
+    let terms = vec!["term1".to_string(), "term2".to_string()];
+
+    let result = get_postings_lists(&segment, &terms);
+    assert!(result.is_ok());
+
+    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
+      result.unwrap();
+    assert_eq!(postings_lists.len(), 2);
+    assert!(!postings_lists[0].is_empty());
+    assert!(!postings_lists[1].is_empty());
+    assert_eq!(last_block_list.len(), 2);
+    assert_eq!(initial_values_list.len(), 2);
+    assert!(!initial_values_list[0].is_empty());
+    assert!(!initial_values_list[1].is_empty());
+    assert_eq!(shortest_list_index, 0);
+  }
+
+  #[test]
+  fn test_get_postings_lists_term_not_found() {
+    let segment = create_mock_segment();
+    let terms = vec!["unknown_term".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+  }
+
+  #[test]
+  fn test_get_postings_lists_empty_terms() {
+    let segment = create_mock_segment();
+    let terms: Vec<String> = Vec::new();
+    let result = get_postings_lists(&segment, &terms);
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  fn test_get_postings_lists_empty_segment() {
+    let segment = Segment::new();
+    let terms = vec!["term1".to_string(), "term2".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+  }
+
+  #[test]
+  fn test_get_postings_lists_single_term() {
+    let segment = create_mock_segment();
+    let terms = vec!["term1".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(result.is_ok());
+
+    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
+      result.unwrap();
+
+    assert_eq!(postings_lists.len(), 1);
+    assert!(!postings_lists[0].is_empty());
+    assert_eq!(last_block_list.len(), 1);
+    assert_eq!(initial_values_list.len(), 1);
+    assert!(!initial_values_list[0].is_empty());
+    assert_eq!(shortest_list_index, 0);
+  }
+
+  #[test]
+  fn test_get_postings_lists_multiple_terms_no_common_documents() {
+    let segment = create_mock_segment();
+    let terms = vec!["term1".to_string(), "term2".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  fn test_get_postings_lists_invalid_term_id_handling() {
+    let segment = create_mock_segment();
+    segment.inverted_map.insert(999, PostingsList::new());
+    let terms = vec!["term1".to_string(), "term2".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  fn test_get_postings_lists_all_terms_not_found() {
+    let segment = create_mock_segment();
+    let terms = vec!["unknown1".to_string(), "unknown2".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+  }
+
+  #[test]
+  fn test_get_postings_lists_partially_found_terms() {
+    let segment = create_mock_segment();
+    let terms = vec!["term1".to_string(), "unknown".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+  }
+
+  #[test]
+  fn test_get_postings_lists_with_mixed_found_and_not_found_terms() {
+    let segment = create_mock_segment();
+    let terms = vec![
+      "term1".to_string(),
+      "unknown_term".to_string(),
+      "term2".to_string(),
+    ];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+  }
+
+  #[test]
+  fn test_get_postings_lists_with_terms_having_empty_postings_lists() {
+    let segment = create_mock_segment();
+    segment.get_inverted_map().insert(3, PostingsList::new());
+    segment.get_inverted_map().insert(4, PostingsList::new());
+    segment.get_terms().insert("term3".to_string(), 3);
+    segment.get_terms().insert("term4".to_string(), 4);
+    let terms = vec!["term3".to_string(), "term4".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    let (postings_lists, _, _, _) = result.unwrap();
+    assert!(postings_lists.iter().all(|list| list.is_empty()));
+  }
+
+  #[test]
+  fn test_get_postings_lists_with_non_string_terms() {
+    let segment = create_mock_segment();
+    let terms = vec!["".to_string(), "123".to_string(), "!@#".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+  }
+
+  #[test]
+  fn test_get_postings_lists_with_incomplete_data_in_segment() {
+    let segment = create_mock_segment();
+    // Simulate incomplete data by clearing inverted map
+    segment.get_inverted_map().clear();
+    let terms = vec!["term1".to_string(), "term2".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+  }
+
+  #[test]
+  fn test_get_postings_lists_with_empty_postings_lists() {
+    let postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
+    let last_block_list: Vec<PostingsBlock> = Vec::new();
+    let initial_values_list: Vec<Vec<u32>> = Vec::new();
+    let mut accumulator: Vec<u32> = Vec::new();
+
+    let result = get_matching_doc_ids(
+      &postings_lists,
+      &last_block_list,
+      &initial_values_list,
+      0,
+      &mut accumulator,
+    );
+
+    assert!(result.is_ok());
+    assert!(
+      accumulator.is_empty(),
+      "Accumulator should be empty for empty postings lists"
+    );
+  }
+
+  #[test]
+  fn test_get_matching_doc_ids_no_matching_documents() {
+    let segment = create_mock_segment();
+    let terms = vec!["term1".to_string(), "term2".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(result.is_ok());
+
+    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
+      result.unwrap();
+
+    let mut accumulator: Vec<u32> = Vec::new();
+    let result = get_matching_doc_ids(
+      &postings_lists,
+      &last_block_list,
+      &initial_values_list,
+      shortest_list_index,
+      &mut accumulator,
+    );
+
+    assert!(result.is_ok());
+    assert!(accumulator.is_empty());
+  }
+
+  #[test]
+  fn test_get_matching_doc_ids_with_multiple_terms_common_documents() {
+    let segment = create_mock_segment();
+    let terms = vec!["term1".to_string(), "term2".to_string()];
+    let result = get_postings_lists(&segment, &terms);
+    assert!(result.is_ok());
+
+    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
+      result.unwrap();
+
+    assert_eq!(postings_lists.len(), 2);
+    let mut accumulator: Vec<u32> = Vec::new();
+    let result = get_matching_doc_ids(
+      &postings_lists,
+      &last_block_list,
+      &initial_values_list,
+      shortest_list_index,
+      &mut accumulator,
+    );
+
+    assert!(result.is_ok());
+    assert!(
+      accumulator.is_empty(),
+      "No common documents should be found"
+    );
+  }
+
+  #[test]
+  fn test_get_matching_doc_ids_empty_postings_lists() {
+    let postings_lists = vec![];
+    let last_block_list = vec![];
+    let initial_values_list = vec![];
+    let mut accumulator: Vec<u32> = Vec::new();
+
+    let result = get_matching_doc_ids(
+      &postings_lists,
+      &last_block_list,
+      &initial_values_list,
+      0,
+      &mut accumulator,
+    );
+
+    assert!(result.is_ok());
+    assert!(
+      accumulator.is_empty(),
+      "Accumulator should be empty for empty postings lists"
+    );
+  }
 }
