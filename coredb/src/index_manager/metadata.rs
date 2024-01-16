@@ -72,12 +72,12 @@ impl Metadata {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   pub fn test_new_metadata() {
     // Check if the metadata implements Sync + Send.
-    is_sync::<Metadata>();
+    is_sync_send::<Metadata>();
 
     // Check a newly created Metadata.
     let m: Metadata = Metadata::new(10, 5, 1000);

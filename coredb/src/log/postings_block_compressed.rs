@@ -155,11 +155,11 @@ mod tests {
   use test_case::test_case;
 
   use super::*;
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   fn test_empty() {
-    is_sync::<PostingsBlockCompressed>();
+    is_sync_send::<PostingsBlockCompressed>();
 
     let pbc = PostingsBlockCompressed::new();
     assert_eq!(pbc.get_initial(), 0);

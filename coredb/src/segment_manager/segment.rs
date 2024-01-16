@@ -22,7 +22,7 @@ use crate::utils::error::LogError;
 use crate::utils::error::SegmentSearchError;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::thread;
-use crate::utils::sync::Mutex;
+use crate::utils::sync::TokioMutex;
 
 use pest::iterators::Pairs;
 
@@ -63,7 +63,7 @@ pub struct Segment {
   time_series: DashMap<u32, TimeSeries>,
 
   // Mutex for only one thread to commit this segment at a time.
-  commit_lock: Mutex<thread::ThreadId>,
+  commit_lock: TokioMutex<thread::ThreadId>,
 }
 
 impl Segment {
@@ -76,7 +76,7 @@ impl Segment {
       inverted_map: DashMap::new(),
       labels: DashMap::new(),
       time_series: DashMap::new(),
-      commit_lock: Mutex::new(thread::current().id()),
+      commit_lock: TokioMutex::new(thread::current().id()),
     }
   }
 
@@ -248,7 +248,7 @@ impl Segment {
 
   /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
   pub async fn commit(&self, storage: &Storage, dir: &str, sync_after_write: bool) -> (u64, u64) {
-    let mut lock = self.commit_lock.lock().unwrap();
+    let mut lock = self.commit_lock.lock().await;
     *lock = thread::current().id();
 
     let dir_path = Path::new(dir);
@@ -379,7 +379,7 @@ impl Segment {
       storage.read(labels_path.to_str().unwrap()).await;
     let (time_series, time_series_size): (DashMap<u32, TimeSeries>, _) =
       storage.read(time_series_path.to_str().unwrap()).await;
-    let commit_lock = Mutex::new(thread::current().id());
+    let commit_lock = TokioMutex::new(thread::current().id());
 
     let total_size = metadata_size
       + terms_size
@@ -511,7 +511,7 @@ mod tests {
   use crate::request_manager::query_dsl::{QueryDslParser, Rule};
   use pest::Parser;
 
-  use crate::utils::sync::{is_sync, thread};
+  use crate::utils::sync::{is_sync_send, thread};
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, pest::error::Error<Rule>> {
     let test_string = term;
@@ -638,7 +638,7 @@ mod tests {
 
   #[test]
   fn test_new_segment() {
-    is_sync::<Segment>();
+    is_sync_send::<Segment>();
 
     let segment = Segment::new();
     assert!(segment.is_empty());

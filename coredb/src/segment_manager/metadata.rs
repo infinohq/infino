@@ -171,12 +171,12 @@ mod tests {
   use test_case::test_case;
 
   use super::*;
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   pub fn test_new_metadata() {
     // Check that the metadata implements Sync and Send.
-    is_sync::<Metadata>();
+    is_sync_send::<Metadata>();
 
     // Check that empty/new metyadata is as expected.
     let m: Metadata = Metadata::new();

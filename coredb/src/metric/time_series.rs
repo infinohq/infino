@@ -199,12 +199,12 @@ mod tests {
   use rand::Rng;
 
   use super::*;
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   fn test_new() {
     // Check that the time series implements sync.
-    is_sync::<TimeSeries>();
+    is_sync_send::<TimeSeries>();
 
     // Check that a new time series is empty.
     let ts = TimeSeries::new();

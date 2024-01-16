@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query};
 use axum::routing::{delete, put};
-use axum::{extract::State, routing::get, routing::post, Json, Router};
+use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
 use log::{debug, error, info};
@@ -98,7 +98,7 @@ async fn commit_in_loop(
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
   loop {
-    state.coredb.commit(true);
+    state.coredb.commit(true).await;
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
@@ -586,7 +586,7 @@ async fn search_metrics(
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
   // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
-  state.coredb.commit(true);
+  state.coredb.commit(true).await;
 
   Ok(())
 }
@@ -602,6 +602,7 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
 }
 
 /// Create a new index in CoreDB with the given name.
+#[debug_handler]
 async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,

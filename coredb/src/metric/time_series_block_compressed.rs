@@ -85,12 +85,12 @@ mod tests {
   use super::super::constants::BLOCK_SIZE_FOR_TIME_SERIES;
   use super::*;
 
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   fn test_new() {
     // Check whether TimeSeriesBlockCompressed implements sync.
-    is_sync::<TimeSeriesBlockCompressed>();
+    is_sync_send::<TimeSeriesBlockCompressed>();
 
     // Check that a newly created compressed time series block is empty.
     let tsbc = TimeSeriesBlockCompressed::new();

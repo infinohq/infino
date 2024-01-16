@@ -160,12 +160,12 @@ mod tests {
   use test_case::test_case;
 
   use super::*;
-  use crate::utils::sync::is_sync;
+  use crate::utils::sync::is_sync_send;
 
   #[test]
   fn test_empty_postings_block() {
     // Make sure that PostingsBlock implements sync.
-    is_sync::<PostingsBlock>();
+    is_sync_send::<PostingsBlock>();
 
     // Verify that a new postings block is empty.
     let pb = PostingsBlock::new();
