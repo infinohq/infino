@@ -253,7 +253,7 @@ mod tests {
     // The first block is compressed, and should have BLOCK_SIZE_FOR_LOG_MESSAGES entries.
     assert_eq!(pl.get_postings_list_compressed().read().unwrap().len(), 1);
     let first_compressed_postings_block_lock = pl.get_postings_list_compressed().read().unwrap();
-    let first_compressed_postings_block = first_compressed_postings_block_lock.get(0).unwrap();
+    let first_compressed_postings_block = first_compressed_postings_block_lock.first().unwrap();
     let first_postings_block = PostingsBlock::try_from(first_compressed_postings_block).unwrap();
     assert_eq!(first_postings_block.len(), BLOCK_SIZE_FOR_LOG_MESSAGES);
 

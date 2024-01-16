@@ -51,7 +51,7 @@ pub fn decompress_numeric_vector(compressed: &[u8]) -> Result<Vec<MetricPoint>, 
 
 /// Compress a given MetricPoint vector to a vector of u8 integers, using delta-of-delta compression.
 pub fn compress_metric_point_vector(metric_points: &[MetricPoint]) -> Vec<u8> {
-  let start_metric_point = metric_points.get(0).unwrap();
+  let start_metric_point = metric_points.first().unwrap();
   let start_time = start_metric_point.get_time();
 
   // We need to convert to/from metric_point::MetricPoint/tsz::DataPoint to avoid tsz::DataPoint in

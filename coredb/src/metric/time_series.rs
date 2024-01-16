@@ -234,7 +234,7 @@ mod tests {
     assert_eq!(ts.last_block.read().unwrap().len(), 1);
     let last_block_lock = ts.last_block.read().unwrap();
     let time_series_metric_points = &*last_block_lock.get_metrics_metric_points().read().unwrap();
-    let metric_point = time_series_metric_points.get(0).unwrap();
+    let metric_point = time_series_metric_points.first().unwrap();
     assert_eq!(metric_point.get_time(), 100);
     assert_eq!(metric_point.get_value(), 200.0);
 
@@ -290,7 +290,7 @@ mod tests {
     );
 
     let uncompressed =
-      TimeSeriesBlock::try_from(ts.compressed_blocks.read().unwrap().get(0).unwrap()).unwrap();
+      TimeSeriesBlock::try_from(ts.compressed_blocks.read().unwrap().first().unwrap()).unwrap();
     assert_eq!(uncompressed.len(), BLOCK_SIZE_FOR_TIME_SERIES);
     let metric_points_lock = uncompressed.get_metrics_metric_points().read().unwrap();
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {

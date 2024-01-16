@@ -531,7 +531,7 @@ mod tests {
   }
 
   fn populate_segment(segment: &mut Segment) {
-    let log_messages = vec![
+    let log_messages = [
       ("log 1", "this is a test log message"),
       ("log 2", "this is another log message"),
       ("log 3", "test log for different term"),
@@ -776,7 +776,7 @@ mod tests {
         .get_metrics_metric_points()
         .read()
         .unwrap()
-        .get(0)
+        .first()
         .unwrap()
         .get_value(),
       100.0
@@ -790,7 +790,7 @@ mod tests {
         Ok(logs) => {
           assert_eq!(logs.len(), 1);
           assert_eq!(
-            logs.get(0).unwrap().get_text(),
+            logs.first().unwrap().get_text(),
             "this is my 1st log message"
           );
         }

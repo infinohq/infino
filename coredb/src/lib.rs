@@ -367,7 +367,7 @@ mod tests {
         .search_logs("message", "", start, end)
         .await
         .expect("Error in search_logs");
-      assert_eq!(results.get(0).unwrap().get_text(), "log message 2");
+      assert_eq!(results.first().unwrap().get_text(), "log message 2");
       assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
     }
 
@@ -376,7 +376,7 @@ mod tests {
       .get_metrics("__name__", "some_metric", start, end)
       .await
       .expect("Error in get_metrics");
-    assert_eq!(results.get(0).unwrap().get_value(), 1.0);
+    assert_eq!(results.first().unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
   }
 }

@@ -877,7 +877,7 @@ mod tests {
       Vec::new()
     };
     assert_eq!(results.len(), 1);
-    assert_eq!(results.get(0).unwrap().get_text(), "thisisunique");
+    assert_eq!(results.first().unwrap().get_text(), "thisisunique");
   }
 
   #[tokio::test]
