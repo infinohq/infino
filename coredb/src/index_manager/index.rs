@@ -171,7 +171,7 @@ impl Index {
     };
 
     // Commit the empty index so that the index directory will be created.
-    index.commit(false).await;
+    index.commit(false).await.expect("Could not commit index");
 
     Ok(index)
   }
@@ -312,7 +312,7 @@ impl Index {
     json_body: &str, // Assuming this should be json_query
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, SearchLogsError> {
+  ) -> Result<Vec<LogMessage>, CoreDBError> {
     debug!(
       "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
       url_query, json_body, range_start_time, range_end_time
@@ -329,7 +329,7 @@ impl Index {
     // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
     if is_json_empty {
       if is_url_empty {
-        return Err(SearchLogsError::NoQueryProvided);
+        return Err(SearchLogsError::NoQueryProvided.into());
       } else {
         // Update json_query with the constructed query from url_query
         json_query = format!(
@@ -371,7 +371,7 @@ impl Index {
             .unwrap_or_else(|_| Vec::new())
         }
         None => {
-          let segment = self.refresh_segment(segment_number).await;
+          let segment = self.refresh_segment(segment_number).await?;
 
           let ast = QueryDslParser::parse(Rule::start, &json_query)
             .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))?;
@@ -395,7 +395,7 @@ impl Index {
     &self,
     segment_number: u32,
     sync_after_write: bool,
-  ) -> (String, u64, u64, u64, u64) {
+  ) -> Result<(String, u64, u64, u64, u64), CoreDBError> {
     debug!("Committing segment with segment_number: {}", segment_number);
 
     // Get the segment corresponding to the segment_number.
@@ -419,15 +419,15 @@ impl Index {
 
     let (uncompressed, compressed) = segment
       .commit(&self.storage, segment_dir_path.as_str(), sync_after_write)
-      .await;
+      .await?;
 
-    (
+    Ok((
       segment_id.to_owned(),
       start_time,
       end_time,
       uncompressed,
       compressed,
-    )
+    ))
   }
 
   /// Get the summaries of the segments in this index.
@@ -454,7 +454,7 @@ impl Index {
     }
 
     let (all_segments_summaries_vec, _): (Vec<SegmentSummary>, _) =
-      self.storage.read(&all_segments_file).await;
+      self.storage.read(&all_segments_file).await?;
 
     info!(
       "Number of segment summaries in index dir path {}: {}",
@@ -470,7 +470,7 @@ impl Index {
   /// If sync_after_write is set to true, make sure that the OS buffers are flushed to
   /// disk before returning (typically sync_after_write should be set to true in tests that refresh the index
   /// immediately after committing).
-  pub async fn commit(&self, sync_after_write: bool) {
+  pub async fn commit(&self, sync_after_write: bool) -> Result<(), CoreDBError> {
     info!("Committing index at {}", chrono::Utc::now());
 
     // Lock to make sure only one thread calls commit at a time.
@@ -487,7 +487,7 @@ impl Index {
     let (segment_id, start_time, end_time, uncompressed_segment_size, _compressed_segment_size) =
       self
         .commit_segment(original_current_segment_number, sync_after_write)
-        .await;
+        .await?;
 
     // Update the start and end time in the summary for this segment.
     // We don't update these in append_* methods for performance, and update only in commit.
@@ -514,7 +514,7 @@ impl Index {
           new_segment_dir_path.as_str(),
           sync_after_write,
         )
-        .await;
+        .await?;
 
       // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
       let summary = SegmentSummary::new(new_segment_number, &new_segment);
@@ -534,13 +534,13 @@ impl Index {
       // current segment.
       self
         .commit_segment(new_segment_number, sync_after_write)
-        .await;
+        .await?;
 
       // Commit the original segment again to commit any updates from the previous commit till the
       // time of changing the current_sgement_number above.
       self
         .commit_segment(original_current_segment_number, sync_after_write)
-        .await;
+        .await?;
 
       // We created a new segment - possibly exceeding the memory budget. So, evict older segments if needed.
       self.evict_from_memory_segments_map();
@@ -554,25 +554,27 @@ impl Index {
     self
       .storage
       .write(summaries, all_segments_file.as_str(), sync_after_write)
-      .await;
+      .await?;
 
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     self
       .storage
       .write(&self.metadata, metadata_path.as_str(), sync_after_write)
-      .await;
+      .await?;
+
+    Ok(())
   }
 
   /// Reads a segment from memory and insert it in memory_segments_map.
-  async fn refresh_segment(&self, segment_number: u32) -> Segment {
+  async fn refresh_segment(&self, segment_number: u32) -> Result<Segment, CoreDBError> {
     let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
     debug!(
       "Loading segment with segment number {} and path {}",
       segment_number, segment_dir_path
     );
-    let (segment, _) = Segment::refresh(&self.storage, &segment_dir_path).await;
+    let (segment, _) = Segment::refresh(&self.storage, &segment_dir_path).await?;
 
-    segment
+    Ok(segment)
   }
 
   /// Read the index from the given index_dir_path.
@@ -586,7 +588,7 @@ impl Index {
 
     // Read metadata.
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
-    let (metadata, _): (Metadata, _) = storage.read(metadata_path.as_str()).await;
+    let (metadata, _): (Metadata, _) = storage.read(metadata_path.as_str()).await?;
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
@@ -616,7 +618,7 @@ impl Index {
       search_memory_budget_consumed_bytes += uncompressed_size;
       if search_memory_budget_consumed_bytes <= search_memory_budget_bytes {
         let segment_number = segment_summary.get_segment_number();
-        let segment = index.refresh_segment(segment_number).await;
+        let segment = index.refresh_segment(segment_number).await?;
         memory_segments_map.insert(segment_number, segment);
       } else {
         // We have reached the memory budget - so do not load any more segments.
@@ -672,7 +674,7 @@ impl Index {
     label_value: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<MetricPoint> {
+  ) -> Result<Vec<MetricPoint>, CoreDBError> {
     let mut retval = Vec::new();
 
     // Get the segments overlapping with the given time range. This is in the reverse chronological order.
@@ -688,7 +690,7 @@ impl Index {
           segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
         }
         None => {
-          let segment = self.refresh_segment(segment_number).await;
+          let segment = self.refresh_segment(segment_number).await?;
           segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
         }
       };
@@ -696,7 +698,7 @@ impl Index {
       retval.append(&mut metric_points);
     }
 
-    retval
+    Ok(retval)
   }
 
   pub fn get_index_dir(&self) -> String {
@@ -793,7 +795,7 @@ mod tests {
       );
     }
 
-    expected.commit(false).await;
+    expected.commit(false).await.expect("Could not commit");
     let received = Index::refresh(&index_dir_path, 1024).await.unwrap();
 
     assert_eq!(&expected.index_dir_path, &received.index_dir_path);
@@ -897,7 +899,8 @@ mod tests {
     let metric_name_label = "__name__";
     let received_metric_points = index
       .get_metrics(metric_name_label, "some_name", 0, u64::MAX)
-      .await;
+      .await
+      .expect("Error in get_metrics");
 
     assert_eq!(expected_metric_points, received_metric_points);
   }
@@ -950,12 +953,20 @@ mod tests {
 
       // Force commit and then refresh the index.
       // This will write one segment to disk and create a new empty segment.
-      index.commit(true).await;
+      index.commit(true).await.expect("Could not commit index");
 
       // Read the index from disk and see that it has expected number of log messages and metric points.
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
-      let (original_segment, original_segment_size) =
-        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap()).await;
+      let index = Index::refresh(&index_dir_path, 1024 * 1024)
+        .await
+        .expect("Could not refresh index");
+      let (original_segment, original_segment_size) = Segment::refresh(
+        &Storage::new(),
+        &original_segment_path
+          .to_str()
+          .expect("Could not convert path to str"),
+      )
+      .await
+      .expect("Could not refresh segment");
       assert_eq!(
         original_segment.get_log_message_count(),
         original_segment_num_log_messages
@@ -1000,10 +1011,12 @@ mod tests {
       }
 
       // Force a commit and refresh. The index should still have only 2 segments.
-      index.commit(true).await;
+      index.commit(true).await.expect("Could not commit index");
       let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
       let (mut original_segment, original_segment_size) =
-        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap()).await;
+        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap())
+          .await
+          .expect("Could not refresh segment");
       assert_eq!(index.memory_segments_map.len(), 2);
 
       assert_eq!(
@@ -1053,10 +1066,18 @@ mod tests {
       }
 
       // Force a commit and refresh.
-      index.commit(false).await;
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
-      (original_segment, _) =
-        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap()).await;
+      index.commit(false).await.expect("Could not commit index");
+      let index = Index::refresh(&index_dir_path, 1024 * 1024)
+        .await
+        .expect("Could not refresh index");
+      (original_segment, _) = Segment::refresh(
+        &Storage::new(),
+        &original_segment_path
+          .to_str()
+          .expect("Could not refresh segment"),
+      )
+      .await
+      .expect("Could not refresh segment");
 
       let current_segment_log_message_count;
       let current_segment_metric_point_count;
@@ -1090,10 +1111,12 @@ mod tests {
       );
 
       // Commit and refresh a few times. The index should not change.
-      index.commit(false).await;
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
-      index.commit(false).await;
-      index.commit(false).await;
+      index.commit(false).await.expect("Could not commit index");
+      let index = Index::refresh(&index_dir_path, 1024 * 1024)
+        .await
+        .expect("Could not refresh index");
+      index.commit(false).await.expect("Could not commit index");
+      index.commit(false).await.expect("Could not commit index");
       Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
       let index_final = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
       let index_final_current_segment_ref = index_final.get_current_segment_ref();
@@ -1147,14 +1170,14 @@ mod tests {
       // Commit after indexing more than commit_after messages.
       num_log_messages_from_last_commit += 1;
       if num_log_messages_from_last_commit > commit_after {
-        index.commit(false).await;
+        index.commit(false).await.expect("Could not commit index");
         num_log_messages_from_last_commit = 0;
         sleep(Duration::from_millis(1000));
       }
     }
 
     // Commit and sleep to ensure the index is written to disk.
-    index.commit(true).await;
+    index.commit(true).await.expect("Could not commit index");
     sleep(Duration::from_millis(1000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -1250,7 +1273,7 @@ mod tests {
           &message,
         );
       }
-      index.commit(false).await;
+      index.commit(false).await.expect("Could not commit index");
     }
 
     for i in 1..num_message_suffixes {
@@ -1303,12 +1326,12 @@ mod tests {
 
       // Commit after we have indexed more than commit_after messages.
       if num_metric_points_from_last_commit >= commit_after {
-        index.commit(false).await;
+        index.commit(false).await.expect("Could not commit index");
         num_metric_points_from_last_commit = 0;
       }
     }
     // Commit and sleep to make sure the index is written to disk.
-    index.commit(true).await;
+    index.commit(true).await.expect("Could not commit index");
     sleep(Duration::from_millis(10000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -1339,7 +1362,8 @@ mod tests {
         start_time - 100,
         end_time + 100,
       )
-      .await;
+      .await
+      .expect("Error in calling get_metrics");
     assert_eq!(num_metric_points, ts.len() as u32)
   }
 
@@ -1352,7 +1376,7 @@ mod tests {
     let index = Index::new(&temp_path_buf.to_str().unwrap()).await.unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
-    index.commit(false).await;
+    index.commit(false).await.expect("Could not commit index");
   }
 
   #[tokio::test]
@@ -1415,7 +1439,7 @@ mod tests {
       let start = i * 2 * 1000;
       index.append_log_message(start, &HashMap::new(), "message_1");
       index.append_log_message(start + 500, &HashMap::new(), "message_2");
-      index.commit(false).await;
+      index.commit(false).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
@@ -1477,7 +1501,10 @@ mod tests {
       let rt = tokio::runtime::Runtime::new().unwrap();
       rt.block_on(async {
         for _ in 0..100 {
-          arc_index_clone.commit(true).await;
+          arc_index_clone
+            .commit(true)
+            .await
+            .expect("Could not commit index");
           sleep(ten_millis);
         }
       });
@@ -1511,9 +1538,14 @@ mod tests {
     }
 
     // Commit again to cover the scenario that append threads run for more time than the commit thread
-    arc_index.commit(true).await;
+    arc_index
+      .commit(true)
+      .await
+      .expect("Could not commit index");
 
-    let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
+    let index = Index::refresh(&index_dir_path, 1024 * 1024)
+      .await
+      .expect("Could not refresh index");
     let expected_len = num_threads * num_appends_per_thread;
 
     let results = index
@@ -1531,7 +1563,8 @@ mod tests {
 
     let results = index
       .get_metrics("label1", "value1", 0, expected_len as u64)
-      .await;
+      .await
+      .expect("Error in get_metrics");
     let received_metric_points_len = results.len();
 
     assert_eq!(expected_len, results.len());
@@ -1553,7 +1586,7 @@ mod tests {
       .await
       .unwrap();
     index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
-    index.commit(true).await;
+    index.commit(true).await.expect("Could not commit index");
 
     // Create one more new index using same dir location
     let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
@@ -1633,7 +1666,7 @@ mod tests {
       let message_end = &format!("message_{}", end);
       index.append_log_message(start, &HashMap::new(), message_start);
       index.append_log_message(end, &HashMap::new(), message_end);
-      index.commit(false).await;
+      index.commit(false).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.

@@ -40,7 +40,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
-use coredb::utils::error::SearchLogsError;
+use coredb::utils::error::{CoreDBError, SearchLogsError};
 use coredb::CoreDB;
 use utils::error::InfinoError;
 
@@ -98,11 +98,15 @@ async fn commit_in_loop(
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
   loop {
-    state.coredb.commit(true).await;
+    let result = state.coredb.commit(true).await;
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
       break;
+    }
+
+    if let Err(e) = result {
+      error!("Error committing to coredb: {}", e);
     }
 
     sleep(Duration::from_secs(commit_interval_in_seconds as u64)).await;
@@ -470,23 +474,31 @@ async fn search_logs(
         serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
       Ok(result_json)
     }
-    Err(search_logs_error) => {
-      // Handle the error and return an appropriate status code and error message.
-      match search_logs_error {
-        SearchLogsError::JsonParseError(_) => {
-          Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+    Err(codedb_error) => {
+      match codedb_error {
+        CoreDBError::SearchLogsError(search_logs_error) => {
+          // Handle the error and return an appropriate status code and error message.
+          match search_logs_error {
+            SearchLogsError::JsonParseError(_) => {
+              Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+            }
+            SearchLogsError::SegmentSearchError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::SegmentError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::NoQueryProvided => {
+              Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
+            }
+          }
         }
-        SearchLogsError::SegmentSearchError(_) => Err((
+        _ => Err((
           StatusCode::INTERNAL_SERVER_ERROR,
           "Internal server error".to_string(),
         )),
-        SearchLogsError::SegmentError(_) => Err((
-          StatusCode::INTERNAL_SERVER_ERROR,
-          "Internal server error".to_string(),
-        )),
-        SearchLogsError::NoQueryProvided => {
-          Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
-        }
       }
     }
   }
@@ -540,21 +552,32 @@ async fn summarize(
         }
       }
     }
-    Err(search_logs_error) => {
-      // Handle the error when calling search_logs
-      Err(match search_logs_error {
-        // Map SearchLogsError to appropriate StatusCode and error message
-        SearchLogsError::JsonParseError(_) => {
-          (StatusCode::BAD_REQUEST, "Invalid JSON input".to_string())
+    Err(codedb_error) => {
+      match codedb_error {
+        CoreDBError::SearchLogsError(search_logs_error) => {
+          // Handle the error and return an appropriate status code and error message.
+          match search_logs_error {
+            SearchLogsError::JsonParseError(_) => {
+              Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+            }
+            SearchLogsError::SegmentSearchError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::SegmentError(_) => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+            SearchLogsError::NoQueryProvided => {
+              Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
+            }
+          }
         }
-        SearchLogsError::SegmentSearchError(_) | SearchLogsError::SegmentError(_) => (
+        _ => Err((
           StatusCode::INTERNAL_SERVER_ERROR,
           "Internal server error".to_string(),
-        ),
-        SearchLogsError::NoQueryProvided => {
-          (StatusCode::BAD_REQUEST, "No query provided".to_string())
-        }
-      })
+        )),
+      }
     }
   }
 }
@@ -563,7 +586,7 @@ async fn summarize(
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
-) -> String {
+) -> Result<String, (StatusCode, String)> {
   debug!("Searching metrics: {:?}", metrics_query);
 
   let results = state
@@ -580,15 +603,33 @@ async fn search_metrics(
     )
     .await;
 
-  serde_json::to_string(&results).expect("Could not convert search results to json")
+  match results {
+    Ok(metrics) => {
+      Ok(serde_json::to_string(&metrics).expect("Could not convert search results to json"))
+    }
+
+    // TODO: separate between user triggered errors and internal errors.
+    Err(_) => Err((
+      StatusCode::INTERNAL_SERVER_ERROR,
+      "Internal server error".to_string(),
+    )),
+  }
 }
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
   // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
-  state.coredb.commit(true).await;
+  let result = state.coredb.commit(true).await;
 
-  Ok(())
+  match result {
+    Ok(result) => Ok(result),
+
+    // TODO: separate between user triggered errors and internal errors.
+    Err(_) => Err((
+      StatusCode::INTERNAL_SERVER_ERROR,
+      "Internal server error".to_string(),
+    )),
+  }
 }
 
 /// Get index directory used by CoreDB.
@@ -871,7 +912,8 @@ mod tests {
       .unwrap_or(Utc::now().timestamp_millis() as u64);
     metric_points_received = refreshed_coredb
       .get_metrics(&query.label_name, &query.label_value, start_time, end_time)
-      .await;
+      .await
+      .expect("Could not get metrics");
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
   }

@@ -38,44 +38,97 @@ pub enum CoreDBError {
 
   #[error("Index not found. {0}")]
   IndexNotFound(String),
-}
 
-#[derive(Debug)]
-pub enum AstError {
-  InvalidQuery,
-  CombinerFailure(String),
-  TraverseError(String),
-  PostingsListError(String),
-  DocMatchingError(String),
-  UnsupportedQuery(String),
-}
+  #[error("Storage Error:  {0}")]
+  StorageError(String),
 
-#[derive(Debug)]
-pub enum LogError {
-  LogMessageNotFound(u32),
-}
+  #[error("IO Error: {0}")]
+  IOError(String),
 
-#[derive(Debug)]
-pub enum SegmentSearchError {
-  AstError(AstError),
-  LogError(LogError),
-}
-
-#[derive(Debug)]
-pub enum SegmentError {
-  SegmentNotFoundError(u32),
-}
-
-#[derive(Debug)]
-pub enum SummaryError {
-  ExternalSummaryError(String),
+  #[error("Search Logs Error: {0}")]
   SearchLogsError(SearchLogsError),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum AstError {
+  #[error("Invalid query")]
+  InvalidQuery,
+
+  #[error("Combiner failure: {0}")]
+  CombinerFailure(String),
+
+  #[error("Traverse error: {0}")]
+  TraverseError(String),
+
+  #[error("Postings list error: {0}")]
+  PostingsListError(String),
+
+  #[error("Doc matching error: {0}")]
+  DocMatchingError(String),
+
+  #[error("Unsupported query: {0}")]
+  UnsupportedQuery(String),
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum LogError {
+  #[error("Log mesage not found error: {0}")]
+  LogMessageNotFound(u32),
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum SegmentSearchError {
+  #[error("Ast error: {0}")]
+  AstError(AstError),
+
+  #[error("Log error: {0}")]
+  LogError(LogError),
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum SegmentError {
+  #[error("Segment not found error: {0}")]
+  SegmentNotFoundError(u32),
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum SummaryError {
+  #[error("External summary error: {0}")]
+  ExternalSummaryError(String),
+
+  #[error("Search logs error: {0}")]
+  SearchLogsError(SearchLogsError),
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
 pub enum SearchLogsError {
+  #[error("Json parse error: {0}")]
   JsonParseError(String),
+
+  #[error("Segment search error: {0}")]
   SegmentSearchError(SegmentSearchError),
+
+  #[error("Segment error: {0}")]
   SegmentError(SegmentError),
+
+  #[error("No query provided")]
   NoQueryProvided,
+}
+
+impl From<object_store::Error> for CoreDBError {
+  fn from(error: object_store::Error) -> Self {
+    CoreDBError::StorageError(error.to_string())
+  }
+}
+
+impl From<std::io::Error> for CoreDBError {
+  fn from(error: std::io::Error) -> Self {
+    CoreDBError::IOError(error.to_string())
+  }
+}
+
+impl From<SearchLogsError> for CoreDBError {
+  fn from(error: SearchLogsError) -> Self {
+    CoreDBError::SearchLogsError(error)
+  }
 }

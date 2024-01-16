@@ -149,18 +149,16 @@ impl CoreDB {
     json_body: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, SearchLogsError> {
+  ) -> Result<Vec<LogMessage>, CoreDBError> {
     let index = self
       .index_map
       .get(self.get_default_index_name())
       .ok_or(SearchLogsError::NoQueryProvided)?;
 
-    let results = index
+    index
       .value()
       .search_logs(query, json_body, range_start_time, range_end_time)
-      .await?;
-
-    Ok(results)
+      .await
   }
 
   /// Get the metric points for given label and range.
@@ -170,7 +168,7 @@ impl CoreDB {
     label_value: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<MetricPoint> {
+  ) -> Result<Vec<MetricPoint>, CoreDBError> {
     self
       .index_map
       .get(self.get_default_index_name())
@@ -183,14 +181,14 @@ impl CoreDB {
   /// Commit the index to disk. If the flag sync_after_commit is set to true,
   /// the directory is sync'd immediately instead of relying on the OS to do so,
   /// hence this flag is usually set to true only in tests.
-  pub async fn commit(&self, sync_after_commit: bool) {
+  pub async fn commit(&self, sync_after_commit: bool) -> Result<(), CoreDBError> {
     self
       .index_map
       .get(self.get_default_index_name())
       .unwrap()
       .value()
       .commit(sync_after_commit)
-      .await;
+      .await
   }
 
   /// Refresh the default index from the given directory path.
@@ -356,7 +354,7 @@ mod tests {
       2.0,
     );
 
-    coredb.commit(true).await;
+    coredb.commit(true).await.expect("Could not commit");
     let coredb = CoreDB::refresh(config_dir_path).await;
 
     let end = Utc::now().timestamp_millis() as u64;
@@ -376,7 +374,8 @@ mod tests {
     // Search for metric points.
     let results = coredb
       .get_metrics(&"__name__", &"some_metric", start, end)
-      .await;
+      .await
+      .expect("Error in get_metrics");
     assert_eq!(results.get(0).unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
   }

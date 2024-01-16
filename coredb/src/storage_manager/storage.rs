@@ -6,6 +6,8 @@ use object_store::{local::LocalFileSystem, ObjectStore};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use crate::utils::error::CoreDBError;
+
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
 pub const COMPRESSION_LEVEL: i32 = 15;
 
@@ -25,8 +27,8 @@ impl Storage {
     &self,
     to_write: &T,
     file_path: &str,
-    sync_after_write: bool,
-  ) -> (u64, u64) {
+    _sync_after_write: bool,
+  ) -> Result<(u64, u64), CoreDBError> {
     let input = serde_json::to_string(&to_write).unwrap();
     let input = input.as_bytes();
     let uncomepressed_length = input.len() as u64;
@@ -38,23 +40,19 @@ impl Storage {
 
     let compressed_length = output.len() as u64;
     let path = Path::from(file_path);
-    self.object_store.put(&path, output).await.unwrap();
+    self.object_store.put(&path, output).await?;
 
-    (uncomepressed_length, compressed_length)
+    Ok((uncomepressed_length, compressed_length))
   }
 
   /// Read the map from the given file. Returns the map and the number of bytes read after decompression.
-  pub async fn read<T: DeserializeOwned>(&self, file_path: &str) -> (T, u64) {
+  pub async fn read<T: DeserializeOwned>(&self, file_path: &str) -> Result<(T, u64), CoreDBError> {
     let path = Path::from(file_path);
-    let get_result = self
-      .object_store
-      .get(&path)
-      .await
-      .expect("Could not get file");
-    let bytes = get_result.bytes().await.expect("Could not get bytes");
-    let data = zstd::decode_all(&bytes[..]).unwrap();
+    let get_result = self.object_store.get(&path).await?;
+    let bytes = get_result.bytes().await?;
+    let data = zstd::decode_all(&bytes[..])?;
     let retval: T = serde_json::from_slice(&data).unwrap();
-    (retval, data.len() as u64)
+    Ok((retval, data.len() as u64))
   }
 }
 
@@ -76,11 +74,17 @@ mod tests {
     for i in 1..=num_keys {
       expected.insert(format!("{prefix}{i}"), i);
     }
-    let (uncompressed, compressed) = storage.write(&expected, file_path, false).await;
+    let (uncompressed, compressed) = storage
+      .write(&expected, file_path, false)
+      .await
+      .expect("Could not write to storage");
     assert!(uncompressed > 0);
     assert!(compressed > 0);
 
-    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage.read(file_path).await;
+    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage
+      .read(file_path)
+      .await
+      .expect("Could not read from storage");
     for i in 1..=num_keys {
       assert!(received.get(&String::from(format!("{prefix}{i}"))).unwrap() == &i);
     }
@@ -103,11 +107,17 @@ mod tests {
       expected.push(format!("{prefix}{i}"));
     }
 
-    let (uncompressed, compressed) = storage.write(&expected, file_path, false).await;
+    let (uncompressed, compressed) = storage
+      .write(&expected, file_path, false)
+      .await
+      .expect("Could not write to storage");
     assert!(uncompressed > 0);
     assert!(compressed > 0);
 
-    let (received, num_bytes_read): (Vec<_>, _) = storage.read(file_path).await;
+    let (received, num_bytes_read): (Vec<_>, _) = storage
+      .read(file_path)
+      .await
+      .expect("Could not read from storage");
 
     for i in 1..=num_keys {
       assert!(received.contains(&format!("{prefix}{i}")));
@@ -125,11 +135,17 @@ mod tests {
     let storage = Storage::new();
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
-    let (uncompressed, compressed) = storage.write(&expected, file_path, false).await;
+    let (uncompressed, compressed) = storage
+      .write(&expected, file_path, false)
+      .await
+      .expect("Could not write to storage");
     assert!(uncompressed > 0);
     assert!(compressed > 0);
 
-    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage.read(file_path).await;
+    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage
+      .read(file_path)
+      .await
+      .expect("Could not read from storage");
     assert!(received.len() == 0);
 
     // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
