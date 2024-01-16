@@ -31,7 +31,7 @@ impl InfinoApiClient {
 
     if let Ok(lines) = io::read_lines(input_data_path) {
       let client = reqwest::Client::new();
-      for (_index, line) in lines.enumerate() {
+      for line in lines {
         num_docs += 1;
         num_docs_in_this_batch += 1;
 
