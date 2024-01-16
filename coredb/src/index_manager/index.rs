@@ -39,7 +39,7 @@ const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
 /// File name to store index metadata.
 const METADATA_FILE_NAME: &str = "metadata.bin";
 
-/// Default threshold for size of segmen used in some tests.
+/// Default threshold for size of segment used in some tests.
 /// A new segment will be created in the next commit when a segment exceeds this size.
 #[cfg(test)]
 const DEFAULT_SEGMENT_SIZE_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024; // 256MB
