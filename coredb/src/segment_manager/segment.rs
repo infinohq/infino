@@ -518,9 +518,16 @@ mod tests {
 
   use crate::utils::sync::{is_sync_send, thread};
 
-  fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, pest::error::Error<Rule>> {
+  fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, Box<pest::error::Error<Rule>>> {
     let test_string = term;
-    QueryDslParser::parse(Rule::start, &test_string)
+    let result = QueryDslParser::parse(Rule::start, test_string);
+
+    match result {
+      Ok(pairs) => Ok(pairs),
+
+      // The error can be arbitrarily large. To utilize the stack effectively, Box the error and return.
+      Err(e) => Err(Box::new(e)),
+    }
   }
 
   fn populate_segment(segment: &mut Segment) {
@@ -555,7 +562,7 @@ mod tests {
     }
     "#;
 
-    match QueryDslParser::parse(Rule::start, &query_dsl) {
+    match QueryDslParser::parse(Rule::start, query_dsl) {
       Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
         Ok(results) => {
           assert!(results
@@ -563,11 +570,11 @@ mod tests {
             .all(|log| log.get_text().contains("test") && log.get_text().contains("log")));
         }
         Err(err) => {
-          assert!(false, "Error in search_logs: {:?}", err);
+          panic!("Error in search_logs: {:?}", err);
         }
       },
       Err(err) => {
-        assert!(false, "Error parsing query DSL: {:?}", err);
+        panic!("Error parsing query DSL: {:?}", err);
       }
     }
   }
@@ -590,7 +597,7 @@ mod tests {
     "#;
 
     // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, &query_dsl) {
+    match QueryDslParser::parse(Rule::start, query_dsl) {
       Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
         Ok(results) => {
           assert!(results
@@ -598,11 +605,11 @@ mod tests {
             .any(|log| log.get_text().contains("another") || log.get_text().contains("different")));
         }
         Err(err) => {
-          assert!(false, "Error in search_logs: {:?}", err);
+          panic!("Error in search_logs: {:?}", err);
         }
       },
       Err(err) => {
-        assert!(false, "Error parsing query DSL: {:?}", err);
+        panic!("Error parsing query DSL: {:?}", err);
       }
     }
   }
@@ -624,7 +631,7 @@ mod tests {
     "#;
 
     // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, &query_dsl_query) {
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
       Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
         Ok(results) => {
           assert!(!results
@@ -632,11 +639,11 @@ mod tests {
             .any(|log| log.get_text().contains("excluded")));
         }
         Err(err) => {
-          assert!(false, "Error in search_logs: {:?}", err);
+          panic!("Error in search_logs: {:?}", err);
         }
       },
       Err(err) => {
-        assert!(false, "Error parsing query DSL: {:?}", err);
+        panic!("Error parsing query DSL: {:?}", err);
       }
     }
   }

@@ -964,7 +964,7 @@ mod tests {
         .expect("Could not refresh index");
       let (original_segment, original_segment_size) = Segment::refresh(
         &Storage::new(),
-        &original_segment_path
+        original_segment_path
           .to_str()
           .expect("Could not convert path to str"),
       )
@@ -1017,7 +1017,7 @@ mod tests {
       index.commit(true).await.expect("Could not commit index");
       let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
       let (mut original_segment, original_segment_size) =
-        Segment::refresh(&Storage::new(), &original_segment_path.to_str().unwrap())
+        Segment::refresh(&Storage::new(), original_segment_path.to_str().unwrap())
           .await
           .expect("Could not refresh segment");
       assert_eq!(index.memory_segments_map.len(), 2);
@@ -1075,7 +1075,7 @@ mod tests {
         .expect("Could not refresh index");
       (original_segment, _) = Segment::refresh(
         &Storage::new(),
-        &original_segment_path
+        original_segment_path
           .to_str()
           .expect("Could not refresh segment"),
       )
@@ -1273,7 +1273,7 @@ mod tests {
         index.append_log_message(
           Utc::now().timestamp_millis() as u64,
           &HashMap::new(),
-          &message,
+          message,
         );
       }
       index.commit(false).await.expect("Could not commit index");
@@ -1376,7 +1376,7 @@ mod tests {
 
     // Create a path within index_dir that does not exist.
     let temp_path_buf = index_dir.path().join("-doesnotexist");
-    let index = Index::new(&temp_path_buf.to_str().unwrap()).await.unwrap();
+    let index = Index::new(temp_path_buf.to_str().unwrap()).await.unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
     index.commit(false).await.expect("Could not commit index");
@@ -1620,7 +1620,7 @@ mod tests {
     // Create a new index in an empty directory - this should work.
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).await;
+    let index = Index::new_with_threshold_params(index_dir_path, 1024, 1024 * 1024).await;
     assert!(index.is_ok());
 
     // Create a new index in an non-empty directory that does not have metadata - this should give an error.
@@ -1628,7 +1628,7 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let file_path = index_dir.path().join("my_file.txt");
     let _ = File::create(&file_path).unwrap();
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024).await;
+    let index = Index::new_with_threshold_params(index_dir_path, 1024, 1024 * 1024).await;
     assert!(index.is_err());
   }
 
@@ -1691,7 +1691,7 @@ mod tests {
       // Check that the queries for unique messages across the entire time range returns exactly one result.
       assert_eq!(
         index
-          .search_logs(&message_start, "", 0, u64::MAX)
+          .search_logs(message_start, "", 0, u64::MAX)
           .await
           .unwrap()
           .len(),
@@ -1699,7 +1699,7 @@ mod tests {
       );
       assert_eq!(
         index
-          .search_logs(&message_end, "", 0, u64::MAX)
+          .search_logs(message_end, "", 0, u64::MAX)
           .await
           .unwrap()
           .len(),
@@ -1709,7 +1709,7 @@ mod tests {
       // Check that the queries for unique messages across the specific time range returns exactly one result.
       assert_eq!(
         index
-          .search_logs(&message_start, "", start, end)
+          .search_logs(message_start, "", start, end)
           .await
           .unwrap()
           .len(),
@@ -1717,7 +1717,7 @@ mod tests {
       );
       assert_eq!(
         index
-          .search_logs(&message_end, "", start, end)
+          .search_logs(message_end, "", start, end)
           .await
           .unwrap()
           .len(),

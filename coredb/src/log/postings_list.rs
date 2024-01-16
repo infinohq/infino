@@ -187,15 +187,15 @@ mod tests {
         .get_log_message_ids()
         .read()
         .unwrap()
-        .get(0)
+        .first()
         .unwrap(),
-      &(100 as u32)
+      &(100_u32)
     );
 
     // Check that the first entry in the initial values is the same as what we appended.
     assert_eq!(
-      pl.get_initial_values().read().unwrap().get(0).unwrap(),
-      &(100 as u32)
+      pl.get_initial_values().read().unwrap().first().unwrap(),
+      &(100_u32)
     );
   }
 
@@ -220,8 +220,8 @@ mod tests {
     // The initial value length should be 1, with the only initial value being the very first value that was inserted.
     assert_eq!(pl.get_initial_values().read().unwrap().len(), 1);
     assert_eq!(
-      pl.get_initial_values().read().unwrap().get(0).unwrap(),
-      &(0 as u32)
+      pl.get_initial_values().read().unwrap().first().unwrap(),
+      &(0_u32)
     );
   }
 
@@ -236,14 +236,14 @@ mod tests {
 
     // Add an additional entry so that one more block is created.
     let second_block_initial_value = 10_001;
-    pl.append(second_block_initial_value as u32);
+    pl.append(second_block_initial_value);
 
     // There should be two blocks. The initial value of the first block should be the very first value appended,
     // while the initial value of the second block should be second_block_initial_value
     assert_eq!(pl.get_initial_values().read().unwrap().len(), 2);
     assert_eq!(
-      pl.get_initial_values().read().unwrap().get(0).unwrap(),
-      &(0 as u32)
+      pl.get_initial_values().read().unwrap().first().unwrap(),
+      &(0_u32)
     );
     assert_eq!(
       pl.get_initial_values().read().unwrap().get(1).unwrap(),
@@ -266,7 +266,7 @@ mod tests {
         .get_log_message_ids()
         .read()
         .unwrap()
-        .get(0)
+        .first()
         .unwrap(),
       &second_block_initial_value
     );

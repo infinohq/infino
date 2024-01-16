@@ -117,7 +117,7 @@ mod tests {
     // Check default settings.
     let config_file_path = get_joined_path(config_dir_path, DEFAULT_CONFIG_FILE_NAME);
     {
-      let mut file = File::create(&config_file_path).unwrap();
+      let mut file = File::create(config_file_path).unwrap();
       file.write_all(b"[coredb]\n").unwrap();
       file
         .write_all(b"index_dir_path = \"/var/index\"\n")
@@ -131,7 +131,7 @@ mod tests {
       file.write_all(b"memory_budget_megabytes = 4096\n").unwrap();
     }
 
-    let settings = Settings::new(&config_dir_path).unwrap();
+    let settings = Settings::new(config_dir_path).unwrap();
     let coredb_settings = settings.get_coredb_settings();
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
     assert_eq!(coredb_settings.get_default_index_name(), ".default");
@@ -156,19 +156,19 @@ mod tests {
       env::set_var("RUN_MODE", "SETTINGSTEST");
       let config_file_path = get_joined_path(config_dir_path, "settingstest.toml");
       {
-        let mut file = File::create(&config_file_path).unwrap();
+        let mut file = File::create(config_file_path).unwrap();
         file.write_all(b"[coredb]\n").unwrap();
         file
           .write_all(b"segment_size_threshold_megabytes=1\n")
           .unwrap();
         file.write_all(b"memory_budget_megabytes=4\n").unwrap();
       }
-      let settings = Settings::new(&config_dir_path).unwrap();
+      let settings = Settings::new(config_dir_path).unwrap();
       let coredb_settings = settings.get_coredb_settings();
       assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
       assert_eq!(
         coredb_settings.get_segment_size_threshold_bytes(),
-        1 * 1024 * 1024
+        1024 * 1024
       );
       assert_eq!(coredb_settings.get_memory_budget_bytes(), 4 * 1024 * 1024);
       assert_eq!(
@@ -187,7 +187,7 @@ mod tests {
     // Create a config where the memory budget is too low.
     let config_file_path = get_joined_path(config_dir_path, DEFAULT_CONFIG_FILE_NAME);
     {
-      let mut file = File::create(&config_file_path).unwrap();
+      let mut file = File::create(config_file_path).unwrap();
       file.write_all(b"[coredb]\n").unwrap();
       file
         .write_all(b"index_dir_path = \"/var/index\"\n")
@@ -202,7 +202,7 @@ mod tests {
     }
 
     // Make sure this config returns an error.
-    let result = Settings::new(&config_dir_path);
+    let result = Settings::new(config_dir_path);
     assert!(result.is_err());
   }
 }

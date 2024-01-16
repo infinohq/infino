@@ -239,7 +239,7 @@ mod tests {
     assert_eq!(metric_point.get_value(), 200.0);
 
     assert_eq!(ts.initial_times.read().unwrap().len(), 1);
-    assert_eq!(ts.initial_times.read().unwrap().get(0).unwrap(), &100);
+    assert_eq!(ts.initial_times.read().unwrap().first().unwrap(), &100);
   }
 
   #[test]
@@ -256,7 +256,7 @@ mod tests {
       BLOCK_SIZE_FOR_TIME_SERIES
     );
     assert_eq!(ts.initial_times.read().unwrap().len(), 1);
-    assert_eq!(ts.initial_times.read().unwrap().get(0).unwrap(), &0);
+    assert_eq!(ts.initial_times.read().unwrap().first().unwrap(), &0);
 
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
       let last_block_lock = ts.last_block.read().unwrap();
@@ -283,7 +283,7 @@ mod tests {
     // There should be 2 initial_times per the two blocks, with start times 0 and
     // BLOCK_SIZE_FOR_TIME_SERIES
     assert_eq!(ts.initial_times.read().unwrap().len(), 2);
-    assert_eq!(ts.initial_times.read().unwrap().get(0).unwrap(), &0);
+    assert_eq!(ts.initial_times.read().unwrap().first().unwrap(), &0);
     assert_eq!(
       ts.initial_times.read().unwrap().get(1).unwrap(),
       &(BLOCK_SIZE_FOR_TIME_SERIES as u64)
@@ -306,7 +306,7 @@ mod tests {
     let ts = TimeSeries::new();
     let num_metric_points = num_blocks * BLOCK_SIZE_FOR_TIME_SERIES as u64;
     for i in 0..num_metric_points {
-      ts.append(i as u64, i as f64);
+      ts.append(i, i as f64);
     }
 
     assert_eq!(
