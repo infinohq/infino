@@ -205,6 +205,9 @@ async fn main() {
   // Load environment variables from .env file, if it exists.
   dotenv().ok();
 
+  // Load environment variables from .env-creds file, if it exists.
+  dotenv::from_filename(".env-creds").ok();
+
   // If log level isn't set, set it to info.
   if env::var("RUST_LOG").is_err() {
     env::set_var("RUST_LOG", "info")
