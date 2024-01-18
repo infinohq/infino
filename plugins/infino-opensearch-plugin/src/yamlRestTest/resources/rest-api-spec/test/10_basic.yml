@@ -5,4 +5,4 @@
         h: component
 
   - match:
-      $body: /^infino-opensearch-plugin-3.0.0-SNAPSHOT\n$/
+      $body: /^infino-opensearch-plugin-2.11.1\n$/
