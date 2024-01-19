@@ -113,12 +113,38 @@ async fn commit_in_loop(
   }
 }
 
+async fn policy_runner(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
+  loop {
+    let result = state.coredb.trigger_retention().await;
+
+    if *shutdown_flag.lock().await {
+      info!("Received shutdown in commit thread. Exiting...");
+      break;
+    }
+
+    if let Err(e) = result {
+      error!(
+        "Error triggering retention policy on index in coredb: {}",
+        e
+      );
+    }
+    sleep(Duration::from_secs(3600)).await;
+  }
+}
+
 /// Axum application for Infino server.
 async fn app(
   config_dir_path: &str,
   image_name: &str,
   image_tag: &str,
-) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
+) -> (
+  Router,
+  JoinHandle<()>,
+  Arc<Mutex<bool>>,
+  Arc<AppState>,
+  JoinHandle<()>,
+  Arc<Mutex<bool>>,
+) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -170,6 +196,12 @@ async fn app(
     commit_thread_shutdown_flag.clone(),
   ));
 
+  let policy_runner_thread_shutdown_flag = Arc::new(Mutex::new(false));
+  let policy_runner_handler = tokio::spawn(policy_runner(
+    shared_state.clone(),
+    policy_runner_thread_shutdown_flag.clone(),
+  ));
+
   // Build our application with a route
   let router: Router = Router::new()
     // GET methods
@@ -195,6 +227,8 @@ async fn app(
     commit_thread_handle,
     commit_thread_shutdown_flag,
     shared_state,
+    policy_runner_handler,
+    policy_runner_thread_shutdown_flag,
   )
 }
 
@@ -216,8 +250,14 @@ async fn main() {
   let image_tag = "3";
 
   // Create app.
-  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) =
-    app(config_dir_path, image_name, image_tag).await;
+  let (
+    app,
+    commit_thread_handle,
+    commit_thread_shutdown_flag,
+    shared_state,
+    policy_runner_handler,
+    policy_runner_thread_shutdown_flag,
+  ) = app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -251,6 +291,11 @@ async fn main() {
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
+
+  *policy_runner_thread_shutdown_flag.lock().await = true;
+  policy_runner_handler
+    .await
+    .expect("Error while completing the policy runner thread");
 
   info!("Completed Infino server shuwdown");
 }
@@ -752,6 +797,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
@@ -940,7 +986,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Check whether the /ping works.
     let response = app
@@ -1108,7 +1154,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Create an index.
     let index_name = "test_index";

@@ -17,6 +17,7 @@ pub struct CoreDBSettings {
   // This has to be greater than 4*segment_size_threshold_megabytes. Otherwise,
   // a ConfigError is raised while parsing.
   memory_budget_megabytes: f32,
+  retention_days: u32,
 }
 
 impl CoreDBSettings {
@@ -46,6 +47,10 @@ impl CoreDBSettings {
     // Search memory budget is total memory budget, minus the size of one segment (typically for insertions).
     ((self.memory_budget_megabytes - self.segment_size_threshold_megabytes) * 1024.0 * 1024.0)
       as u64
+  }
+
+  pub fn get_retention_days(&self) -> u32 {
+    self.retention_days
   }
 }
 
@@ -129,6 +134,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 4096\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
     }
 
     let settings = Settings::new(config_dir_path).unwrap();
@@ -147,6 +153,7 @@ mod tests {
       coredb_settings.get_search_memory_budget_bytes(),
       (4096 - 1024) * 1024 * 1024
     );
+    assert_eq!(coredb_settings.get_retention_days(), 30);
 
     // Check if we are running this test as part of a GitHub actions. We can't change environment variables
     // in GitHub actions, so don't run rest of the test as part of GitHub actions.
@@ -199,6 +206,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 2048\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
     }
 
     // Make sure this config returns an error.

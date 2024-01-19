@@ -10,4 +10,5 @@ pub(crate) mod range;
 pub mod config;
 pub mod io;
 pub mod sync;
+pub mod time;
 pub mod tokenize;

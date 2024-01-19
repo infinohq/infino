@@ -712,6 +712,13 @@ impl Index {
   pub fn delete(&self) {
     std::fs::remove_dir_all(&self.index_dir_path).unwrap();
   }
+
+  pub async fn delete_segment(&self, segment_number: u32) -> Result<(), CoreDBError> {
+    // TODO: take lock on segment to make sure other are not using it
+    let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+    self.storage.delete(segment_dir_path.as_str()).await?;
+    Ok(())
+  }
 }
 
 #[cfg(test)]

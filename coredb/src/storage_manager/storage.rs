@@ -54,6 +54,19 @@ impl Storage {
     let retval: T = serde_json::from_slice(&data).unwrap();
     Ok((retval, data.len() as u64))
   }
+
+  /// Delete the given file.
+  pub async fn delete(&self, file_path: &str) -> Result<(), CoreDBError> {
+    let path = Path::from(file_path);
+    self.object_store.delete(&path).await?;
+    Ok(())
+  }
+}
+
+impl Default for Storage {
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 #[cfg(test)]
