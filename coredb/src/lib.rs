@@ -42,6 +42,7 @@ impl CoreDB {
         let default_index_name = coredb_settings.get_default_index_name();
         let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+        let storage_type = coredb_settings.get_storage_type();
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
@@ -62,6 +63,7 @@ impl CoreDB {
               );
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
               let index = Index::new_with_threshold_params(
+                storage_type,
                 &default_index_dir_path,
                 segment_size_threshold_bytes,
                 search_memory_budget_bytes,
@@ -73,8 +75,12 @@ impl CoreDB {
                 let entry = entry.unwrap();
                 let index_name = entry.file_name().into_string().unwrap();
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
-                let index =
-                  Index::refresh(&full_index_path_name, search_memory_budget_bytes).await?;
+                let index = Index::refresh(
+                  storage_type,
+                  &full_index_path_name,
+                  search_memory_budget_bytes,
+                )
+                .await?;
                 index_map.insert(index_name, index);
               }
             }
@@ -86,6 +92,7 @@ impl CoreDB {
             );
             let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
             let index = Index::new_with_threshold_params(
+              storage_type,
               &default_index_dir_path,
               segment_size_threshold_bytes,
               search_memory_budget_bytes,
@@ -202,11 +209,16 @@ impl CoreDB {
     let search_memory_budget_bytes = settings
       .get_coredb_settings()
       .get_search_memory_budget_bytes();
+    let storage_type = settings.get_coredb_settings().get_storage_type();
 
     // Refresh the index.
-    let index = Index::refresh(&default_index_dir_path, search_memory_budget_bytes)
-      .await
-      .unwrap();
+    let index = Index::refresh(
+      storage_type,
+      &default_index_dir_path,
+      search_memory_budget_bytes,
+    )
+    .await
+    .unwrap();
 
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
@@ -243,9 +255,11 @@ impl CoreDB {
       .settings
       .get_coredb_settings()
       .get_search_memory_budget_bytes();
+    let storage_type = self.settings.get_coredb_settings().get_storage_type();
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
     let index = Index::new_with_threshold_params(
+      storage_type,
       &index_dir_path,
       segment_size_threshold_bytes,
       search_memory_budget_bytes,

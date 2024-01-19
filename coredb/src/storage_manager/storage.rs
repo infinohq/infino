@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
 use object_store::{local::LocalFileSystem, ObjectStore};
 use serde::de::DeserializeOwned;
@@ -12,14 +13,35 @@ use crate::utils::error::CoreDBError;
 pub const COMPRESSION_LEVEL: i32 = 15;
 
 #[derive(Debug)]
+pub enum StorageType {
+  Local,
+  AWS(String), // AWS storage with bucket name.
+}
+
+#[derive(Debug)]
 pub struct Storage {
+  storage_type: StorageType,
   object_store: Arc<dyn ObjectStore>,
 }
 
 impl Storage {
-  pub fn new() -> Self {
-    let object_store = Arc::new(LocalFileSystem::new());
-    Self { object_store }
+  pub fn new(storage_type: StorageType) -> Self {
+    let object_store;
+    match storage_type {
+      StorageType::AWS(bucket_name) => {
+        object_store = AmazonS3Builder::from_env()
+          .with_bucket_name(&bucket_name)
+          .build();
+      }
+      StorageType::Local => {
+        object_store = Arc::new(LocalFileSystem::new());
+      }
+    }
+
+    Self {
+      storage_type,
+      object_store,
+    }
   }
 
   /// Compress and write the specified map to the given file. Returns the number of bytes written after compression.
@@ -59,16 +81,21 @@ impl Storage {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::collections::BTreeMap;
-  use tempfile::NamedTempFile;
 
+  use std::collections::BTreeMap;
+
+  use tempfile::NamedTempFile;
+  use test_case::test_case;
+
+  #[test_case(StorageType::Local; "with local storage")]
+  #[test_case(StorageType::AWS("unit_test".to_owned()); "with AWS storage")]
   #[tokio::test]
-  async fn test_serialize_btree_map() {
+  async fn test_serialize_btree_map(storage_type: StorageType) {
     let file = NamedTempFile::new().expect("Could not create temporary file");
     let file_path = file.path().to_str().unwrap();
     let num_keys = 8;
     let prefix = "term#";
-    let storage = Storage::new();
+    let storage = Storage::new(storage_type);
 
     let mut expected: BTreeMap<String, u32> = BTreeMap::new();
     for i in 1..=num_keys {
@@ -95,12 +122,14 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn test_serialize_vec() {
+  #[test_case(StorageType::Local; "with local storage")]
+  #[test_case(StorageType::AWS("unit_test".to_owned()); "with AWS storage")]
+  async fn test_serialize_vec(storage_type: StorageType) {
     let file = NamedTempFile::new().expect("Could not create temporary file");
     let file_path = file.path().to_str().unwrap();
     let num_keys = 8;
     let prefix = "term#";
-    let storage = Storage::new();
+    let storage = Storage::new(storage_type);
 
     let mut expected: Vec<String> = Vec::new();
     for i in 1..=num_keys {
@@ -129,10 +158,12 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn test_empty() {
+  #[test_case(StorageType::Local; "with local storage")]
+  #[test_case(StorageType::AWS("unit_test".to_owned()); "with AWS storage")]
+  async fn test_empty(storage_type: StorageType) {
     let file = NamedTempFile::new().expect("Could not create temporary file");
     let file_path = file.path().to_str().unwrap();
-    let storage = Storage::new();
+    let storage = Storage::new(storage_type);
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
     let (uncompressed, compressed) = storage

@@ -5,6 +5,8 @@ use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 use std::env;
 
+use crate::storage_manager::storage::StorageType;
+
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
 #[derive(Debug, Deserialize)]
@@ -17,6 +19,9 @@ pub struct CoreDBSettings {
   // This has to be greater than 4*segment_size_threshold_megabytes. Otherwise,
   // a ConfigError is raised while parsing.
   memory_budget_megabytes: f32,
+
+  storage_type: String,
+  aws_bucket_name: Option<String>,
 }
 
 impl CoreDBSettings {
@@ -46,6 +51,18 @@ impl CoreDBSettings {
     // Search memory budget is total memory budget, minus the size of one segment (typically for insertions).
     ((self.memory_budget_megabytes - self.segment_size_threshold_megabytes) * 1024.0 * 1024.0)
       as u64
+  }
+
+  pub fn get_storage_type(&self) -> StorageType {
+    match self.storage_type.as_str() {
+      "local" => StorageType::Local,
+      "aws" => {
+        let aws_bucket_name = self
+          .get_aws_bucket_name()
+          .expect("AWS bucket name is not set");
+        StorageType::AWS(aws_bucket_name)
+      }
+    }
   }
 }
 
@@ -83,6 +100,12 @@ impl Settings {
     {
       return Err(ConfigError::Message(
         "Memory budget should be at least 4 times the segment size threshold".to_owned(),
+      ));
+    }
+
+    if settings.coredb.storage_type == "aws" && settings.coredb.aws_bucket_name.is_none() {
+      return Err(ConfigError::Message(
+        "AWS bucket name is not set".to_owned(),
       ));
     }
 

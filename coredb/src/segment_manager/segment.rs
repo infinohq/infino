@@ -693,7 +693,7 @@ mod tests {
     let original_segment = Segment::new();
     let segment_dir = TempDir::new("segment_test").unwrap();
     let segment_dir_path = segment_dir.path().to_str().unwrap();
-    let storage = Storage::new();
+    let storage = Storage::new(StorageType::local);
 
     original_segment
       .append_log_message(
