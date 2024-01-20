@@ -27,7 +27,6 @@ use axum::extract::{Path, Query};
 use axum::routing::{delete, put};
 use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
-use dotenv::dotenv;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -41,11 +40,12 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
+use coredb::utils::environment::load_env;
 use coredb::utils::error::{CoreDBError, SearchLogsError};
 use coredb::CoreDB;
-use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
+use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
@@ -202,11 +202,8 @@ async fn app(
 #[tokio::main]
 /// Program entry point.
 async fn main() {
-  // Load environment variables from .env file, if it exists.
-  dotenv().ok();
-
-  // Load environment variables from .env-creds file, if it exists.
-  dotenv::from_filename(".env-creds").ok();
+  // Load environment variables from ".env" and ".env-creds" file.
+  load_env();
 
   // If log level isn't set, set it to info.
   if env::var("RUST_LOG").is_err() {

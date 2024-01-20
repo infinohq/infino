@@ -28,12 +28,15 @@ pub struct Storage {
 impl Storage {
   pub fn new(storage_type: &StorageType) -> Result<Self, CoreDBError> {
     let object_store: Arc<dyn ObjectStore> = match storage_type {
+      // AWS storage. Create the bucket if it doesn't exist.
       StorageType::Aws(bucket_name) => {
         let s3_store = AmazonS3Builder::from_env()
           .with_bucket_name(bucket_name.to_owned())
           .build()?;
         Arc::new(s3_store)
       }
+
+      // Local storage.
       StorageType::Local => Arc::new(LocalFileSystem::new()),
     };
 
@@ -90,6 +93,9 @@ mod tests {
   use super::*;
 
   use std::collections::BTreeMap;
+  use std::env;
+
+  use crate::utils::environment::load_env;
 
   use tempfile::NamedTempFile;
   use test_case::test_case;
@@ -98,6 +104,14 @@ mod tests {
   #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_serialize_btree_map(storage_type: StorageType) {
+    // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
+    if env::var("GITHUB_ACTIONS").is_ok() && storage_type != StorageType::Local {
+      return;
+    }
+
+    // Load environment variables - esp creds for accessing non-local storage.
+    load_env();
+
     let file = NamedTempFile::new().expect("Could not create temporary file");
     let file_path = file
       .path()
@@ -136,6 +150,14 @@ mod tests {
   #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_serialize_vec(storage_type: StorageType) {
+    // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
+    if env::var("GITHUB_ACTIONS").is_ok() && storage_type != StorageType::Local {
+      return;
+    }
+
+    // Load environment variables - esp creds for accessing non-local storage.
+    load_env();
+
     let file = NamedTempFile::new().expect("Could not create temporary file");
     let file_path = file.path().to_str().expect("Could not get file path");
     let num_keys = 8;
@@ -173,6 +195,14 @@ mod tests {
   #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_empty(storage_type: StorageType) {
+    // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
+    if env::var("GITHUB_ACTIONS").is_ok() && storage_type != StorageType::Local {
+      return;
+    }
+
+    // Load environment variables - esp creds for accessing non-local storage.
+    load_env();
+
     let file = NamedTempFile::new().expect("Could not create temporary file");
     let file_path = file.path().to_str().unwrap();
     let storage = Storage::new(&storage_type).expect("Could not create storage");
