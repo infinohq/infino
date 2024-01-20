@@ -46,6 +46,7 @@ use coredb::CoreDB;
 use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
+use crate::utils::constants;
 use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
@@ -119,7 +120,7 @@ async fn policy_runner(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
     let result = state.coredb.trigger_retention().await;
 
     if *shutdown_flag.lock().await {
-      info!("Received shutdown in commit thread. Exiting...");
+      info!("Received shutdown in policy runner thread. Exiting...");
       break;
     }
 
@@ -140,11 +141,9 @@ async fn app(
   image_tag: &str,
 ) -> (
   Router,
-  JoinHandle<()>,
-  Arc<Mutex<bool>>,
+  HashMap<&'static str, JoinHandle<()>>,
+  HashMap<&'static str, Arc<Mutex<bool>>>,
   Arc<AppState>,
-  JoinHandle<()>,
-  Arc<Mutex<bool>>,
 ) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
@@ -223,14 +222,21 @@ async fn app(
     .with_state(shared_state.clone())
     .layer(TraceLayer::new_for_http());
 
-  (
-    router,
-    commit_thread_handle,
+  let mut shutdown_flag_map = HashMap::new();
+  shutdown_flag_map.insert(
+    constants::COMMIT_THREAD_SHUTDOWN_FLAG,
     commit_thread_shutdown_flag,
-    shared_state,
-    policy_runner_handler,
+  );
+  shutdown_flag_map.insert(
+    constants::POLICY_THREAD_SHUTDOWN_FLAG,
     policy_runner_thread_shutdown_flag,
-  )
+  );
+
+  // create vector of join handles
+  let mut join_handle_map = HashMap::new();
+  join_handle_map.insert(constants::COMMIT_THREAD_HANDLE, commit_thread_handle);
+  join_handle_map.insert(constants::POLICY_THREAD_HANDLE, policy_runner_handler);
+  (router, join_handle_map, shutdown_flag_map, shared_state)
 }
 
 #[tokio::main]
@@ -257,14 +263,26 @@ async fn main() {
   let image_tag = "3";
 
   // Create app.
-  let (
-    app,
-    commit_thread_handle,
-    commit_thread_shutdown_flag,
-    shared_state,
-    policy_runner_handler,
-    policy_runner_thread_shutdown_flag,
-  ) = app(config_dir_path, image_name, image_tag).await;
+  let (app, mut thread_handle_map, shutdown_flag_map, shared_state) =
+    app(config_dir_path, image_name, image_tag).await;
+
+  let commit_thread_handle = thread_handle_map
+    .remove(constants::COMMIT_THREAD_HANDLE)
+    .unwrap();
+
+  let commit_thread_shutdown_flag = shutdown_flag_map
+    .get(constants::COMMIT_THREAD_SHUTDOWN_FLAG)
+    .unwrap()
+    .clone();
+
+  let policy_runner_handler = thread_handle_map
+    .remove(constants::POLICY_THREAD_HANDLE)
+    .unwrap();
+
+  let policy_runner_thread_shutdown_flag = shutdown_flag_map
+    .get(constants::POLICY_THREAD_SHUTDOWN_FLAG)
+    .unwrap()
+    .clone();
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -993,7 +1011,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create the app.
-    let (mut app, _, _, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Check whether the /ping works.
     let response = app
@@ -1161,7 +1179,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create the app.
-    let (mut app, _, _, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Create an index.
     let index_name = "test_index";
