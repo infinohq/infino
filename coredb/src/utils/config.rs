@@ -85,9 +85,9 @@ impl Settings {
       // Default to 'development' env
       // Note that this file is _optional_
       .add_source(File::with_name(&config_environment_file_name).required(false))
-      // Add in settings from the environment (with a prefix of COREDB)
-      // Eg.. `COREDB_DEBUG=1` would set the `debug` key
-      .add_source(Environment::with_prefix("coredb"))
+      // Add in settings from the environment (with a prefix of INFINO)
+      // Eg.. `INFINO_DEBUG=1` would set the `debug` key
+      .add_source(Environment::with_prefix("INFINO"))
       .build()?;
 
     // Deserialize (and thus freeze) the entire configuration.

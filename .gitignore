@@ -27,8 +27,9 @@ benches/ch-tmp/
 #ignore plugin build artifacts
 plugins/.gradle
 
-# the index created by coredb if default config is used
+# the index created by coredb ind server test f default config is used
 data
+server/data
 
 # the documentation artifacts
 docs/.rustc_info.json
