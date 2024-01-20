@@ -130,7 +130,7 @@ async fn policy_runner(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
         e
       );
     }
-    sleep(Duration::from_secs(3600)).await;
+    sleep(Duration::from_secs(30)).await;
   }
 }
 
@@ -320,6 +320,7 @@ async fn main() {
     .await
     .expect("Error while completing the commit thread");
 
+  info!("Shutting down policy thread and waiting for it to finish...");
   *policy_runner_thread_shutdown_flag.lock().await = true;
   policy_runner_handler
     .await

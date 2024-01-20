@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::StreamExt;
 use object_store::path::Path;
 use object_store::{local::LocalFileSystem, ObjectStore};
 use serde::de::DeserializeOwned;
@@ -58,7 +59,16 @@ impl Storage {
   /// Delete the given file.
   pub async fn delete(&self, file_path: &str) -> Result<(), CoreDBError> {
     let path = Path::from(file_path);
-    self.object_store.delete(&path).await?;
+    // List all the files in the path
+    let mut file_stream = self.object_store.list(Some(&path));
+    while let Some(file) = file_stream.next().await {
+      match file {
+        Ok(file) => {
+          self.object_store.delete(&file.location).await?;
+        }
+        Err(e) => return Err(e.into()),
+      }
+    }
     Ok(())
   }
 }
@@ -154,6 +164,46 @@ mod tests {
       .expect("Could not write to storage");
     assert!(uncompressed > 0);
     assert!(compressed > 0);
+
+    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage
+      .read(file_path)
+      .await
+      .expect("Could not read from storage");
+    assert!(received.is_empty());
+
+    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
+    assert!(num_bytes_read == uncompressed);
+
+    file.close().expect("Could not close temporary file");
+  }
+
+  #[tokio::test]
+  async fn test_delete() {
+    let file = NamedTempFile::new().expect("Could not create temporary file");
+    let file_path = file.path().to_str().unwrap();
+    let storage = Storage::new();
+
+    let expected: BTreeMap<String, u32> = BTreeMap::new();
+    let (uncompressed, compressed) = storage
+      .write(&expected, file_path, false)
+      .await
+      .expect("Could not write to storage");
+    assert!(uncompressed > 0);
+    assert!(compressed > 0);
+
+    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage
+      .read(file_path)
+      .await
+      .expect("Could not read from storage");
+    assert!(received.is_empty());
+
+    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
+    assert!(num_bytes_read == uncompressed);
+
+    storage
+      .delete(file_path)
+      .await
+      .expect("Could not delete file");
 
     let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage
       .read(file_path)
