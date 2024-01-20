@@ -7,7 +7,6 @@ use std::path::Path;
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use log::{debug, error, info};
-
 use pest::error::Error as PestError;
 
 use crate::index_manager::metadata::Metadata;

@@ -39,6 +39,8 @@ features = [
 ]
 
 [dev-dependencies]
+assert_cmd = "*"
+cmd_lib = "*"
 tower = { version = "*", features = ["util"] }
 tempdir = "*"
 test-case = "*"

@@ -18,7 +18,7 @@ pub struct InfinoEngine {
 impl InfinoEngine {
   pub async fn new(config_path: &str) -> InfinoEngine {
     let setting = Settings::new(config_path).unwrap();
-    let index_dir_path = String::from(setting.get_coredb_settings().get_index_dir_path());
+    let index_dir_path = setting.get_coredb_settings().get_index_dir_path();
     let coredb = CoreDB::new(config_path).await.unwrap();
 
     InfinoEngine {

@@ -44,7 +44,7 @@ impl CoreDB {
     match result {
       Ok(settings) => {
         let coredb_settings = settings.get_coredb_settings();
-        let index_dir_path = coredb_settings.get_index_dir_path();
+        let index_dir_path = &coredb_settings.get_index_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
         let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();

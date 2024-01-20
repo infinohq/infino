@@ -258,7 +258,10 @@ async fn main() {
     .with_env_filter(EnvFilter::from_default_env())
     .init();
 
-  let config_dir_path = "config";
+  // Config directory path is relative to the current directory, and set in environment variable "INFINO_CONFIG_DIR_PATH".
+  // Defaults to "config" if not set.
+  let config_dir_path = &env::var("INFINO_CONFIG_DIR_PATH").unwrap_or_else(|_| "config".to_owned());
+
   let image_name = "rabbitmq";
   let image_tag = "3";
 
