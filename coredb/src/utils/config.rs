@@ -1,9 +1,11 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
+use std::env;
+use std::path::Path;
+
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
-use std::env;
 
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
@@ -21,8 +23,22 @@ pub struct CoreDBSettings {
 
 impl CoreDBSettings {
   /// Get the settings for the directory where the index is stored.
-  pub fn get_index_dir_path(&self) -> &str {
-    self.index_dir_path.as_str()
+  pub fn get_index_dir_path(&self) -> String {
+    let path = Path::new(&self.index_dir_path);
+
+    if path.is_absolute() {
+      // If the path is already absolute, return it as is.
+      self.index_dir_path.clone()
+    } else {
+      // If the path is relative, concatenate it with the current directory.
+      let current_dir = env::current_dir().expect("Could not get current directory");
+      let joined_path = current_dir.join(path);
+      joined_path
+        .as_path()
+        .to_str()
+        .expect("Could not convert path to string")
+        .to_owned()
+    }
   }
 
   /// Get the settings for the default index name.
@@ -69,9 +85,9 @@ impl Settings {
       // Default to 'development' env
       // Note that this file is _optional_
       .add_source(File::with_name(&config_environment_file_name).required(false))
-      // Add in settings from the environment (with a prefix of COREDB)
-      // Eg.. `COREDB_DEBUG=1` would set the `debug` key
-      .add_source(Environment::with_prefix("coredb"))
+      // Add in settings from the environment (with a prefix of INFINO)
+      // Eg.. `INFINO_DEBUG=1` would set the `debug` key
+      .add_source(Environment::with_prefix("INFINO"))
       .build()?;
 
     // Deserialize (and thus freeze) the entire configuration.
