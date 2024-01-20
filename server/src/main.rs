@@ -762,6 +762,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
@@ -785,7 +786,7 @@ mod tests {
     search_text: &str,
     query: LogsQuery,
     log_messages_expected: Vec<LogMessage>,
-  ) {
+  ) -> Result<(), CoreDBError> {
     let query_start_time = query
       .start_time
       .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
@@ -828,7 +829,7 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
@@ -849,6 +850,8 @@ mod tests {
         eprintln!("Error in search_logs: {:?}", search_logs_error);
       }
     }
+
+    Ok(())
   }
 
   fn check_metric_point_vectors(expected: &Vec<MetricPoint>, received: &Vec<MetricPoint>) {
@@ -872,7 +875,7 @@ mod tests {
     config_dir_path: &str,
     query: MetricsQuery,
     metric_points_expected: Vec<MetricPoint>,
-  ) {
+  ) -> Result<(), CoreDBError> {
     let query_start_time = query
       .start_time
       .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
@@ -915,7 +918,7 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
@@ -926,13 +929,15 @@ mod tests {
       .expect("Could not get metrics");
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
+
+    Ok(())
   }
 
   // Only run the tests without rabbitmq, as that is the use-case we are targeting.
   // #[test_case(true ; "use rabbitmq")]
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_basic(use_rabbitmq: bool) {
+  async fn test_basic(use_rabbitmq: bool) -> Result<(), CoreDBError> {
     init();
 
     let config_dir = TempDir::new("config_test").unwrap();
@@ -1015,7 +1020,7 @@ mod tests {
       query,
       log_messages_expected,
     )
-    .await;
+    .await?;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = LogsQuery {
@@ -1030,7 +1035,7 @@ mod tests {
       query_too_old,
       Vec::new(),
     )
-    .await;
+    .await?;
 
     // **Part 2**: Test insertion and search of time series metric points.
     let num_metric_points = 100;
@@ -1069,7 +1074,7 @@ mod tests {
       start_time: None,
       end_time: None,
     };
-    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await;
+    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await?;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = MetricsQuery {
@@ -1078,7 +1083,7 @@ mod tests {
       start_time: Some(1),
       end_time: Some(10000),
     };
-    check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await;
+    check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await?;
 
     // Check whether the /flush works.
     let response = app
@@ -1095,6 +1100,8 @@ mod tests {
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
+
+    Ok(())
   }
 
   /// Write test to test Create and Delete index APIs.

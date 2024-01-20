@@ -42,7 +42,7 @@ impl CoreDB {
         let default_index_name = coredb_settings.get_default_index_name();
         let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
-        let storage_type = coredb_settings.get_storage_type();
+        let storage_type = coredb_settings.get_storage_type()?;
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
@@ -63,7 +63,7 @@ impl CoreDB {
               );
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
               let index = Index::new_with_threshold_params(
-                storage_type,
+                &storage_type,
                 &default_index_dir_path,
                 segment_size_threshold_bytes,
                 search_memory_budget_bytes,
@@ -76,7 +76,7 @@ impl CoreDB {
                 let index_name = entry.file_name().into_string().unwrap();
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
                 let index = Index::refresh(
-                  storage_type,
+                  &storage_type,
                   &full_index_path_name,
                   search_memory_budget_bytes,
                 )
@@ -92,7 +92,7 @@ impl CoreDB {
             );
             let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
             let index = Index::new_with_threshold_params(
-              storage_type,
+              &storage_type,
               &default_index_dir_path,
               segment_size_threshold_bytes,
               search_memory_budget_bytes,
@@ -200,7 +200,7 @@ impl CoreDB {
 
   /// Refresh the default index from the given directory path.
   // TODO: what to do if there are multiple indices?
-  pub async fn refresh(config_dir_path: &str) -> Self {
+  pub async fn refresh(config_dir_path: &str) -> Result<Self, CoreDBError> {
     // Read the settings and the index directory path.
     let settings = Settings::new(config_dir_path).unwrap();
     let index_dir_path = settings.get_coredb_settings().get_index_dir_path();
@@ -209,24 +209,23 @@ impl CoreDB {
     let search_memory_budget_bytes = settings
       .get_coredb_settings()
       .get_search_memory_budget_bytes();
-    let storage_type = settings.get_coredb_settings().get_storage_type();
+    let storage_type = settings.get_coredb_settings().get_storage_type()?;
 
     // Refresh the index.
     let index = Index::refresh(
-      storage_type,
+      &storage_type,
       &default_index_dir_path,
       search_memory_budget_bytes,
     )
-    .await
-    .unwrap();
+    .await?;
 
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
 
-    CoreDB {
+    Ok(CoreDB {
       index_map,
       settings,
-    }
+    })
   }
 
   /// Get the directory where the index is stored.
@@ -255,11 +254,11 @@ impl CoreDB {
       .settings
       .get_coredb_settings()
       .get_search_memory_budget_bytes();
-    let storage_type = self.settings.get_coredb_settings().get_storage_type();
+    let storage_type = self.settings.get_coredb_settings().get_storage_type()?;
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
     let index = Index::new_with_threshold_params(
-      storage_type,
+      &storage_type,
       &index_dir_path,
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
@@ -323,11 +322,12 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
   }
 
   #[tokio::test]
-  async fn test_basic() {
+  async fn test_basic() -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
@@ -369,7 +369,7 @@ mod tests {
     );
 
     coredb.commit(true).await.expect("Could not commit");
-    let coredb = CoreDB::refresh(config_dir_path).await;
+    let coredb = CoreDB::refresh(config_dir_path).await?;
 
     let end = Utc::now().timestamp_millis() as u64;
 
@@ -392,5 +392,7 @@ mod tests {
       .expect("Error in get_metrics");
     assert_eq!(results.first().unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
+
+    Ok(())
   }
 }

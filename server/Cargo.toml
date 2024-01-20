@@ -16,7 +16,7 @@ lazy_static = "1"
 log = "0.4.19"
 mime = "0.3.16"
 mockall = "*"
-openai-api-rs = "2.1.0"
+openai-api-rs = "4.0.1"
 rabbitmq-stream-client = { git = "https://github.com/rabbitmq/rabbitmq-stream-rust-client", rev = "203d1a11fb29665e9385741df89b325a1deb3bff" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

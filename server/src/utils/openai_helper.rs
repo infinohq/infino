@@ -48,9 +48,8 @@ impl OpenAIHelper {
       GPT3_5_TURBO_16K.to_string(),
       vec![chat_completion::ChatCompletionMessage {
         role: chat_completion::MessageRole::user,
-        content: prompt,
+        content: openai_api_rs::v1::chat_completion::Content::Text(prompt),
         name: None,
-        function_call: None,
       }],
     );
 

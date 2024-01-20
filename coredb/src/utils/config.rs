@@ -9,6 +9,8 @@ use serde::Deserialize;
 
 use crate::storage_manager::storage::StorageType;
 
+use super::error::CoreDBError;
+
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
 #[derive(Debug, Deserialize)]
@@ -69,14 +71,22 @@ impl CoreDBSettings {
       as u64
   }
 
-  pub fn get_storage_type(&self) -> StorageType {
+  pub fn get_storage_type(&self) -> Result<StorageType, CoreDBError> {
     match self.storage_type.as_str() {
-      "local" => StorageType::Local,
+      "local" => Ok(StorageType::Local),
       "aws" => {
-        let aws_bucket_name = self
-          .get_aws_bucket_name()
-          .expect("AWS bucket name is not set");
-        StorageType::AWS(aws_bucket_name)
+        let aws_bucket_name =
+          self
+            .aws_bucket_name
+            .to_owned()
+            .ok_or(CoreDBError::InvalidConfiguration(
+              "AWS bucket name not provided".to_owned(),
+            ))?;
+        Ok(StorageType::Aws(aws_bucket_name))
+      }
+      _ => {
+        let message = format!("Unknown storage type: {}", self.storage_type);
+        Err(CoreDBError::InvalidConfiguration(message))
       }
     }
   }
@@ -168,6 +178,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 4096\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
 
     let settings = Settings::new(config_dir_path).unwrap();
@@ -185,6 +196,10 @@ mod tests {
     assert_eq!(
       coredb_settings.get_search_memory_budget_bytes(),
       (4096 - 1024) * 1024 * 1024
+    );
+    assert_eq!(
+      coredb_settings.get_storage_type().unwrap(),
+      StorageType::Local
     );
 
     // Check if we are running this test as part of a GitHub actions. We can't change environment variables
@@ -238,6 +253,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 2048\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
 
     // Make sure this config returns an error.

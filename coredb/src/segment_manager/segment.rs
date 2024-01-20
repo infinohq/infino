@@ -513,7 +513,10 @@ mod tests {
   use tempdir::TempDir;
 
   use super::*;
-  use crate::request_manager::query_dsl::{QueryDslParser, Rule};
+  use crate::{
+    request_manager::query_dsl::{QueryDslParser, Rule},
+    storage_manager::storage::StorageType,
+  };
   use pest::Parser;
 
   use crate::utils::sync::{is_sync_send, thread};
@@ -693,7 +696,7 @@ mod tests {
     let original_segment = Segment::new();
     let segment_dir = TempDir::new("segment_test").unwrap();
     let segment_dir_path = segment_dir.path().to_str().unwrap();
-    let storage = Storage::new(StorageType::local);
+    let storage = Storage::new(&StorageType::Local).expect("Could not create storage");
 
     original_segment
       .append_log_message(

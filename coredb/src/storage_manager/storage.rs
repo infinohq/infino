@@ -12,36 +12,38 @@ use crate::utils::error::CoreDBError;
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
 pub const COMPRESSION_LEVEL: i32 = 15;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageType {
   Local,
-  AWS(String), // AWS storage with bucket name.
+  Aws(String), // AWS storage with bucket name.
 }
 
 #[derive(Debug)]
 pub struct Storage {
+  #[allow(dead_code)]
   storage_type: StorageType,
   object_store: Arc<dyn ObjectStore>,
 }
 
 impl Storage {
-  pub fn new(storage_type: StorageType) -> Self {
-    let object_store;
-    match storage_type {
-      StorageType::AWS(bucket_name) => {
-        object_store = AmazonS3Builder::from_env()
-          .with_bucket_name(&bucket_name)
-          .build();
+  pub fn new(storage_type: &StorageType) -> Result<Self, CoreDBError> {
+    let object_store: Arc<dyn ObjectStore> = match storage_type {
+      StorageType::Aws(bucket_name) => {
+        let s3_store = AmazonS3Builder::from_env()
+          .with_bucket_name(bucket_name.to_owned())
+          .build()?;
+        Arc::new(s3_store)
       }
-      StorageType::Local => {
-        object_store = Arc::new(LocalFileSystem::new());
-      }
-    }
+      StorageType::Local => Arc::new(LocalFileSystem::new()),
+    };
 
-    Self {
-      storage_type,
+    Ok(Self {
+      // We try to avoid clone() in the service code - but it is
+      // - (a) necessary here as we need it to be part of Storage for further operations,
+      // - (b) Storage::new() is usually one time per index - so isn't in the critical path of search or insertions.
+      storage_type: storage_type.clone(),
       object_store,
-    }
+    })
   }
 
   /// Compress and write the specified map to the given file. Returns the number of bytes written after compression.
@@ -76,6 +78,11 @@ impl Storage {
     let retval: T = serde_json::from_slice(&data).unwrap();
     Ok((retval, data.len() as u64))
   }
+
+  #[cfg(test)]
+  pub fn get_storage_type(&self) -> &StorageType {
+    &self.storage_type
+  }
 }
 
 #[cfg(test)]
@@ -88,14 +95,18 @@ mod tests {
   use test_case::test_case;
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::AWS("unit_test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_serialize_btree_map(storage_type: StorageType) {
     let file = NamedTempFile::new().expect("Could not create temporary file");
-    let file_path = file.path().to_str().unwrap();
+    let file_path = file
+      .path()
+      .to_str()
+      .expect("Could not get path to temporary file");
     let num_keys = 8;
     let prefix = "term#";
-    let storage = Storage::new(storage_type);
+    let storage = Storage::new(&storage_type).expect("Could not create storage");
+    assert_eq!(storage_type, storage.get_storage_type().clone());
 
     let mut expected: BTreeMap<String, u32> = BTreeMap::new();
     for i in 1..=num_keys {
@@ -121,15 +132,16 @@ mod tests {
     file.close().expect("Could not close temporary file");
   }
 
-  #[tokio::test]
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::AWS("unit_test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
+  #[tokio::test]
   async fn test_serialize_vec(storage_type: StorageType) {
     let file = NamedTempFile::new().expect("Could not create temporary file");
-    let file_path = file.path().to_str().unwrap();
+    let file_path = file.path().to_str().expect("Could not get file path");
     let num_keys = 8;
     let prefix = "term#";
-    let storage = Storage::new(storage_type);
+    let storage = Storage::new(&storage_type).expect("Could not create storage");
+    assert_eq!(storage_type, storage.get_storage_type().clone());
 
     let mut expected: Vec<String> = Vec::new();
     for i in 1..=num_keys {
@@ -157,13 +169,14 @@ mod tests {
     file.close().expect("Could not close temporary file");
   }
 
-  #[tokio::test]
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::AWS("unit_test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
+  #[tokio::test]
   async fn test_empty(storage_type: StorageType) {
     let file = NamedTempFile::new().expect("Could not create temporary file");
     let file_path = file.path().to_str().unwrap();
-    let storage = Storage::new(storage_type);
+    let storage = Storage::new(&storage_type).expect("Could not create storage");
+    assert_eq!(storage_type, storage.get_storage_type().clone());
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
     let (uncompressed, compressed) = storage
