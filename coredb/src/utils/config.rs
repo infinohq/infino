@@ -27,10 +27,10 @@ impl CoreDBSettings {
     let path = Path::new(&self.index_dir_path);
 
     if path.is_absolute() {
-      // If the path is already absolute, return it as is
+      // If the path is already absolute, return it as is.
       self.index_dir_path.clone()
     } else {
-      // If the path is relative, concatenate it with the current directory
+      // If the path is relative, concatenate it with the current directory.
       let current_dir = env::current_dir().expect("Could not get current directory");
       let joined_path = current_dir.join(path);
       joined_path
