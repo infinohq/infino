@@ -47,6 +47,9 @@ pub enum CoreDBError {
 
   #[error("Search Logs Error: {0}")]
   SearchLogsError(SearchLogsError),
+
+  #[error("AWS SDK Error: {0}")]
+  AwsSdkError(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

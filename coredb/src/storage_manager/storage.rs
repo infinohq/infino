@@ -7,6 +7,7 @@ use object_store::{local::LocalFileSystem, ObjectStore};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use crate::storage_manager::aws_s3_utils::AWSS3Utils;
 use crate::utils::error::CoreDBError;
 
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
@@ -26,10 +27,18 @@ pub struct Storage {
 }
 
 impl Storage {
-  pub fn new(storage_type: &StorageType) -> Result<Self, CoreDBError> {
+  pub async fn new(storage_type: &StorageType) -> Result<Self, CoreDBError> {
     let object_store: Arc<dyn ObjectStore> = match storage_type {
       // AWS storage. Create the bucket if it doesn't exist.
       StorageType::Aws(bucket_name) => {
+        // Check if the bucket exists.
+        let aws_s3_utils = AWSS3Utils::new().await?;
+        let exists = aws_s3_utils.check_bucket_exists(bucket_name).await;
+        if !exists {
+          log::info!("Bucket {} doesn't exist. Creating it.", bucket_name);
+          aws_s3_utils.create_bucket(bucket_name).await?;
+        }
+
         let s3_store = AmazonS3Builder::from_env()
           .with_bucket_name(bucket_name.to_owned())
           .build()?;
@@ -100,26 +109,38 @@ mod tests {
   use tempfile::NamedTempFile;
   use test_case::test_case;
 
+  fn get_temp_file_path(storage_type: &StorageType, test_name: &str) -> String {
+    match storage_type {
+      StorageType::Local => {
+        let file = NamedTempFile::new().expect("Could not create temporary file");
+        file.path().to_str().unwrap().to_owned()
+      }
+      StorageType::Aws(_) => {
+        format!("storage-test/{}", test_name)
+      }
+    }
+  }
+
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_serialize_btree_map(storage_type: StorageType) {
-    // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
-    if env::var("GITHUB_ACTIONS").is_ok() && storage_type != StorageType::Local {
-      return;
-    }
-
     // Load environment variables - esp creds for accessing non-local storage.
     load_env();
 
-    let file = NamedTempFile::new().expect("Could not create temporary file");
-    let file_path = file
-      .path()
-      .to_str()
-      .expect("Could not get path to temporary file");
+    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
+    if storage_type != StorageType::Local
+      && (env::var("GITHUB_ACTIONS").is_ok() || !env::var("AWS_ACCESS_KEY_ID").is_ok())
+    {
+      return;
+    }
+
+    let file_path = &get_temp_file_path(&storage_type, "test-serialize-btree-map");
     let num_keys = 8;
     let prefix = "term#";
-    let storage = Storage::new(&storage_type).expect("Could not create storage");
+    let storage = Storage::new(&storage_type)
+      .await
+      .expect("Could not create storage");
     assert_eq!(storage_type, storage.get_storage_type().clone());
 
     let mut expected: BTreeMap<String, u32> = BTreeMap::new();
@@ -142,27 +163,28 @@ mod tests {
     }
     // The number of bytes read is uncompressed - so it should be equal to the uncompressed number of bytes written.
     assert!(num_bytes_read == uncompressed);
-
-    file.close().expect("Could not close temporary file");
   }
 
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_serialize_vec(storage_type: StorageType) {
-    // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
-    if env::var("GITHUB_ACTIONS").is_ok() && storage_type != StorageType::Local {
-      return;
-    }
-
     // Load environment variables - esp creds for accessing non-local storage.
     load_env();
 
-    let file = NamedTempFile::new().expect("Could not create temporary file");
-    let file_path = file.path().to_str().expect("Could not get file path");
+    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
+    if storage_type != StorageType::Local
+      && (env::var("GITHUB_ACTIONS").is_ok() || !env::var("AWS_ACCESS_KEY_ID").is_ok())
+    {
+      return;
+    }
+
+    let file_path = &get_temp_file_path(&storage_type, "test-serialize-vec");
     let num_keys = 8;
     let prefix = "term#";
-    let storage = Storage::new(&storage_type).expect("Could not create storage");
+    let storage = Storage::new(&storage_type)
+      .await
+      .expect("Could not create storage");
     assert_eq!(storage_type, storage.get_storage_type().clone());
 
     let mut expected: Vec<String> = Vec::new();
@@ -187,25 +209,26 @@ mod tests {
     }
     // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
     assert!(num_bytes_read == uncompressed);
-
-    file.close().expect("Could not close temporary file");
   }
 
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_empty(storage_type: StorageType) {
-    // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
-    if env::var("GITHUB_ACTIONS").is_ok() && storage_type != StorageType::Local {
-      return;
-    }
-
     // Load environment variables - esp creds for accessing non-local storage.
     load_env();
 
-    let file = NamedTempFile::new().expect("Could not create temporary file");
-    let file_path = file.path().to_str().unwrap();
-    let storage = Storage::new(&storage_type).expect("Could not create storage");
+    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
+    if storage_type != StorageType::Local
+      && (env::var("GITHUB_ACTIONS").is_ok() || !env::var("AWS_ACCESS_KEY_ID").is_ok())
+    {
+      return;
+    }
+
+    let file_path = &get_temp_file_path(&storage_type, "test-empty");
+    let storage = Storage::new(&storage_type)
+      .await
+      .expect("Could not create storage");
     assert_eq!(storage_type, storage.get_storage_type().clone());
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
@@ -224,7 +247,5 @@ mod tests {
 
     // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
     assert!(num_bytes_read == uncompressed);
-
-    file.close().expect("Could not close temporary file");
   }
 }

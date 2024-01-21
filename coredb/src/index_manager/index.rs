@@ -160,7 +160,7 @@ impl Index {
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
-    let storage = Storage::new(storage_type)?;
+    let storage = Storage::new(storage_type).await?;
 
     let index = Index {
       metadata,
@@ -590,7 +590,7 @@ impl Index {
   ) -> Result<Self, CoreDBError> {
     info!("Refreshing index from index_dir_path: {}", index_dir_path);
 
-    let storage = Storage::new(storage_type)?;
+    let storage = Storage::new(storage_type).await?;
 
     // Read metadata.
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
@@ -929,7 +929,7 @@ mod tests {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
     for _ in 0..10 {
       let storage_type = StorageType::Local;
-      let storage = Storage::new(&storage_type)?;
+      let storage = Storage::new(&storage_type).await?;
 
       let index_dir = TempDir::new("index_test").unwrap();
       let index_dir_path = format!(
