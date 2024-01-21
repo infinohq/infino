@@ -101,7 +101,7 @@ mod tests {
   use test_case::test_case;
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_serialize_btree_map(storage_type: StorageType) {
     // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
@@ -147,7 +147,7 @@ mod tests {
   }
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_serialize_vec(storage_type: StorageType) {
     // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
@@ -192,7 +192,7 @@ mod tests {
   }
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("unit_test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
   #[tokio::test]
   async fn test_empty(storage_type: StorageType) {
     // Do not run non-local storage in Github Actions, as we don't set the non-local credentials.
