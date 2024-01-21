@@ -2,7 +2,6 @@
 // https://www.elastic.co/licensing/elastic-license
 
 use std::collections::HashMap;
-use std::fs::create_dir;
 use std::path::Path;
 use std::vec::Vec;
 
@@ -257,11 +256,6 @@ impl Segment {
     *lock = thread::current().id();
 
     let dir_path = Path::new(dir);
-
-    if !dir_path.exists() {
-      // Directory does not exist - create it.
-      create_dir(dir_path).unwrap();
-    }
 
     let metadata_path = dir_path.join(METADATA_FILE_NAME);
     let terms_path = dir_path.join(TERMS_FILE_NAME);

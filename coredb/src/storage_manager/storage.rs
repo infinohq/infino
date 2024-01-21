@@ -130,7 +130,7 @@ mod tests {
 
     // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
     if storage_type != StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || !env::var("AWS_ACCESS_KEY_ID").is_ok())
+      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
     {
       return;
     }
@@ -174,7 +174,7 @@ mod tests {
 
     // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
     if storage_type != StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || !env::var("AWS_ACCESS_KEY_ID").is_ok())
+      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
     {
       return;
     }
@@ -220,7 +220,7 @@ mod tests {
 
     // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
     if storage_type != StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || !env::var("AWS_ACCESS_KEY_ID").is_ok())
+      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
     {
       return;
     }

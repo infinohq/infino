@@ -73,23 +73,19 @@ mod tests {
     load_env();
 
     // Do not run this test in Github Actions, and do not run it if the AWS credentials are not set.
-    if env::var("GITHUB_ACTIONS").is_ok() || !env::var("AWS_ACCESS_KEY_ID").is_ok() {
+    if env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err() {
       return;
     }
 
     // Check a bucket that should exist.
     let utils = AWSS3Utils::new().await.unwrap();
-    assert_eq!(
-      utils.check_bucket_exists("dev-infino-unit-test").await,
-      true
-    );
+    assert!(utils.check_bucket_exists("dev-infino-unit-test").await);
 
     // Check a bucket that does not exist.
-    assert_eq!(
-      utils
+    assert!(
+      !(utils
         .check_bucket_exists("dev-infino-bucket-does-not-exist")
-        .await,
-      false
+        .await)
     );
 
     // Create a bucket that exists - the operation should succeed.
