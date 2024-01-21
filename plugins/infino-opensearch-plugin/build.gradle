@@ -95,6 +95,7 @@ loggerUsageCheck.enabled = false
 // No need to validate pom, as we do not upload to maven/sonatype
 validateNebulaPom.enabled = false
 
+// Buildscript needs a redundant declaration of opensearch_version. Not sure why.
 buildscript {
     ext {
         opensearch_version = System.getProperty("opensearch.version", "2.11.1")
@@ -112,15 +113,160 @@ buildscript {
     }
 }
 
-configurations.all {
-    resolutionStrategy {
-        force 'org.junit.platform:junit-platform-engine:1.6.0'
-    }
+ext {
+    // Function to pad version numbers for comparison
+    def padVersion = { v -> v.tokenize('.').collect { String.format('%04d', it.toInteger()) }.join('.') }
+
+    // Getting and padding the OpenSearch version
+    opensearch_version = System.getProperty("opensearch.version", "2.11.1")
+    currentVersionPadded = padVersion(opensearch_version)
+    version210Padded = padVersion('2.10.0')
+    version211Padded = padVersion('2.11.0')
+    version29Padded = padVersion('2.9.0')
+    version27Padded = padVersion('2.7.0')
+    version26Padded = padVersion('2.6.0')
 }
 
 dependencies {
-    testImplementation 'org.mockito:mockito-core:5.5.0'
+    if (currentVersionPadded >= version211Padded) {
+       testImplementation 'org.mockito:mockito-core:5.5.0'
+    } else 
+    if (currentVersionPadded >= version29Padded) {
+        testImplementation 'org.mockito:mockito-core:5.4.0'
+    } else 
+    if (currentVersionPadded >= version27Padded) {
+        testImplementation 'org.mockito:mockito-core:5.2.0'
+    } else 
+    if (currentVersionPadded >= version26Padded) {
+        testImplementation 'org.mockito:mockito-core:5.1.0'
+    }
+    else {
+        testImplementation 'org.mockito:mockito-core:4.7.0'
+    }
+    
 }
+
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+
+// Define a function to execute sed command using ProcessBuilder
+def executeSedCommand(String filePath, String pattern, boolean isMacOS) {
+    if (Files.exists(Paths.get(filePath))) {
+        def commandLine = isMacOS ? 
+            ["sed", "-i", "''", pattern, filePath] : 
+            ["sed", "-i", pattern, filePath]
+
+        try {
+            def processBuilder = new ProcessBuilder(commandLine)
+            processBuilder.redirectErrorStream(true)
+            def process = processBuilder.start()
+            def output = process.text
+            process.waitFor()
+
+            if (process.exitValue() != 0) {
+                logger.error("Error executing command: ${commandLine.join(' ')}")
+                logger.error("Output: ${output}")
+            } else {
+                logger.lifecycle("Command executed successfully: ${commandLine.join(' ')}")
+                logger.info("Output: ${output}")
+            }
+        } catch (Exception e) {
+            logger.error("Exception while executing command: ${commandLine.join(' ')}", e)
+        }
+    } else {
+        logger.lifecycle("File not found: ${filePath}")
+    }
+}
+
+task restoreOriginalFiles {
+    doLast {
+        def filesToModify = [
+            "src/test/java/org/opensearch/infino/InfinoRestHandlerTests.java",
+            "src/test/java/org/opensearch/infino/InfinoMockService.java",
+            "src/main/java/org/opensearch/infino/InfinoRestHandler.java"
+        ]
+
+        filesToModify.each { filePath ->
+            def originalPath = Paths.get(filePath)
+            def backupPath = Paths.get(backupFilePath(filePath))
+
+            if (Files.exists(backupPath)) {
+                // Restore the original file
+                Files.move(backupPath, originalPath, StandardCopyOption.REPLACE_EXISTING)
+                logger.lifecycle("Original file restored: ${filePath}")
+
+                // Cleanup: Delete the backup file
+                Files.deleteIfExists(backupPath)
+                logger.lifecycle("Backup file deleted: ${backupPath}")
+            }
+        }
+    }
+}
+
+// Top-level function to get the backup file path
+def backupFilePath(String path) {
+    return path + ".bak"
+}
+
+// Java doesn't have conditional imports, so this is a crude but simple
+// way of changing the import paths based on the OpenSearch version
+task modifySourcesBasedOnVersion {
+    doLast {
+        // Determine the OS
+        def isMacOS = System.properties['os.name'].toLowerCase().contains('mac')
+        logger.info("Is macOS: ${isMacOS}")
+
+        def filesToModify = [
+            "src/test/java/org/opensearch/infino/InfinoRestHandlerTests.java",
+            "src/test/java/org/opensearch/infino/InfinoMockService.java",
+            "src/main/java/org/opensearch/infino/InfinoRestHandler.java"
+        ]
+
+        logger.info("Current OpenSearch version: ${opensearch_version}")
+        logger.info("Current version padded: ${currentVersionPadded}")
+        logger.info("Version 2.10.0 padded: ${version210Padded}")
+
+        // Define sed patterns
+        def sedPatternLessThan210 = [
+            's/org.opensearch.core.rest.RestStatus/org.opensearch.rest.RestStatus/g',
+            's/org.opensearch.core.action.ActionListener/org.opensearch.action.ActionListener/g'
+        ]
+        def sedPatternGreaterOrEqualTo210 = [
+            's/org.opensearch.rest.RestStatus/org.opensearch.core.rest.RestStatus/g',
+            's/org.opensearch.action.ActionListener/org.opensearch.core.action.ActionListener/g'
+        ]
+
+        filesToModify.each { filePath ->
+            def originalPath = Paths.get(filePath)
+            def backupPath = Paths.get(backupFilePath(filePath))
+
+            if (Files.exists(originalPath) && !Files.exists(backupPath)) {
+                Files.copy(originalPath, backupPath, StandardCopyOption.REPLACE_EXISTING)
+                logger.lifecycle("Backup created for: ${filePath}")
+            }
+
+            logger.lifecycle("Processing file: ${filePath}")
+            if (currentVersionPadded >= version210Padded) {
+                logger.info("Applying patterns for version >= 2.10.0")
+                sedPatternGreaterOrEqualTo210.each { pattern ->
+                    executeSedCommand(filePath, pattern, isMacOS)
+                }
+            } else {
+                logger.info("Applying patterns for version < 2.10.0")
+                sedPatternLessThan210.each { pattern ->
+                    executeSedCommand(filePath, pattern, isMacOS)
+                }
+            }
+        }
+    }
+}
+
+// Make sure this task is executed before compiling Java sources
+compileJava.dependsOn modifySourcesBasedOnVersion
+
+// Make sure modified files are restored after the build
+test.finalizedBy restoreOriginalFiles
 
 repositories {
     mavenLocal()
