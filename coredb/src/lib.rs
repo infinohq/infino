@@ -8,7 +8,7 @@ pub mod log;
 pub mod metric;
 pub(crate) mod request_manager;
 pub(crate) mod segment_manager;
-pub(crate) mod storage_manager;
+pub mod storage_manager;
 pub mod utils;
 
 use std::collections::HashMap;
@@ -270,11 +270,11 @@ impl CoreDB {
   }
 
   /// Delete an index.
-  pub fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
+  pub async fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let index = self.index_map.remove(index_name);
     match index {
       Some(index) => {
-        index.1.delete();
+        index.1.delete().await?;
         Ok(())
       }
       None => {

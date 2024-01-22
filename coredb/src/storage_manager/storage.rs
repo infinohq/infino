@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
 use object_store::{local::LocalFileSystem, ObjectStore};
@@ -104,6 +105,39 @@ impl Storage {
       if !dir_path.is_dir() {
         // Directory does not exist. Create it.
         std::fs::create_dir_all(dir_path)?;
+      }
+    }
+
+    Ok(())
+  }
+
+  pub async fn remove_dir(&self, dir: &str) -> Result<(), CoreDBError> {
+    // We only need to create the directory for local storage. For cloud storage such as
+    // AWS, directories are just implied hierarchies by path separator '/'.
+    match self.storage_type {
+      StorageType::Local => {
+        let dir_path = std::path::Path::new(dir);
+        if !dir_path.is_dir() {
+          // Directory does not exist. Create it.
+          std::fs::remove_dir_all(dir_path)?;
+        }
+      }
+      _ => {
+        let path = Path::from(dir);
+
+        // Get a list of all the files in the directory.
+        let locations = self
+          .object_store
+          .list(Some(&path))
+          .map_ok(|m| m.location)
+          .boxed();
+
+        // Delete those files.
+        self
+          .object_store
+          .delete_stream(locations)
+          .try_collect::<Vec<Path>>()
+          .await?;
       }
     }
 

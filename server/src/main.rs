@@ -675,7 +675,7 @@ async fn delete_index(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Deleting index {}", index_name);
 
-  let result = state.coredb.delete_index(&index_name);
+  let result = state.coredb.delete_index(&index_name).await;
   if result.is_err() {
     let msg = format!("Could not delete index {}", index_name);
     error!("{} with error: {}", msg, result.err().unwrap());
@@ -703,6 +703,8 @@ mod tests {
 
   use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
+  use coredb::storage_manager::storage::Storage;
+  use coredb::storage_manager::storage::StorageType;
   use coredb::utils::io::get_joined_path;
   use coredb::utils::tokenize::FIELD_DELIMITER;
 
@@ -736,7 +738,7 @@ mod tests {
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
-      let default_index_name = format!("default_index_name = \"{}\"\n", "default");
+      let default_index_name = format!("default_index_name = \"{}\"\n", ".default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = use_rabbitmq
         .then(|| "yes".to_string())
@@ -1112,6 +1114,9 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
+    let storage = Storage::new(&StorageType::Local)
+      .await
+      .expect("Could not create storage");
 
     create_test_config(
       config_dir_path,
@@ -1140,7 +1145,7 @@ mod tests {
 
     // Check whether the index directory exists.
     let index_dir_path = get_joined_path(index_dir_path, index_name);
-    assert!(std::path::Path::new(&index_dir_path).exists());
+    assert!(storage.check_path_exists(&index_dir_path).await);
 
     // Delete the index.
     let response = app
@@ -1156,7 +1161,7 @@ mod tests {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Check whether the index directory exists.
-    assert!(!std::path::Path::new(&index_dir_path).exists());
+    assert!(!storage.check_path_exists(&index_dir_path).await);
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);

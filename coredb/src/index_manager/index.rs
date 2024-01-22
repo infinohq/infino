@@ -706,8 +706,8 @@ impl Index {
   }
 
   /// Function to delete the index directory.
-  pub fn delete(&self) {
-    std::fs::remove_dir_all(&self.index_dir_path).unwrap();
+  pub async fn delete(&self) -> Result<(), CoreDBError> {
+    self.storage.remove_dir(&self.index_dir_path).await
   }
 }
 
@@ -1415,6 +1415,9 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let temp_path_buf = index_dir.path().join("doesnotexist");
     let storage_type = StorageType::Local;
+    let storage = Storage::new(&storage_type)
+      .await
+      .expect("Could not create storage");
 
     // Expect an error when directory isn't present.
     let mut result =
@@ -1422,7 +1425,9 @@ mod tests {
     assert!(result.is_err());
 
     // Expect an error when metadata file is not present in the directory.
-    std::fs::create_dir(temp_path_buf.to_str().unwrap()).unwrap();
+    storage
+      .create_dir(temp_path_buf.to_str().expect("Could not create dir path"))
+      .expect("Could not create dir");
     result = Index::refresh(&storage_type, temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
     assert!(result.is_err());
   }
