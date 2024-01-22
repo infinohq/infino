@@ -1,5 +1,5 @@
 # Image to build infino release binary.
-FROM rust:1.67 as builder
+FROM rust:1.75 as builder
 
 WORKDIR /usr/src/infino
 COPY . .
