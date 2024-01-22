@@ -37,13 +37,14 @@ if (org.opensearch.gradle.info.BuildParams.inFipsJvm) {
 tasks.named('forbiddenApisMain').configure { onlyIf { false } }
 tasks.named('forbiddenApisTest').configure { onlyIf { false } }
 
-tasks.register("preparePluginPathDirs") {
+task preparePluginPathDirs {
     mustRunAfter clean
     doLast {
         def newPath = pathToPlugin.replace(".", "/")
         mkdir "src/main/java/org/opensearch/$newPath"
         mkdir "src/test/java/org/opensearch/$newPath"
         mkdir "src/yamlRestTest/java/org/opensearch/$newPath"
+        mkdir "build/lib"
     }
 }
 
@@ -113,6 +114,12 @@ buildscript {
     }
 }
 
+// WAR for OpenSearch versioning
+// 
+// OpenSearch changed the path of some imports in version 2.10.0
+// This is a WAR for that without needing to modify the code
+// or have different code branches for each version
+
 ext {
     // Function to pad version numbers for comparison
     def padVersion = { v -> v.tokenize('.').collect { String.format('%04d', it.toInteger()) }.join('.') }
@@ -128,147 +135,150 @@ ext {
 }
 
 dependencies {
+    def mockitoVersion
+    def jnaVersion
     if (currentVersionPadded >= version211Padded) {
-       testImplementation 'org.mockito:mockito-core:5.5.0'
-    } else 
-    if (currentVersionPadded >= version29Padded) {
-        testImplementation 'org.mockito:mockito-core:5.4.0'
-    } else 
-    if (currentVersionPadded >= version27Padded) {
-        testImplementation 'org.mockito:mockito-core:5.2.0'
-    } else 
-    if (currentVersionPadded >= version26Padded) {
-        testImplementation 'org.mockito:mockito-core:5.1.0'
+        mockitoVersion = '5.5.0'
+        jnaVersion = '5.13.0'
+    } else if (currentVersionPadded >= version210Padded) {
+        mockitoVersion = '5.4.0'
+        jnaVersion = '5.5.0'
+    } else if (currentVersionPadded >= version29Padded) {
+        mockitoVersion = '5.4.0'
+        jnaVersion = '5.5.0'
+    } else if (currentVersionPadded >= version27Padded) {
+        mockitoVersion = '5.2.0'
+        jnaVersion = '5.5.0'
+    } else if (currentVersionPadded >= version26Padded) {
+        mockitoVersion = '5.1.0'
+        jnaVersion = '5.5.0'
+    } else {
+        mockitoVersion = '4.7.0'
+        jnaVersion = '5.5.0'
     }
-    else {
-        testImplementation 'org.mockito:mockito-core:4.7.0'
-    }
-    
+
+    testImplementation "org.mockito:mockito-core:$mockitoVersion"
+    implementation "net.java.dev.jna:jna:$jnaVersion"
 }
 
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 
-// Define a function to execute sed command using ProcessBuilder
-def executeSedCommand(String filePath, String pattern, boolean isMacOS) {
-    if (Files.exists(Paths.get(filePath))) {
-        def commandLine = isMacOS ? 
-            ["sed", "-i", "''", pattern, filePath] : 
-            ["sed", "-i", pattern, filePath]
+// Define sed patterns OpenSearch imports
+def sedPatternUseCorePath = [
+    's/org.opensearch.rest.RestStatus/org.opensearch.core.rest.RestStatus/g',
+    's/org.opensearch.action.ActionListener/org.opensearch.core.action.ActionListener/g'
+]
+def sedPatternUseNormalPath = [
+    's/org.opensearch.core.rest.RestStatus/org.opensearch.rest.RestStatus/g',
+    's/org.opensearch.core.action.ActionListener/org.opensearch.action.ActionListener/g'
+]
 
-        try {
-            def processBuilder = new ProcessBuilder(commandLine)
-            processBuilder.redirectErrorStream(true)
-            def process = processBuilder.start()
-            def output = process.text
-            process.waitFor()
+// Map to track if files were modified
+def modifiedFiles = [:]
 
-            if (process.exitValue() != 0) {
-                logger.error("Error executing command: ${commandLine.join(' ')}")
-                logger.error("Output: ${output}")
-            } else {
-                logger.lifecycle("Command executed successfully: ${commandLine.join(' ')}")
-                logger.info("Output: ${output}")
-            }
-        } catch (Exception e) {
-            logger.error("Exception while executing command: ${commandLine.join(' ')}", e)
-        }
-    } else {
+def executeSedCommand(String filePath, String pattern) {
+    if (!Files.exists(Paths.get(filePath))) {
         logger.lifecycle("File not found: ${filePath}")
+        return false
     }
-}
 
-task restoreOriginalFiles {
-    doLast {
-        def filesToModify = [
-            "src/test/java/org/opensearch/infino/InfinoRestHandlerTests.java",
-            "src/test/java/org/opensearch/infino/InfinoMockService.java",
-            "src/main/java/org/opensearch/infino/InfinoRestHandler.java"
-        ]
+    def backupFilePath = "${filePath}.bak"
 
-        filesToModify.each { filePath ->
-            def originalPath = Paths.get(filePath)
-            def backupPath = Paths.get(backupFilePath(filePath))
-
-            if (Files.exists(backupPath)) {
-                // Restore the original file
-                Files.move(backupPath, originalPath, StandardCopyOption.REPLACE_EXISTING)
-                logger.lifecycle("Original file restored: ${filePath}")
-
-                // Cleanup: Delete the backup file
-                Files.deleteIfExists(backupPath)
-                logger.lifecycle("Backup file deleted: ${backupPath}")
+    try {
+        // Check and remove existing backup file before running sed
+        if (Files.exists(Paths.get(backupFilePath))) {
+            exec {
+                commandLine 'rm', '-f', backupFilePath
             }
         }
+        
+        exec {
+            commandLine 'sed', '-i.bak', '-e', pattern, '--', filePath
+        }
+
+        logger.lifecycle("Sed command executed successfully.")
+        return true
+    } catch (Exception e) {
+        logger.error("Exception while executing command: sed", e)
+        return false
     }
 }
 
-// Top-level function to get the backup file path
-def backupFilePath(String path) {
-    return path + ".bak"
-}
-
-// Java doesn't have conditional imports, so this is a crude but simple
-// way of changing the import paths based on the OpenSearch version
+// Task to modify source files based on OpenSearch version
 task modifySourcesBasedOnVersion {
     doLast {
-        // Determine the OS
-        def isMacOS = System.properties['os.name'].toLowerCase().contains('mac')
-        logger.info("Is macOS: ${isMacOS}")
-
         def filesToModify = [
             "src/test/java/org/opensearch/infino/InfinoRestHandlerTests.java",
             "src/test/java/org/opensearch/infino/InfinoMockService.java",
             "src/main/java/org/opensearch/infino/InfinoRestHandler.java"
         ]
 
-        logger.info("Current OpenSearch version: ${opensearch_version}")
-        logger.info("Current version padded: ${currentVersionPadded}")
-        logger.info("Version 2.10.0 padded: ${version210Padded}")
-
-        // Define sed patterns
-        def sedPatternLessThan210 = [
-            's/org.opensearch.core.rest.RestStatus/org.opensearch.rest.RestStatus/g',
-            's/org.opensearch.core.action.ActionListener/org.opensearch.action.ActionListener/g'
-        ]
-        def sedPatternGreaterOrEqualTo210 = [
-            's/org.opensearch.rest.RestStatus/org.opensearch.core.rest.RestStatus/g',
-            's/org.opensearch.action.ActionListener/org.opensearch.core.action.ActionListener/g'
-        ]
-
         filesToModify.each { filePath ->
-            def originalPath = Paths.get(filePath)
-            def backupPath = Paths.get(backupFilePath(filePath))
-
-            if (Files.exists(originalPath) && !Files.exists(backupPath)) {
-                Files.copy(originalPath, backupPath, StandardCopyOption.REPLACE_EXISTING)
-                logger.lifecycle("Backup created for: ${filePath}")
+            // Mark file as "assume-unchanged" using Git
+            exec {
+                commandLine 'git', 'update-index', '--assume-unchanged', filePath
             }
 
             logger.lifecycle("Processing file: ${filePath}")
+            def wasModified = false
             if (currentVersionPadded >= version210Padded) {
-                logger.info("Applying patterns for version >= 2.10.0")
-                sedPatternGreaterOrEqualTo210.each { pattern ->
-                    executeSedCommand(filePath, pattern, isMacOS)
+                wasModified = sedPatternUseCorePath.each { pattern ->
+                    executeSedCommand(filePath, pattern)
                 }
             } else {
-                logger.info("Applying patterns for version < 2.10.0")
-                sedPatternLessThan210.each { pattern ->
-                    executeSedCommand(filePath, pattern, isMacOS)
+                wasModified = sedPatternUseNormalPath.each { pattern ->
+                    executeSedCommand(filePath, pattern)
                 }
             }
+            modifiedFiles[filePath] = wasModified
         }
-
-        compileJava.finalizedBy restoreOriginalFiles
     }
 }
 
-// Make sure this task is executed before compiling Java sources
-compileJava.dependsOn modifySourcesBasedOnVersion
+// Task to restore files to their original state after modification
+task restoreOriginalFiles {
+    doLast {
+        modifiedFiles.each { filePath, wasModified ->
+            if (wasModified) {
+                if (currentVersionPadded >= version210Padded) {
+                    sedPatternUseNormalPath.each { pattern ->
+                        executeSedCommand(filePath, pattern)
+                    }
+                } else {
+                    sedPatternUseCorePath.each { pattern ->
+                        executeSedCommand(filePath, pattern)
+                    }
+                }
+            }
 
-// Make sure modified files are restored after the build
+            def backupFilePath = "${filePath}.bak"
+
+            // Check and remove existing backup file before running sed
+            if (Files.exists(Paths.get(backupFilePath))) {
+                exec {
+                    commandLine 'rm', '-f', backupFilePath
+                }
+            }
+
+            // Mark file as "no-assume-unchanged" using Git
+            exec {
+                commandLine 'git', 'update-index', '--no-assume-unchanged', filePath
+            }
+
+            logger.lifecycle("Restored file: ${filePath}")
+        }
+    }
+}
+
+// Task dependencies and ordering
+compileJava.dependsOn modifySourcesBasedOnVersion
+build.finalizedBy restoreOriginalFiles
 test.finalizedBy restoreOriginalFiles
+compileJava.finalizedBy restoreOriginalFiles
+
+// WAR done
 
 repositories {
     mavenLocal()
@@ -299,6 +309,7 @@ integTest {
     }
     // Turn off the security manager for integration tests.
     jvmArgs '-Dtests.security.manager=false'
+    jvmArgs '-OPENSEARCH_JAVA_OPTS="-Djna.tmpdir=build/lib".'
 }
 
 testClusters.integTest {
