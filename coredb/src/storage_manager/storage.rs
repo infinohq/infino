@@ -95,6 +95,30 @@ impl Storage {
   pub fn get_storage_type(&self) -> &StorageType {
     &self.storage_type
   }
+
+  pub fn create_dir(&self, dir: &str) -> Result<(), CoreDBError> {
+    // We only need to create the directory for local storage. For cloud storage such as
+    // AWS, directories are just implied hierarchies by path separator '/'.
+    if let StorageType::Local = self.storage_type {
+      let dir_path = std::path::Path::new(dir);
+      if !dir_path.is_dir() {
+        // Directory does not exist. Create it.
+        std::fs::create_dir_all(dir_path)?;
+      }
+    }
+
+    Ok(())
+  }
+
+  // Returns true if the specified path exists.
+  pub async fn check_path_exists(&self, path_str: &str) -> bool {
+    let path = Path::from(path_str);
+
+    // Perform a head operation to check if the path exists.
+    let result = self.object_store.head(&path).await;
+
+    result.is_ok()
+  }
 }
 
 #[cfg(test)]
@@ -121,6 +145,17 @@ mod tests {
     }
   }
 
+  fn run_test(storage_type: &StorageType) -> bool {
+    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
+    if storage_type != &StorageType::Local
+      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
+    {
+      return false;
+    }
+
+    true
+  }
+
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
   #[tokio::test]
@@ -128,10 +163,8 @@ mod tests {
     // Load environment variables - esp creds for accessing non-local storage.
     load_env();
 
-    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
-    if storage_type != StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
-    {
+    // Check if this test should be run (typically we don't run cloud tests in Github Actions or if credentials are not set).
+    if !run_test(&storage_type) {
       return;
     }
 
@@ -172,10 +205,8 @@ mod tests {
     // Load environment variables - esp creds for accessing non-local storage.
     load_env();
 
-    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
-    if storage_type != StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
-    {
+    // Check if this test should be run (typically we don't run cloud tests in Github Actions or if credentials are not set).
+    if !run_test(&storage_type) {
       return;
     }
 
@@ -218,10 +249,8 @@ mod tests {
     // Load environment variables - esp creds for accessing non-local storage.
     load_env();
 
-    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
-    if storage_type != StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
-    {
+    // Check if this test should be run (typically we don't run cloud tests in Github Actions or if credentials are not set).
+    if !run_test(&storage_type) {
       return;
     }
 
@@ -247,5 +276,63 @@ mod tests {
 
     // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
     assert!(num_bytes_read == uncompressed);
+  }
+
+  #[test_case(StorageType::Local; "with local storage")]
+  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[tokio::test]
+  async fn test_create_dir(storage_type: StorageType) {
+    // Load environment variables - esp creds for accessing non-local storage.
+    load_env();
+
+    // Check if this test should be run (typically we don't run cloud tests in Github Actions or if credentials are not set).
+    if !run_test(&storage_type) {
+      return;
+    }
+
+    let storage = Storage::new(&storage_type)
+      .await
+      .expect("Could not create storage");
+    match storage_type {
+      StorageType::Local => {
+        let temp_dir = std::env::temp_dir();
+        let test_dir = temp_dir.as_path().join("test-create-dir");
+        let test_dir = test_dir.to_str().expect("Could not create path");
+        assert!(storage.create_dir(test_dir).is_ok());
+        assert!(std::path::Path::new(test_dir).is_dir());
+      }
+      _ => assert!(storage.create_dir("some-dir").is_ok()),
+    };
+  }
+
+  #[test_case(StorageType::Local; "with local storage")]
+  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[tokio::test]
+  async fn test_prefix(storage_type: StorageType) {
+    // Load environment variables - esp creds for accessing non-local storage.
+    load_env();
+
+    // Check if this test should be run (typically we don't run cloud tests in Github Actions or if credentials are not set).
+    if !run_test(&storage_type) {
+      return;
+    }
+
+    // Check for non-existing prefix.
+    let storage = Storage::new(&storage_type)
+      .await
+      .expect("Could not create storage");
+    /*assert!(
+      !storage
+        .check_prefix_exists("this-prefix-does-not-exist")
+        .await
+    );*/
+
+    // Write some data, and check that the prefix with that data exists.
+    let file_path = &get_temp_file_path(&storage_type, "test-prefix");
+    storage
+      .write(&Vec::<String>::new(), file_path, false)
+      .await
+      .expect("Could not write to storage");
+    assert!(storage.check_path_exists(file_path).await);
   }
 }

@@ -13,6 +13,7 @@ config = "0.13.1"
 crossbeam = "0.8.2"
 dashmap = { version = "5.4.0", features = ["serde"] }
 dotenv = "0.15.0"
+futures = "0.3"
 lazy_static = "1.4.0"
 log = "0.4"
 object_store = { version = "0.9.0", features = ["aws"] }

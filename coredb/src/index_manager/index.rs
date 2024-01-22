@@ -6,7 +6,7 @@ use std::path::Path;
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
-use log::{debug, error, info};
+use log::{debug, info};
 use pest::error::Error as PestError;
 
 use crate::index_manager::metadata::Metadata;
@@ -106,11 +106,16 @@ impl Index {
       storage_type, index_dir, segment_size_threshold_bytes
     );
 
-    let index_dir_path = Path::new(index_dir);
-    if !index_dir_path.is_dir() {
-      // Directory does not exist. Create it.
-      std::fs::create_dir_all(index_dir_path).unwrap();
-    } else if Path::new(&io::get_joined_path(index_dir, METADATA_FILE_NAME)).is_file() {
+    let storage = Storage::new(storage_type).await?;
+
+    if !storage.check_path_exists(index_dir).await {
+      // Index directory does not exist - create it.
+      storage.create_dir(index_dir)?;
+    }
+
+    // Check whether index directory already has a metadata file.
+    let metadata_path = &format!("{}/{}", index_dir, METADATA_FILE_NAME);
+    if storage.check_path_exists(metadata_path).await {
       // index_dir_path has metadata file, refresh the index instead of creating new one
       match Self::refresh(storage_type, index_dir, search_memory_budget_bytes).await {
         Ok(mut index) => {
@@ -118,28 +123,19 @@ impl Index {
             .metadata
             .update_segment_size_threshold_bytes(segment_size_threshold_bytes);
           index.search_memory_budget_bytes = search_memory_budget_bytes;
+          println!("#### Refreshed index");
           return Ok(index);
         }
         Err(err) => {
+          println!("#### Err while refreshing index: {:?}", err);
           // Received a error while refreshing index
           return Err(err);
         }
       }
-    } else {
-      // Check if a directory is empty. We need to skip "." and "..".
-      // https://stackoverflow.com/questions/56744383/how-would-i-check-if-a-directory-is-empty-in-rust
-      let is_empty = index_dir_path.read_dir().unwrap().next().is_none();
-
-      if !is_empty {
-        error!(
-          "The directory {} is not empty. Cannot create index in this directory.",
-          index_dir
-        );
-        return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
-          String::from(index_dir),
-        ));
-      }
     }
+
+    // The directory did not have a metadata file - so create a new index.
+    println!("#### prefix does not exist: {}", metadata_path);
 
     // Create an initial segment.
     let segment = Segment::new();
@@ -159,8 +155,6 @@ impl Index {
     memory_segments_map.insert(current_segment_number, segment);
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
-
-    let storage = Storage::new(storage_type).await?;
 
     let index = Index {
       metadata,
@@ -719,7 +713,6 @@ impl Index {
 
 #[cfg(test)]
 mod tests {
-  use std::fs::File;
   use std::path::Path;
   use std::thread::sleep;
   use std::time::Duration;
@@ -1408,7 +1401,7 @@ mod tests {
     let storage_type = StorageType::Local;
 
     // Create a path within index_dir that does not exist.
-    let temp_path_buf = index_dir.path().join("-doesnotexist");
+    let temp_path_buf = index_dir.path().join("doesnotexist");
     let index = Index::new(&storage_type, temp_path_buf.to_str().unwrap())
       .await
       .unwrap();
@@ -1662,7 +1655,7 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn test_directory_without_metadata() {
+  async fn test_empty_directory_without_metadata() {
     // Create a new index in an empty directory - this should work.
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
@@ -1671,15 +1664,6 @@ mod tests {
     let index =
       Index::new_with_threshold_params(&storage_type, index_dir_path, 1024, 1024 * 1024).await;
     assert!(index.is_ok());
-
-    // Create a new index in an non-empty directory that does not have metadata - this should give an error.
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let file_path = index_dir.path().join("my_file.txt");
-    let _ = File::create(&file_path).unwrap();
-    let index =
-      Index::new_with_threshold_params(&storage_type, index_dir_path, 1024, 1024 * 1024).await;
-    assert!(index.is_err());
   }
 
   #[test_case(32; "search_memory_budget = 32 * segment_size_threshold")]
