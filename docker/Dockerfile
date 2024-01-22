@@ -7,12 +7,9 @@ RUN cargo build --release
 
 # Smaller image for running infino.
 FROM debian:bookworm-slim
+
 WORKDIR /opt/infino
-RUN apt-get update && \
-    apt-get install -y extra-runtime-dependencies && \
-    apt-get autoremove -y && \
-    apt-get clean -y && \
-    rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /usr/src/infino/target/release/infino /opt/infino/infino
 COPY --from=builder /usr/src/infino/config /opt/infino/config
 
