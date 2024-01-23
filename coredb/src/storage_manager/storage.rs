@@ -153,6 +153,23 @@ impl Storage {
 
     result.is_ok()
   }
+
+  pub async fn read_dir(&self, path_str: &str) -> Result<Vec<String>, CoreDBError> {
+    let path = Path::from(path_str);
+
+    // Get a list of all the files in the directory.
+    let list_result = self.object_store.list_with_delimiter(Some(&path)).await?;
+
+    let mut retval = Vec::new();
+    for prefix in list_result.common_prefixes {
+      let dirname = prefix.filename().ok_or(CoreDBError::CannotReadDirectory(
+        "Could not get filename from directory path".to_owned(),
+      ))?;
+      retval.push(dirname.to_string());
+    }
+
+    Ok(retval)
+  }
 }
 
 #[cfg(test)]
@@ -164,6 +181,7 @@ mod tests {
 
   use crate::utils::environment::load_env;
 
+  use tempfile::tempdir;
   use tempfile::NamedTempFile;
   use test_case::test_case;
 
@@ -179,6 +197,17 @@ mod tests {
     }
   }
 
+  fn get_temp_dir_path(storage_type: &StorageType, test_name: &str) -> String {
+    match storage_type {
+      StorageType::Local => {
+        let dir = tempdir().expect("Could not create temporary directory");
+        dir.path().to_str().unwrap().to_owned()
+      }
+      StorageType::Aws(_) => {
+        format!("storage-test/{}", test_name)
+      }
+    }
+  }
   fn run_test(storage_type: &StorageType) -> bool {
     // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
     if storage_type != &StorageType::Local
@@ -355,11 +384,11 @@ mod tests {
     let storage = Storage::new(&storage_type)
       .await
       .expect("Could not create storage");
-    /*assert!(
+    assert!(
       !storage
-        .check_prefix_exists("this-prefix-does-not-exist")
+        .check_path_exists("this-prefix-does-not-exist")
         .await
-    );*/
+    );
 
     // Write some data, and check that the prefix with that data exists.
     let file_path = &get_temp_file_path(&storage_type, "test-prefix");
@@ -368,5 +397,49 @@ mod tests {
       .await
       .expect("Could not write to storage");
     assert!(storage.check_path_exists(file_path).await);
+
+    // Write a couple more files in directories.
+    let dir_path = &get_temp_dir_path(&storage_type, "test-dir-prefix");
+    if storage_type == StorageType::Local {}
+    storage
+      .create_dir(&format!("{}/0", dir_path))
+      .expect("Could not create dir");
+    storage
+      .create_dir(&format!("{}/1", dir_path))
+      .expect("Could not create dir");
+
+    storage
+      .write(
+        &Vec::<String>::new(),
+        &format!("{}/0/test", dir_path),
+        false,
+      )
+      .await
+      .expect("Could not write to storage");
+    storage
+      .write(
+        &Vec::<String>::new(),
+        &format!("{}/1/test", dir_path),
+        false,
+      )
+      .await
+      .expect("Could not write to storage");
+    storage
+      .write(
+        &Vec::<String>::new(),
+        &format!("{}/1/test-again", dir_path),
+        false,
+      )
+      .await
+      .expect("Could not write to storage");
+
+    // Check that the directories are as expected.
+    let directories = storage
+      .read_dir(dir_path)
+      .await
+      .expect("Could not read dir");
+    assert_eq!(directories.len(), 2);
+    assert!(directories.contains(&"0".to_owned()));
+    assert!(directories.contains(&"1".to_owned()));
   }
 }

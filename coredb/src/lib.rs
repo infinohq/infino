@@ -3,7 +3,7 @@
 //! It uses time-sharded segments and compressed blocks for data storage
 //! and implements indexing for fast data retrieval.
 
-pub(crate) mod index_manager;
+pub mod index_manager;
 pub mod log;
 pub mod metric;
 pub(crate) mod request_manager;
@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use ::log::{debug, info};
 use dashmap::DashMap;
+use storage_manager::storage::Storage;
 use utils::error::SearchLogsError;
 
 use crate::index_manager::index::Index;
@@ -43,20 +44,19 @@ impl CoreDB {
         let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
         let storage_type = coredb_settings.get_storage_type()?;
+        let storage = Storage::new(&storage_type).await?;
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
-        let index_dir = std::fs::read_dir(index_dir_path);
-        match index_dir {
-          Ok(_) => {
+        let index_names = storage.read_dir(index_dir_path).await;
+        match index_names {
+          Ok(index_names) => {
             info!(
               "Index directory {} already exists. Loading existing index",
               index_dir_path
             );
 
-            let directories = std::fs::read_dir(index_dir_path).unwrap();
-
-            if directories.count() == 0 {
+            if index_names.is_empty() {
               info!(
                 "Index directory {} does not exist. Creating it.",
                 index_dir_path
@@ -71,9 +71,7 @@ impl CoreDB {
               .await?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
-              for entry in std::fs::read_dir(index_dir_path).unwrap() {
-                let entry = entry.unwrap();
-                let index_name = entry.file_name().into_string().unwrap();
+              for index_name in index_names {
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
                 let index = Index::refresh(
                   &storage_type,
@@ -291,7 +289,6 @@ impl CoreDB {
 
 #[cfg(test)]
 mod tests {
-  use std::fs::File;
   use std::io::Write;
 
   use chrono::Utc;
@@ -314,7 +311,7 @@ mod tests {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let default_index_name_line = format!("default_index_name = \"{}\"\n", ".default");
 
-      let mut file = File::create(config_file_path).unwrap();
+      let mut file = std::fs::File::create(config_file_path).unwrap();
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name_line.as_bytes()).unwrap();

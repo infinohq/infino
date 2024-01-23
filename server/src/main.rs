@@ -701,6 +701,7 @@ mod tests {
   use tower::Service;
   use urlencoding::encode;
 
+  use coredb::index_manager::index::Index;
   use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
   use coredb::storage_manager::storage::Storage;
@@ -1124,7 +1125,6 @@ mod tests {
       container_name,
       use_rabbitmq,
     );
-    println!("Config dir path {}", config_dir_path);
 
     // Create the app.
     let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
@@ -1143,9 +1143,10 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Check whether the index directory exists.
+    // Check whether the metadata file in the index directory exists.
     let index_dir_path = get_joined_path(index_dir_path, index_name);
-    assert!(storage.check_path_exists(&index_dir_path).await);
+    let metadata_file_path = &format!("{}/{}", index_dir_path, Index::get_metadata_file_name());
+    assert!(storage.check_path_exists(metadata_file_path).await);
 
     // Delete the index.
     let response = app
@@ -1161,7 +1162,7 @@ mod tests {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Check whether the index directory exists.
-    assert!(!storage.check_path_exists(&index_dir_path).await);
+    assert!(!storage.check_path_exists(metadata_file_path).await);
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);

@@ -709,6 +709,10 @@ impl Index {
   pub async fn delete(&self) -> Result<(), CoreDBError> {
     self.storage.remove_dir(&self.index_dir_path).await
   }
+
+  pub fn get_metadata_file_name() -> String {
+    METADATA_FILE_NAME.to_owned()
+  }
 }
 
 #[cfg(test)]
