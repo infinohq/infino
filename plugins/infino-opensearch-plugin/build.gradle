@@ -43,7 +43,6 @@ task preparePluginPathDirs {
         mkdir "src/main/java/org/opensearch/$newPath"
         mkdir "src/test/java/org/opensearch/$newPath"
         mkdir "src/yamlRestTest/java/org/opensearch/$newPath"
-        mkdir "build/lib"
     }
 }
 
@@ -183,7 +182,6 @@ integTest {
     }
     // Turn off the security manager for integration tests.
     jvmArgs '-Dtests.security.manager=false'
-    // jvmArgs '-OPENSEARCH_JAVA_OPTS="-Djna.tmpdir=build/lib".'
 }
 
 testClusters.integTest {
