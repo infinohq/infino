@@ -100,8 +100,6 @@ public class InfinoRestHandler extends BaseRestHandler {
 
     /**
      * Get the HTTP Client
-     * /**
-     * Get the HTTP Client
      *
      * @return the httpclient member from this class
      */
@@ -121,18 +119,12 @@ public class InfinoRestHandler extends BaseRestHandler {
 
     private static final ScheduledExecutorService infinoThreadPool = Executors.newScheduledThreadPool(THREADPOOLSIZE,
             new CustomThreadFactory("InfinoPluginThread"));
-    private static final ScheduledExecutorService infinoThreadPool = Executors.newScheduledThreadPool(THREADPOOLSIZE,
-            new CustomThreadFactory("InfinoPluginThread"));
 
-    /**
-     * Get thread pool
     /**
      * Get thread pool
      * 
      * @return the thread pool to use for the requests
      */
-    protected ExecutorService getInfinoThreadPool() {
-
     protected ExecutorService getInfinoThreadPool() {
         return infinoThreadPool;
     }
@@ -154,8 +146,6 @@ public class InfinoRestHandler extends BaseRestHandler {
     }
 
     /**
-     * Use a privileged custom thread factory since Security Manager blocks
-     * /**
      * Use a privileged custom thread factory since Security Manager blocks
      * access to thread groups.
      *
@@ -186,67 +176,8 @@ public class InfinoRestHandler extends BaseRestHandler {
                     t.setDaemon(false);
                 if (t.getPriority() != Thread.NORM_PRIORITY)
                     t.setPriority(Thread.NORM_PRIORITY);
-                if (t.isDaemon())
-                    t.setDaemon(false);
-                if (t.getPriority() != Thread.NORM_PRIORITY)
-                    t.setPriority(Thread.NORM_PRIORITY);
                 return t;
             });
-        }
-    }
-
-    private <T> MyActionListener<T> createDynamicActionListener(Consumer<T> onResponse, Consumer<Exception> onFailure) {
-        try {
-            Class<?> actionListenerClass;
-            try {
-                actionListenerClass = Class.forName("org.opensearch.core.action.ActionListener");
-            } catch (ClassNotFoundException e) {
-                actionListenerClass = Class.forName("org.opensearch.action.ActionListener");
-            }
-
-            // Define the methods of your custom interface that match ActionListener
-            MyActionListener<T> myActionListener = new MyActionListener<T>() {
-                @Override
-                public void onResponse(T response) {
-                    onResponse.accept(response);
-                }
-
-                @Override
-                public void onFailure(Exception e) {
-                    onFailure.accept(e);
-                }
-            };
-
-            // Use dynamic proxy to implement ActionListener-like behavior
-            return (MyActionListener<T>) Proxy.newProxyInstance(
-                    actionListenerClass.getClassLoader(),
-                    new Class<?>[] { MyActionListener.class },
-                    new InvocationHandler() {
-                        @Override
-                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                            // Map MyActionListener methods to ActionListener methods
-                            if ("onResponse".equals(method.getName()) && args.length == 1) {
-                                myActionListener.onResponse((T) args[0]);
-                            } else if ("onFailure".equals(method.getName()) && args.length == 1) {
-                                myActionListener.onFailure((Exception) args[0]);
-                            }
-                            return null;
-                        }
-                    });
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to dynamically load ActionListener class", e);
-        }
-    }
-
-    private Class<?> getActionListenerClass() {
-        try {
-            return Class.forName("org.opensearch.action.ActionListener");
-        } catch (ClassNotFoundException e) {
-            try {
-                return Class.forName("org.opensearch.action.ActionListener");
-            } catch (ClassNotFoundException ex) {
-                throw new RuntimeException("ActionListener class not found", ex);
-            }
         }
     }
 
@@ -282,29 +213,7 @@ public class InfinoRestHandler extends BaseRestHandler {
                 }
             } catch (Exception e) {
                 logger.error("Failed to delete '" + indexName + "' Lucene index on local node", e);
-        IndicesExistsRequest getIndexRequest = new IndicesExistsRequest(new String[] { indexName });
-
-        IndicesExistsResponse response;
-        try {
-            response = client.admin().indices().exists(getIndexRequest).actionGet();
-        } catch (Exception e) {
-            logger.error("Error checking existence of '" + indexName + "' index", e);
-            return;
-        }
-
-        if (response.isExists()) {
-            DeleteIndexRequest deleteIndexRequest = new DeleteIndexRequest(indexName);
-            try {
-                AcknowledgedResponse deleteResponse = client.admin().indices().delete(deleteIndexRequest).actionGet();
-                if (deleteResponse.isAcknowledged()) {
-                    logger.info("Successfully deleted '" + indexName + "' Lucene index on local node");
-                } else {
-                    logger.error("Failed to delete '" + indexName + "' Lucene index on local node");
-                }
-            } catch (Exception e) {
-                logger.error("Failed to delete '" + indexName + "' Lucene index on local node", e);
             }
-        }
         }
     }
 
@@ -313,7 +222,6 @@ public class InfinoRestHandler extends BaseRestHandler {
      * exist. Note that actionGet() is synchronous, which is fine for index creation
      * and/or deletion.
      *
-     * @param client       - client for the current OpenSearch node
      * @param client       - client for the current OpenSearch node
      * @param rawIndexName - name of the index to create
      */
@@ -346,30 +254,7 @@ public class InfinoRestHandler extends BaseRestHandler {
                 }
             } catch (Exception e) {
                 logger.error("Failed to create '" + indexName + "' Lucene index on local node", e);
-        IndicesExistsResponse response;
-        try {
-            response = client.admin().indices().exists(getIndexRequest).actionGet();
-        } catch (Exception e) {
-            logger.error("Error checking existence of '" + indexName + "' index", e);
-            return;
-        }
-
-        if (!response.isExists()) {
-            CreateIndexRequest createIndexRequest = new CreateIndexRequest(indexName);
-            createIndexRequest.settings(Settings.builder()
-                    .put("index.number_of_shards", 1)
-                    .put("index.number_of_replicas", 1));
-            try {
-                AcknowledgedResponse createResponse = client.admin().indices().create(createIndexRequest).actionGet();
-                if (createResponse.isAcknowledged()) {
-                    logger.info("Successfully created '" + indexName + "' Lucene index on local node");
-                } else {
-                    logger.error("Failed to create '" + indexName + "' Lucene index on local node");
-                }
-            } catch (Exception e) {
-                logger.error("Failed to create '" + indexName + "' Lucene index on local node", e);
             }
-        }
         }
     }
 
