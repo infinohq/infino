@@ -52,10 +52,13 @@ impl AWSS3Utils {
 
   pub async fn check_bucket_exists(&self, bucket_name: &str) -> bool {
     // Return true if the head_bucket operation is successful, return false otherwise.
-    matches!(
-      self.client.head_bucket().bucket(bucket_name).send().await,
-      Ok(_)
-    )
+    self
+      .client
+      .head_bucket()
+      .bucket(bucket_name)
+      .send()
+      .await
+      .is_ok()
   }
 }
 

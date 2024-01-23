@@ -398,14 +398,15 @@ mod tests {
 
     // Write a couple more files in directories.
     let dir_path = &get_temp_dir_path(&storage_type, "test-dir-prefix");
-    if storage_type == StorageType::Local {}
-    storage
-      .create_dir(&format!("{}/0", dir_path))
-      .expect("Could not create dir");
-    storage
-      .create_dir(&format!("{}/1", dir_path))
-      .expect("Could not create dir");
-
+    if storage_type == StorageType::Local {
+      // Need to create directories only for local storage.
+      storage
+        .create_dir(&format!("{}/0", dir_path))
+        .expect("Could not create dir");
+      storage
+        .create_dir(&format!("{}/1", dir_path))
+        .expect("Could not create dir");
+    }
     storage
       .write(
         &Vec::<String>::new(),
