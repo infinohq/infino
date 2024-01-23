@@ -7,6 +7,10 @@ use std::path::Path;
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 
+use crate::storage_manager::storage::StorageType;
+
+use super::error::CoreDBError;
+
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
 #[derive(Debug, Deserialize)]
@@ -19,6 +23,9 @@ pub struct CoreDBSettings {
   // This has to be greater than 4*segment_size_threshold_megabytes. Otherwise,
   // a ConfigError is raised while parsing.
   memory_budget_megabytes: f32,
+
+  storage_type: String,
+  aws_bucket_name: Option<String>,
 }
 
 impl CoreDBSettings {
@@ -63,6 +70,26 @@ impl CoreDBSettings {
     ((self.memory_budget_megabytes - self.segment_size_threshold_megabytes) * 1024.0 * 1024.0)
       as u64
   }
+
+  pub fn get_storage_type(&self) -> Result<StorageType, CoreDBError> {
+    match self.storage_type.as_str() {
+      "local" => Ok(StorageType::Local),
+      "aws" => {
+        let aws_bucket_name =
+          self
+            .aws_bucket_name
+            .to_owned()
+            .ok_or(CoreDBError::InvalidConfiguration(
+              "AWS bucket name not provided".to_owned(),
+            ))?;
+        Ok(StorageType::Aws(aws_bucket_name))
+      }
+      _ => {
+        let message = format!("Unknown storage type: {}", self.storage_type);
+        Err(CoreDBError::InvalidConfiguration(message))
+      }
+    }
+  }
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +126,12 @@ impl Settings {
     {
       return Err(ConfigError::Message(
         "Memory budget should be at least 4 times the segment size threshold".to_owned(),
+      ));
+    }
+
+    if settings.coredb.storage_type == "aws" && settings.coredb.aws_bucket_name.is_none() {
+      return Err(ConfigError::Message(
+        "AWS bucket name is not set".to_owned(),
       ));
     }
 
@@ -145,6 +178,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 4096\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
 
     let settings = Settings::new(config_dir_path).unwrap();
@@ -162,6 +196,10 @@ mod tests {
     assert_eq!(
       coredb_settings.get_search_memory_budget_bytes(),
       (4096 - 1024) * 1024 * 1024
+    );
+    assert_eq!(
+      coredb_settings.get_storage_type().unwrap(),
+      StorageType::Local
     );
 
     // Check if we are running this test as part of a GitHub actions. We can't change environment variables
@@ -215,6 +253,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 2048\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
 
     // Make sure this config returns an error.

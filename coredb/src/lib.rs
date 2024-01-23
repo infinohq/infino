@@ -3,18 +3,19 @@
 //! It uses time-sharded segments and compressed blocks for data storage
 //! and implements indexing for fast data retrieval.
 
-pub(crate) mod index_manager;
+pub mod index_manager;
 pub mod log;
 pub mod metric;
 pub(crate) mod request_manager;
 pub(crate) mod segment_manager;
-pub(crate) mod storage_manager;
+pub mod storage_manager;
 pub mod utils;
 
 use std::collections::HashMap;
 
 use ::log::{debug, info};
 use dashmap::DashMap;
+use storage_manager::storage::Storage;
 use utils::error::SearchLogsError;
 
 use crate::index_manager::index::Index;
@@ -42,26 +43,27 @@ impl CoreDB {
         let default_index_name = coredb_settings.get_default_index_name();
         let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+        let storage_type = coredb_settings.get_storage_type()?;
+        let storage = Storage::new(&storage_type).await?;
 
         // Check if index_dir_path exist and has some directories in it
         let index_map = DashMap::new();
-        let index_dir = std::fs::read_dir(index_dir_path);
-        match index_dir {
-          Ok(_) => {
+        let index_names = storage.read_dir(index_dir_path).await;
+        match index_names {
+          Ok(index_names) => {
             info!(
               "Index directory {} already exists. Loading existing index",
               index_dir_path
             );
 
-            let directories = std::fs::read_dir(index_dir_path).unwrap();
-
-            if directories.count() == 0 {
+            if index_names.is_empty() {
               info!(
                 "Index directory {} does not exist. Creating it.",
                 index_dir_path
               );
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
               let index = Index::new_with_threshold_params(
+                &storage_type,
                 &default_index_dir_path,
                 segment_size_threshold_bytes,
                 search_memory_budget_bytes,
@@ -69,12 +71,14 @@ impl CoreDB {
               .await?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
-              for entry in std::fs::read_dir(index_dir_path).unwrap() {
-                let entry = entry.unwrap();
-                let index_name = entry.file_name().into_string().unwrap();
+              for index_name in index_names {
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
-                let index =
-                  Index::refresh(&full_index_path_name, search_memory_budget_bytes).await?;
+                let index = Index::refresh(
+                  &storage_type,
+                  &full_index_path_name,
+                  search_memory_budget_bytes,
+                )
+                .await?;
                 index_map.insert(index_name, index);
               }
             }
@@ -86,6 +90,7 @@ impl CoreDB {
             );
             let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
             let index = Index::new_with_threshold_params(
+              &storage_type,
               &default_index_dir_path,
               segment_size_threshold_bytes,
               search_memory_budget_bytes,
@@ -193,7 +198,7 @@ impl CoreDB {
 
   /// Refresh the default index from the given directory path.
   // TODO: what to do if there are multiple indices?
-  pub async fn refresh(config_dir_path: &str) -> Self {
+  pub async fn refresh(config_dir_path: &str) -> Result<Self, CoreDBError> {
     // Read the settings and the index directory path.
     let settings = Settings::new(config_dir_path).unwrap();
     let index_dir_path = settings.get_coredb_settings().get_index_dir_path();
@@ -202,19 +207,23 @@ impl CoreDB {
     let search_memory_budget_bytes = settings
       .get_coredb_settings()
       .get_search_memory_budget_bytes();
+    let storage_type = settings.get_coredb_settings().get_storage_type()?;
 
     // Refresh the index.
-    let index = Index::refresh(&default_index_dir_path, search_memory_budget_bytes)
-      .await
-      .unwrap();
+    let index = Index::refresh(
+      &storage_type,
+      &default_index_dir_path,
+      search_memory_budget_bytes,
+    )
+    .await?;
 
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
 
-    CoreDB {
+    Ok(CoreDB {
       index_map,
       settings,
-    }
+    })
   }
 
   /// Get the directory where the index is stored.
@@ -243,9 +252,11 @@ impl CoreDB {
       .settings
       .get_coredb_settings()
       .get_search_memory_budget_bytes();
+    let storage_type = self.settings.get_coredb_settings().get_storage_type()?;
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
     let index = Index::new_with_threshold_params(
+      &storage_type,
       &index_dir_path,
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
@@ -257,11 +268,12 @@ impl CoreDB {
   }
 
   /// Delete an index.
-  pub fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
+  pub async fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
+    println!("#### in delete index {}", index_name);
     let index = self.index_map.remove(index_name);
     match index {
       Some(index) => {
-        index.1.delete();
+        index.1.delete().await?;
         Ok(())
       }
       None => {
@@ -278,7 +290,6 @@ impl CoreDB {
 
 #[cfg(test)]
 mod tests {
-  use std::fs::File;
   use std::io::Write;
 
   use chrono::Utc;
@@ -301,7 +312,7 @@ mod tests {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let default_index_name_line = format!("default_index_name = \"{}\"\n", ".default");
 
-      let mut file = File::create(config_file_path).unwrap();
+      let mut file = std::fs::File::create(config_file_path).unwrap();
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name_line.as_bytes()).unwrap();
@@ -309,11 +320,12 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
   }
 
   #[tokio::test]
-  async fn test_basic() {
+  async fn test_basic() -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
@@ -355,7 +367,7 @@ mod tests {
     );
 
     coredb.commit(true).await.expect("Could not commit");
-    let coredb = CoreDB::refresh(config_dir_path).await;
+    let coredb = CoreDB::refresh(config_dir_path).await?;
 
     let end = Utc::now().timestamp_millis() as u64;
 
@@ -378,5 +390,7 @@ mod tests {
       .expect("Error in get_metrics");
     assert_eq!(results.first().unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
+
+    Ok(())
   }
 }

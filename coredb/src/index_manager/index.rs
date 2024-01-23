@@ -2,11 +2,10 @@
 // https://www.elastic.co/licensing/elastic-license
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
-use log::{debug, error, info};
+use log::{debug, info};
 use pest::error::Error as PestError;
 
 use crate::index_manager::metadata::Metadata;
@@ -17,6 +16,7 @@ use crate::request_manager::query_dsl::QueryDslParser;
 use crate::request_manager::query_dsl::Rule;
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
+use crate::storage_manager::storage::StorageType;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::SearchLogsError;
 use crate::utils::io;
@@ -80,8 +80,9 @@ impl Index {
   /// the function will refresh the existing index instead of creating a new one.
   /// If the refresh process fails, an error will be thrown to indicate the issue.
   #[cfg(test)]
-  pub async fn new(index_dir_path: &str) -> Result<Self, CoreDBError> {
+  pub async fn new(storage_type: &StorageType, index_dir_path: &str) -> Result<Self, CoreDBError> {
     Index::new_with_threshold_params(
+      storage_type,
       index_dir_path,
       DEFAULT_SEGMENT_SIZE_THRESHOLD_BYTES,
       DEFAULT_SEARCH_MEMORY_BUDGET_BYTES,
@@ -94,49 +95,46 @@ impl Index {
   /// file in it, the existing index will be refreshed instead of creating a new one. If the refresh
   /// process fails, an error will be thrown to indicate the issue.
   pub async fn new_with_threshold_params(
+    storage_type: &StorageType,
     index_dir: &str,
     segment_size_threshold_bytes: u64,
     search_memory_budget_bytes: u64,
   ) -> Result<Self, CoreDBError> {
     info!(
-      "Creating index - dir {}, segment size threshold in megabytes: {}",
-      index_dir, segment_size_threshold_bytes
+      "Creating index - storage type {:?}, dir {}, segment size threshold in megabytes: {}",
+      storage_type, index_dir, segment_size_threshold_bytes
     );
 
-    let index_dir_path = Path::new(index_dir);
-    if !index_dir_path.is_dir() {
-      // Directory does not exist. Create it.
-      std::fs::create_dir_all(index_dir_path).unwrap();
-    } else if Path::new(&io::get_joined_path(index_dir, METADATA_FILE_NAME)).is_file() {
+    let storage = Storage::new(storage_type).await?;
+
+    if !storage.check_path_exists(index_dir).await {
+      // Index directory does not exist - create it.
+      storage.create_dir(index_dir)?;
+    }
+
+    // Check whether index directory already has a metadata file.
+    let metadata_path = &format!("{}/{}", index_dir, METADATA_FILE_NAME);
+    if storage.check_path_exists(metadata_path).await {
       // index_dir_path has metadata file, refresh the index instead of creating new one
-      match Self::refresh(index_dir, search_memory_budget_bytes).await {
+      match Self::refresh(storage_type, index_dir, search_memory_budget_bytes).await {
         Ok(mut index) => {
           index
             .metadata
             .update_segment_size_threshold_bytes(segment_size_threshold_bytes);
           index.search_memory_budget_bytes = search_memory_budget_bytes;
+          println!("#### Refreshed index");
           return Ok(index);
         }
         Err(err) => {
+          println!("#### Err while refreshing index: {:?}", err);
           // Received a error while refreshing index
           return Err(err);
         }
       }
-    } else {
-      // Check if a directory is empty. We need to skip "." and "..".
-      // https://stackoverflow.com/questions/56744383/how-would-i-check-if-a-directory-is-empty-in-rust
-      let is_empty = index_dir_path.read_dir().unwrap().next().is_none();
-
-      if !is_empty {
-        error!(
-          "The directory {} is not empty. Cannot create index in this directory.",
-          index_dir
-        );
-        return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
-          String::from(index_dir),
-        ));
-      }
     }
+
+    // The directory did not have a metadata file - so create a new index.
+    println!("#### prefix does not exist: {}", metadata_path);
 
     // Create an initial segment.
     let segment = Segment::new();
@@ -156,8 +154,6 @@ impl Index {
     memory_segments_map.insert(current_segment_number, segment);
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
-
-    let storage = Storage::new();
 
     let index = Index {
       metadata,
@@ -439,17 +435,10 @@ impl Index {
       self.index_dir_path
     );
 
-    // Check if the directory exists.
-    if !Path::new(&self.index_dir_path).is_dir() {
-      return Err(CoreDBError::CannotReadDirectory(String::from(
-        &self.index_dir_path,
-      )));
-    }
-
     // Read all segments summaries from disk.
     let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
-    if !Path::new(&all_segments_file).is_file() {
+    if !self.storage.check_path_exists(&all_segments_file).await {
       return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
         String::from(&self.index_dir_path),
       ));
@@ -581,12 +570,13 @@ impl Index {
 
   /// Read the index from the given index_dir_path.
   pub async fn refresh(
+    storage_type: &StorageType,
     index_dir_path: &str,
     search_memory_budget_bytes: u64,
   ) -> Result<Self, CoreDBError> {
     info!("Refreshing index from index_dir_path: {}", index_dir_path);
 
-    let storage = Storage::new();
+    let storage = Storage::new(storage_type).await?;
 
     // Read metadata.
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
@@ -708,15 +698,17 @@ impl Index {
   }
 
   /// Function to delete the index directory.
-  pub fn delete(&self) {
-    std::fs::remove_dir_all(&self.index_dir_path).unwrap();
+  pub async fn delete(&self) -> Result<(), CoreDBError> {
+    self.storage.remove_dir(&self.index_dir_path).await
+  }
+
+  pub fn get_metadata_file_name() -> String {
+    METADATA_FILE_NAME.to_owned()
   }
 }
 
 #[cfg(test)]
 mod tests {
-  use std::fs::File;
-  use std::path::Path;
   use std::thread::sleep;
   use std::time::Duration;
 
@@ -725,6 +717,7 @@ mod tests {
   use test_case::test_case;
 
   use super::*;
+  use crate::utils::io::get_joined_path;
   use crate::utils::sync::is_sync_send;
 
   #[tokio::test]
@@ -738,7 +731,9 @@ mod tests {
       "test_empty_index"
     );
 
-    let index = Index::new(&index_dir_path).await.unwrap();
+    let index = Index::new(&StorageType::Local, &index_dir_path)
+      .await
+      .unwrap();
     let segment_ref = index.get_current_segment_ref();
     let segment = segment_ref.value();
     assert_eq!(segment.get_log_message_count(), 0);
@@ -746,18 +741,25 @@ mod tests {
     assert_eq!(index.index_dir_path, index_dir_path);
 
     // Check that the index directory exists, and has expected structure.
-    let base = Path::new(&index_dir_path);
-    assert!(base.is_dir());
-    assert!(base.join(ALL_SEGMENTS_FILE_NAME).is_file());
-    assert!(base
-      .join(
-        index
-          .metadata
-          .get_current_segment_number()
-          .to_string()
-          .as_str()
-      )
-      .is_dir());
+    let all_segments_file_path = get_joined_path(&index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    assert!(
+      index
+        .storage
+        .check_path_exists(&all_segments_file_path)
+        .await
+    );
+
+    let segment_path = get_joined_path(
+      &index_dir_path,
+      &index.metadata.get_current_segment_number().to_string(),
+    );
+    let segment_metadata_path = get_joined_path(&segment_path, &Segment::get_metadata_file_name());
+    assert!(
+      index
+        .storage
+        .check_path_exists(&segment_metadata_path)
+        .await
+    );
   }
 
   #[tokio::test]
@@ -768,8 +770,9 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_commit_refresh"
     );
+    let storage_type = StorageType::Local;
 
-    let expected = Index::new(&index_dir_path).await.unwrap();
+    let expected = Index::new(&storage_type, &index_dir_path).await.unwrap();
     let num_log_messages = 5;
     let message_prefix = "content#";
     let num_metric_points = 5;
@@ -798,7 +801,9 @@ mod tests {
     }
 
     expected.commit(false).await.expect("Could not commit");
-    let received = Index::refresh(&index_dir_path, 1024).await.unwrap();
+    let received = Index::refresh(&storage_type, &index_dir_path, 1024)
+      .await
+      .unwrap();
 
     assert_eq!(&expected.index_dir_path, &received.index_dir_path);
     assert_eq!(
@@ -828,8 +833,9 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_basic_search"
     );
+    let storage_type = StorageType::Local;
 
-    let index = Index::new(&index_dir_path).await.unwrap();
+    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -887,8 +893,9 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_basic_time_series"
     );
+    let storage_type = StorageType::Local;
 
-    let index = Index::new(&index_dir_path).await.unwrap();
+    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
     let num_metric_points = 1000;
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
@@ -911,9 +918,15 @@ mod tests {
   #[test_case(false, true; "when only metric points are appended")]
   #[test_case(true, true; "when both logs and metric points are appended")]
   #[tokio::test]
-  async fn test_two_segments(append_log: bool, append_metric_point: bool) {
+  async fn test_two_segments(
+    append_log: bool,
+    append_metric_point: bool,
+  ) -> Result<(), CoreDBError> {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
     for _ in 0..10 {
+      let storage_type = StorageType::Local;
+      let storage = Storage::new(&storage_type).await?;
+
       let index_dir = TempDir::new("index_test").unwrap();
       let index_dir_path = format!(
         "{}/{}",
@@ -922,13 +935,14 @@ mod tests {
       );
 
       // Create an index with a small segment size threshold.
-      let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
-        .await
-        .unwrap();
+      let index =
+        Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
+          .await
+          .unwrap();
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
-        Path::new(&index_dir_path).join(original_segment_number.to_string().as_str());
+        get_joined_path(&index_dir_path, &original_segment_number.to_string());
 
       let message_prefix = "message";
       let mut expected_log_messages: Vec<String> = Vec::new();
@@ -958,17 +972,13 @@ mod tests {
       index.commit(true).await.expect("Could not commit index");
 
       // Read the index from disk and see that it has expected number of log messages and metric points.
-      let index = Index::refresh(&index_dir_path, 1024 * 1024)
+      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      let (original_segment, original_segment_size) = Segment::refresh(
-        &Storage::new(),
-        original_segment_path
-          .to_str()
-          .expect("Could not convert path to str"),
-      )
-      .await
-      .expect("Could not refresh segment");
+      let (original_segment, original_segment_size) =
+        Segment::refresh(&storage, &original_segment_path)
+          .await
+          .expect("Could not refresh segment");
       assert_eq!(
         original_segment.get_log_message_count(),
         original_segment_num_log_messages
@@ -1014,9 +1024,11 @@ mod tests {
 
       // Force a commit and refresh. The index should still have only 2 segments.
       index.commit(true).await.expect("Could not commit index");
-      let index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
+      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+        .await
+        .unwrap();
       let (mut original_segment, original_segment_size) =
-        Segment::refresh(&Storage::new(), original_segment_path.to_str().unwrap())
+        Segment::refresh(&storage, &original_segment_path)
           .await
           .expect("Could not refresh segment");
       assert_eq!(index.memory_segments_map.len(), 2);
@@ -1069,17 +1081,12 @@ mod tests {
 
       // Force a commit and refresh.
       index.commit(false).await.expect("Could not commit index");
-      let index = Index::refresh(&index_dir_path, 1024 * 1024)
+      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      (original_segment, _) = Segment::refresh(
-        &Storage::new(),
-        original_segment_path
-          .to_str()
-          .expect("Could not refresh segment"),
-      )
-      .await
-      .expect("Could not refresh segment");
+      (original_segment, _) = Segment::refresh(&storage, &original_segment_path)
+        .await
+        .expect("Could not refresh segment");
 
       let current_segment_log_message_count;
       let current_segment_metric_point_count;
@@ -1114,13 +1121,17 @@ mod tests {
 
       // Commit and refresh a few times. The index should not change.
       index.commit(false).await.expect("Could not commit index");
-      let index = Index::refresh(&index_dir_path, 1024 * 1024)
+      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
       index.commit(false).await.expect("Could not commit index");
       index.commit(false).await.expect("Could not commit index");
-      Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
-      let index_final = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
+      Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+        .await
+        .unwrap();
+      let index_final = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+        .await
+        .unwrap();
       let index_final_current_segment_ref = index_final.get_current_segment_ref();
       let index_final_current_segment = index_final_current_segment_ref.value();
 
@@ -1138,6 +1149,8 @@ mod tests {
         index_final_current_segment.get_metric_point_count()
       );
     }
+
+    Ok(())
   }
 
   #[tokio::test]
@@ -1148,12 +1161,14 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_multiple_segments_logs"
     );
+    let storage_type = StorageType::Local;
     let start_time = Utc::now().timestamp_millis() as u64;
 
     // Create a new index with a low threshold for the segment size.
-    let mut index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
-      .await
-      .unwrap();
+    let mut index =
+      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
+        .await
+        .unwrap();
 
     let message_prefix = "message";
     let num_log_messages = 10000;
@@ -1185,7 +1200,7 @@ mod tests {
     let end_time = Utc::now().timestamp_millis() as u64;
 
     // Read the index from disk.
-    index = match Index::refresh(&index_dir_path, 1024 * 1024).await {
+    index = match Index::refresh(&storage_type, &index_dir_path, 1024 * 1024).await {
       Ok(index) => index,
       Err(err) => {
         eprintln!("Error refreshing index: {:?}", err);
@@ -1257,8 +1272,9 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_search_logs_count"
     );
+    let storage_type = StorageType::Local;
 
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+    let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
       .await
       .unwrap();
     let message_prefix = "message";
@@ -1304,11 +1320,13 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_multiple_segments_metric_points"
     );
+    let storage_type = StorageType::Local;
 
     // Create an index with a low threshold for segment size.
-    let mut index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
-      .await
-      .unwrap();
+    let mut index =
+      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
+        .await
+        .unwrap();
     let num_metric_points = 10000;
     let mut num_metric_points_from_last_commit = 0;
     let commit_after = 1000;
@@ -1339,7 +1357,9 @@ mod tests {
     let end_time = Utc::now().timestamp_millis() as u64;
 
     // Refresh the segment from disk.
-    index = Index::refresh(&index_dir_path, 1024 * 1024).await.unwrap();
+    index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+      .await
+      .unwrap();
     let current_segment_ref = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
@@ -1372,10 +1392,13 @@ mod tests {
   #[tokio::test]
   async fn test_index_dir_does_not_exist() {
     let index_dir = TempDir::new("index_test").unwrap();
+    let storage_type = StorageType::Local;
 
     // Create a path within index_dir that does not exist.
-    let temp_path_buf = index_dir.path().join("-doesnotexist");
-    let index = Index::new(temp_path_buf.to_str().unwrap()).await.unwrap();
+    let temp_path_buf = index_dir.path().join("doesnotexist");
+    let index = Index::new(&storage_type, temp_path_buf.to_str().unwrap())
+      .await
+      .unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
     index.commit(false).await.expect("Could not commit index");
@@ -1385,14 +1408,21 @@ mod tests {
   async fn test_refresh_does_not_exist() {
     let index_dir = TempDir::new("index_test").unwrap();
     let temp_path_buf = index_dir.path().join("doesnotexist");
+    let storage_type = StorageType::Local;
+    let storage = Storage::new(&storage_type)
+      .await
+      .expect("Could not create storage");
 
     // Expect an error when directory isn't present.
-    let mut result = Index::refresh(temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
+    let mut result =
+      Index::refresh(&storage_type, temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
     assert!(result.is_err());
 
     // Expect an error when metadata file is not present in the directory.
-    std::fs::create_dir(temp_path_buf.to_str().unwrap()).unwrap();
-    result = Index::refresh(temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
+    storage
+      .create_dir(temp_path_buf.to_str().expect("Could not create dir path"))
+      .expect("Could not create dir");
+    result = Index::refresh(&storage_type, temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
     assert!(result.is_err());
   }
 
@@ -1404,7 +1434,9 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_overlap_one_segment"
     );
-    let index = Index::new(&index_dir_path).await.unwrap();
+    let storage_type = StorageType::Local;
+
+    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
     index.append_log_message(1000, &HashMap::new(), "message_1");
     index.append_log_message(2000, &HashMap::new(), "message_2");
 
@@ -1423,7 +1455,10 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_overlap_multiple_segments"
     );
+    let storage_type = StorageType::Local;
+
     let index = Index::new_with_threshold_params(
+      &storage_type,
       &index_dir_path,
       // This size depends on the number of log messages added in each segment in the for loop below.
       (0.0003 * 1024.0 * 1024.0) as u64,
@@ -1480,9 +1515,12 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_concurrent_append"
     );
+    let storage_type = StorageType::Local;
+
     let segment_size_threshold_bytes = 1024;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
     let index = Index::new_with_threshold_params(
+      &storage_type,
       &index_dir_path,
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
@@ -1545,7 +1583,7 @@ mod tests {
       .await
       .expect("Could not commit index");
 
-    let index = Index::refresh(&index_dir_path, 1024 * 1024)
+    let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
       .await
       .expect("Could not refresh index");
     let expected_len = num_threads * num_appends_per_thread;
@@ -1581,17 +1619,18 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_reusing_index_when_available"
     );
+    let storage_type = StorageType::Local;
 
     let start_time = Utc::now().timestamp_millis();
     // Create a new index
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+    let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
       .await
       .unwrap();
     index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
     index.commit(true).await.expect("Could not commit index");
 
     // Create one more new index using same dir location
-    let index = Index::new_with_threshold_params(&index_dir_path, 1024, 1024 * 1024)
+    let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
       .await
       .unwrap();
 
@@ -1615,20 +1654,15 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn test_directory_without_metadata() {
+  async fn test_empty_directory_without_metadata() {
     // Create a new index in an empty directory - this should work.
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let index = Index::new_with_threshold_params(index_dir_path, 1024, 1024 * 1024).await;
-    assert!(index.is_ok());
+    let storage_type = StorageType::Local;
 
-    // Create a new index in an non-empty directory that does not have metadata - this should give an error.
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let file_path = index_dir.path().join("my_file.txt");
-    let _ = File::create(&file_path).unwrap();
-    let index = Index::new_with_threshold_params(index_dir_path, 1024, 1024 * 1024).await;
-    assert!(index.is_err());
+    let index =
+      Index::new_with_threshold_params(&storage_type, index_dir_path, 1024, 1024 * 1024).await;
+    assert!(index.is_ok());
   }
 
   #[test_case(32; "search_memory_budget = 32 * segment_size_threshold")]
@@ -1644,9 +1678,12 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_limited_memory"
     );
+    let storage_type = StorageType::Local;
+
     let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
     let index = Index::new_with_threshold_params(
+      &storage_type,
       &index_dir_path,
       // This size depends on the number of log messages added in each segment in the for loop below.
       segment_size_threshold_bytes,

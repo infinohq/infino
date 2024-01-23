@@ -1,5 +1,10 @@
 [coredb]
+# Storage configuration.
+storage_type = "local"                # can be "local", "aws", "gcp" or "azure"
+aws_bucket_name = "dev-infino-data"   # only relevant for storage type "aws"
 index_dir_path = "data"
+
+# Index configuration.
 default_index_name = ".default"
 segment_size_threshold_megabytes = 256
 memory_budget_megabytes = 1024
