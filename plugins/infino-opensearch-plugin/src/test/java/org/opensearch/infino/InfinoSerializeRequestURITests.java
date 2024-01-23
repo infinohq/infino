@@ -16,16 +16,19 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.test.OpenSearchTestCase;
 import static org.opensearch.rest.RestRequest.Method.*;
 
-/** General testing approach is:
+/**
+ * General testing approach is:
  * 1. Mock the underlying request
- * 2. Create the request and add default parameters created by routes() in the rest handler
+ * 2. Create the request and add default parameters created by routes() in the
+ * rest handler
  * 3. Ensure we process the request correctly
  *
  * Notes:
  *
  * 1. default Infino test URL is defined in build.gradle:test.
- * 2. the security manager (turned off for unit tests) will catch unsupported methods (e.g. TRACE)
- *    so we don't test for that here
+ * 2. the security manager (turned off for unit tests) will catch unsupported
+ * methods (e.g. TRACE)
+ * so we don't test for that here
  */
 public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
@@ -124,7 +127,8 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
         restRequest.params().put("infinoPath", "_ping");
 
         InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
-        assertEquals("Ping URL should be constructed correctly", "http://test-host:3000/ping", infinoSerializeRequestURI.finalUrl);
+        assertEquals("Ping URL should be constructed correctly", "http://test-host:3000/ping",
+                infinoSerializeRequestURI.finalUrl);
     }
 
     public void testInvalidPath() {
@@ -205,7 +209,8 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
         restRequest.params().put("infinoPath", "_search");
 
         InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
-        assertEquals("Index type should be UNDEFINED for unknown index path", InfinoSerializeRequestURI.InfinoIndexType.UNDEFINED, infinoSerializeRequestURI.getIndexType());
+        assertEquals("Index type should be UNDEFINED for unknown index path",
+                InfinoSerializeRequestURI.InfinoIndexType.UNDEFINED, infinoSerializeRequestURI.getIndexType());
     }
 
     public void testNoIndexNameProvided() {
@@ -270,7 +275,8 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
         restRequest.params().put("infinoPath", "logs/_search");
 
         InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
-        assertTrue("URL should be encoded to handle special characters", infinoSerializeRequestURI.finalUrl.contains("%3Cerror%3E"));
+        assertTrue("URL should be encoded to handle special characters",
+                infinoSerializeRequestURI.finalUrl.contains("%3Cerror%3E"));
     }
 
     public void testMethodTypeHandling() throws Exception {
@@ -285,7 +291,8 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
         InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
         assertEquals("Method type should be GET", RestRequest.Method.GET, infinoSerializeRequestURI.method);
-        assertTrue("Final URL should contain the summarize path", infinoSerializeRequestURI.finalUrl.contains("/summarize"));
+        assertTrue("Final URL should contain the summarize path",
+                infinoSerializeRequestURI.finalUrl.contains("/summarize"));
     }
 
     public void testUrlConstructionForPostMethod() throws Exception {
@@ -299,6 +306,8 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
         restRequest.params().put("infinoPath", "logs/append_log");
 
         InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
-        assertEquals("Final URL should be constructed for the append_log path", infinoSerializeRequestURI.infinoEndpoint + "/test-index/append_log", infinoSerializeRequestURI.finalUrl);
+        assertEquals("Final URL should be constructed for the append_log path",
+                infinoSerializeRequestURI.infinoEndpoint + "/test-index/append_log",
+                infinoSerializeRequestURI.finalUrl);
     }
 }

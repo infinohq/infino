@@ -28,7 +28,6 @@ jarHell.enabled = false
 // OpenSearch don't support running gradle with a JVM that is in FIPS 140 mode, so skip tests.
 // WaitForHttpResourceTests tests would fail as they use JKS/PKCS12 keystores
 if (org.opensearch.gradle.info.BuildParams.inFipsJvm) {
-
     test.enabled = false
     testingConventions.enabled = false
 }
@@ -114,12 +113,6 @@ buildscript {
     }
 }
 
-// WAR for OpenSearch versioning
-// 
-// OpenSearch changed the path of some imports in version 2.10.0
-// This is a WAR for that without needing to modify the code
-// or have different code branches for each version
-
 ext {
     // Function to pad version numbers for comparison
     def padVersion = { v -> v.tokenize('.').collect { String.format('%04d', it.toInteger()) }.join('.') }
@@ -161,125 +154,6 @@ dependencies {
     implementation "net.java.dev.jna:jna:$jnaVersion"
 }
 
-import java.nio.file.Files
-import java.nio.file.Paths
-import java.security.MessageDigest
-
-// Define sed patterns OpenSearch imports
-def sedPatternUseCorePath = [
-    's/org.opensearch.rest.RestStatus/org.opensearch.core.rest.RestStatus/g',
-    's/org.opensearch.action.ActionListener/org.opensearch.core.action.ActionListener/g'
-]
-def sedPatternUseNormalPath = [
-    's/org.opensearch.core.rest.RestStatus/org.opensearch.rest.RestStatus/g',
-    's/org.opensearch.core.action.ActionListener/org.opensearch.action.ActionListener/g'
-]
-
-// Map to track if files were modified
-def modifiedFiles = [:]
-
-def executeSedCommand(String filePath, String pattern) {
-    if (!Files.exists(Paths.get(filePath))) {
-        logger.lifecycle("File not found: ${filePath}")
-        return false
-    }
-
-    def backupFilePath = "${filePath}.bak"
-
-    try {
-        // Check and remove existing backup file before running sed
-        if (Files.exists(Paths.get(backupFilePath))) {
-            exec {
-                commandLine 'rm', '-f', backupFilePath
-            }
-        }
-        
-        exec {
-            commandLine 'sed', '-i.bak', '-e', pattern, '--', filePath
-        }
-
-        logger.lifecycle("Sed command executed successfully.")
-        return true
-    } catch (Exception e) {
-        logger.error("Exception while executing command: sed", e)
-        return false
-    }
-}
-
-// Task to modify source files based on OpenSearch version
-task modifySourcesBasedOnVersion {
-    doLast {
-        def filesToModify = [
-            "src/test/java/org/opensearch/infino/InfinoRestHandlerTests.java",
-            "src/test/java/org/opensearch/infino/InfinoMockService.java",
-            "src/main/java/org/opensearch/infino/InfinoRestHandler.java"
-        ]
-
-        filesToModify.each { filePath ->
-            // Mark file as "assume-unchanged" using Git
-            exec {
-                commandLine 'git', 'update-index', '--assume-unchanged', filePath
-            }
-
-            logger.lifecycle("Processing file: ${filePath}")
-            def wasModified = false
-            if (currentVersionPadded >= version210Padded) {
-                wasModified = sedPatternUseCorePath.each { pattern ->
-                    executeSedCommand(filePath, pattern)
-                }
-            } else {
-                wasModified = sedPatternUseNormalPath.each { pattern ->
-                    executeSedCommand(filePath, pattern)
-                }
-            }
-            modifiedFiles[filePath] = wasModified
-        }
-    }
-}
-
-// Task to restore files to their original state after modification
-task restoreOriginalFiles {
-    doLast {
-        modifiedFiles.each { filePath, wasModified ->
-            if (wasModified) {
-                if (currentVersionPadded >= version210Padded) {
-                    sedPatternUseNormalPath.each { pattern ->
-                        executeSedCommand(filePath, pattern)
-                    }
-                } else {
-                    sedPatternUseCorePath.each { pattern ->
-                        executeSedCommand(filePath, pattern)
-                    }
-                }
-            }
-
-            def backupFilePath = "${filePath}.bak"
-
-            // Check and remove existing backup file before running sed
-            if (Files.exists(Paths.get(backupFilePath))) {
-                exec {
-                    commandLine 'rm', '-f', backupFilePath
-                }
-            }
-
-            // Mark file as "no-assume-unchanged" using Git
-            exec {
-                commandLine 'git', 'update-index', '--no-assume-unchanged', filePath
-            }
-
-            logger.lifecycle("Restored file: ${filePath}")
-        }
-    }
-}
-
-// Task dependencies and ordering
-compileJava.dependsOn modifySourcesBasedOnVersion
-build.finalizedBy restoreOriginalFiles
-test.finalizedBy restoreOriginalFiles
-compileJava.finalizedBy restoreOriginalFiles
-
-// WAR done
-
 repositories {
     mavenLocal()
     maven { url "https://aws.oss.sonatype.org/content/repositories/snapshots" }
@@ -309,7 +183,7 @@ integTest {
     }
     // Turn off the security manager for integration tests.
     jvmArgs '-Dtests.security.manager=false'
-    jvmArgs '-OPENSEARCH_JAVA_OPTS="-Djna.tmpdir=build/lib".'
+    // jvmArgs '-OPENSEARCH_JAVA_OPTS="-Djna.tmpdir=build/lib".'
 }
 
 testClusters.integTest {

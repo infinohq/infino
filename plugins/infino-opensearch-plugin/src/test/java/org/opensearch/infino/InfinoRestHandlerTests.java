@@ -13,7 +13,6 @@ import org.junit.After;
 
 import org.opensearch.client.node.NodeClient;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.core.rest.RestStatus;
 import org.opensearch.rest.AbstractRestChannel;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestResponse;
@@ -308,8 +307,9 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
         @Override
         public void sendResponse(RestResponse response) {
+
             this.capturedRestResponse = response;
-            if (response.status() == RestStatus.OK) {
+            if (response.status() == InfinoRestHandler.getRestStatusFromCode(200)) {
                 responses.incrementAndGet();
             } else {
                 errors.incrementAndGet();
@@ -349,7 +349,8 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
     public void testNonExistentEndpoint() throws Exception {
         mockStatusCode = 410;
         mockBody = "Not Found";
-        runRequestHandler(RestRequest.Method.GET, "Not Found", RestStatus.GONE, "/non-existent-endpoint");
+        runRequestHandler(RestRequest.Method.GET, "Not Found", InfinoRestHandler.getRestStatusFromCode(mockStatusCode),
+                "/non-existent-endpoint");
     }
 
     // Test handling of a 5xx response
@@ -357,12 +358,14 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
         String path = "/infino/test-index/_ping?invalidParam=value";
         mockStatusCode = 500;
         mockBody = "Internal Server Error";
-        runRequestHandler(RestRequest.Method.GET, "Internal Server Error", RestStatus.INTERNAL_SERVER_ERROR, path);
+        runRequestHandler(RestRequest.Method.GET, "Internal Server Error",
+                InfinoRestHandler.getRestStatusFromCode(mockStatusCode), path);
     }
 
     // Helper method to test requests with a specific method and expected response
     private void runRequestHandler(RestRequest.Method method, String expectedBody) throws Exception {
-        runRequestHandler(method, expectedBody, RestStatus.OK, "/infino/test-index/_ping");
+        runRequestHandler(method, expectedBody, InfinoRestHandler.getRestStatusFromCode(200),
+                "/infino/test-index/_ping");
     }
 
     // Test response with a large payload
@@ -372,7 +375,7 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
     }
 
     // Generic helper method to test requests
-    private void runRequestHandler(RestRequest.Method method, String expectedBody, RestStatus expectedStatus,
+    private void runRequestHandler(RestRequest.Method method, String expectedBody, Object expectedStatus,
             String path) throws Exception {
         when(mockInfinoSerializeRequestURI.getMethod()).thenReturn(method);
         when(mockInfinoSerializeRequestURI.getFinalUrl()).thenReturn("http://test-path" + path);
@@ -388,7 +391,7 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
         int expectedErrors = 1;
         int expectedResponses = 0;
-        if (expectedStatus == RestStatus.OK) {
+        if (expectedStatus == InfinoRestHandler.getRestStatusFromCode(200)) {
             expectedErrors = 0;
             expectedResponses = 1;
         }
