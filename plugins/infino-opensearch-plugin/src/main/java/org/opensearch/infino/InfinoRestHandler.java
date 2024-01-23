@@ -30,9 +30,6 @@ import java.lang.reflect.Method;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.NoSuchMethodException;
 import java.lang.InstantiationException;
-import java.util.function.Consumer;
-import java.lang.reflect.Proxy;
-import java.lang.reflect.InvocationHandler;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.unmodifiableList;
@@ -40,7 +37,6 @@ import static java.util.Collections.unmodifiableList;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
-import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.opensearch.action.admin.indices.exists.indices.IndicesExistsRequest;
 import org.opensearch.action.admin.indices.exists.indices.IndicesExistsResponse;
@@ -53,13 +49,6 @@ import org.opensearch.rest.RestChannel;
 import org.opensearch.rest.RestRequest;
 
 import static org.opensearch.rest.RestRequest.Method.*;
-
-// Define ActionListener-like interface for reflection (to handle OpenSearch versioning)
-interface MyActionListener<T> {
-    void onResponse(T response);
-
-    void onFailure(Exception e);
-}
 
 /**
  * Handle REST calls for the /infino index.
@@ -192,63 +181,11 @@ public class InfinoRestHandler extends BaseRestHandler {
         }
     }
 
-    private <T> MyActionListener<T> createDynamicActionListener(Consumer<T> onResponse, Consumer<Exception> onFailure) {
-        try {
-            Class<?> actionListenerClass;
-            try {
-                actionListenerClass = Class.forName("org.opensearch.core.action.ActionListener");
-            } catch (ClassNotFoundException e) {
-                actionListenerClass = Class.forName("org.opensearch.action.ActionListener");
-            }
-
-            // Define the methods of your custom interface that match ActionListener
-            MyActionListener<T> myActionListener = new MyActionListener<T>() {
-                @Override
-                public void onResponse(T response) {
-                    onResponse.accept(response);
-                }
-
-                @Override
-                public void onFailure(Exception e) {
-                    onFailure.accept(e);
-                }
-            };
-
-            // Use dynamic proxy to implement ActionListener-like behavior
-            return (MyActionListener<T>) Proxy.newProxyInstance(
-                    actionListenerClass.getClassLoader(),
-                    new Class<?>[] { MyActionListener.class },
-                    new InvocationHandler() {
-                        @Override
-                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                            // Map MyActionListener methods to ActionListener methods
-                            if ("onResponse".equals(method.getName()) && args.length == 1) {
-                                myActionListener.onResponse((T) args[0]);
-                            } else if ("onFailure".equals(method.getName()) && args.length == 1) {
-                                myActionListener.onFailure((Exception) args[0]);
-                            }
-                            return null;
-                        }
-                    });
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to dynamically load ActionListener class", e);
-        }
-    }
-
-    private Class<?> getActionListenerClass() {
-        try {
-            return Class.forName("org.opensearch.action.ActionListener");
-        } catch (ClassNotFoundException e) {
-            try {
-                return Class.forName("org.opensearch.action.ActionListener");
-            } catch (ClassNotFoundException ex) {
-                throw new RuntimeException("ActionListener class not found", ex);
-            }
-        }
-    }
-
     /**
      * Deletes a Lucene index if it exists.
+     * 
+     * Note that actionGet() is synchronous, which is fine for
+     * index creation and/or deletion.
      *
      * @param client       The NodeClient to perform the operation.
      * @param rawIndexName The raw name of the index to delete.
@@ -282,11 +219,13 @@ public class InfinoRestHandler extends BaseRestHandler {
 
     /**
      * Create a Lucene index with the same name as the Infino index if it doesn't
-     * exist.
+     * exist. Note that actionGet() is synchronous, which is fine for index creation
+     * and/or deletion.
      *
      * @param client       - client for the current OpenSearch node
      * @param rawIndexName - name of the index to create
      */
+
     protected void createLuceneIndexIfNeeded(NodeClient client, String rawIndexName) {
         String indexName = "infino-" + rawIndexName;
         IndicesExistsRequest getIndexRequest = new IndicesExistsRequest(new String[] { indexName });
