@@ -2,7 +2,6 @@
 // https://www.elastic.co/licensing/elastic-license
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
@@ -436,17 +435,10 @@ impl Index {
       self.index_dir_path
     );
 
-    // Check if the directory exists.
-    if !Path::new(&self.index_dir_path).is_dir() {
-      return Err(CoreDBError::CannotReadDirectory(String::from(
-        &self.index_dir_path,
-      )));
-    }
-
     // Read all segments summaries from disk.
     let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
-    if !Path::new(&all_segments_file).is_file() {
+    if !self.storage.check_path_exists(&all_segments_file).await {
       return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
         String::from(&self.index_dir_path),
       ));
@@ -717,7 +709,6 @@ impl Index {
 
 #[cfg(test)]
 mod tests {
-  use std::path::Path;
   use std::thread::sleep;
   use std::time::Duration;
 
@@ -726,6 +717,7 @@ mod tests {
   use test_case::test_case;
 
   use super::*;
+  use crate::utils::io::get_joined_path;
   use crate::utils::sync::is_sync_send;
 
   #[tokio::test]
@@ -749,18 +741,25 @@ mod tests {
     assert_eq!(index.index_dir_path, index_dir_path);
 
     // Check that the index directory exists, and has expected structure.
-    let base = Path::new(&index_dir_path);
-    assert!(base.is_dir());
-    assert!(base.join(ALL_SEGMENTS_FILE_NAME).is_file());
-    assert!(base
-      .join(
-        index
-          .metadata
-          .get_current_segment_number()
-          .to_string()
-          .as_str()
-      )
-      .is_dir());
+    let all_segments_file_path = get_joined_path(&index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    assert!(
+      index
+        .storage
+        .check_path_exists(&all_segments_file_path)
+        .await
+    );
+
+    let segment_path = get_joined_path(
+      &index_dir_path,
+      &index.metadata.get_current_segment_number().to_string(),
+    );
+    let segment_metadata_path = get_joined_path(&segment_path, &Segment::get_metadata_file_name());
+    assert!(
+      index
+        .storage
+        .check_path_exists(&segment_metadata_path)
+        .await
+    );
   }
 
   #[tokio::test]
@@ -943,7 +942,7 @@ mod tests {
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
-        Path::new(&index_dir_path).join(original_segment_number.to_string().as_str());
+        get_joined_path(&index_dir_path, &original_segment_number.to_string());
 
       let message_prefix = "message";
       let mut expected_log_messages: Vec<String> = Vec::new();
@@ -976,14 +975,10 @@ mod tests {
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      let (original_segment, original_segment_size) = Segment::refresh(
-        &storage,
-        original_segment_path
-          .to_str()
-          .expect("Could not convert path to str"),
-      )
-      .await
-      .expect("Could not refresh segment");
+      let (original_segment, original_segment_size) =
+        Segment::refresh(&storage, &original_segment_path)
+          .await
+          .expect("Could not refresh segment");
       assert_eq!(
         original_segment.get_log_message_count(),
         original_segment_num_log_messages
@@ -1033,7 +1028,7 @@ mod tests {
         .await
         .unwrap();
       let (mut original_segment, original_segment_size) =
-        Segment::refresh(&storage, original_segment_path.to_str().unwrap())
+        Segment::refresh(&storage, &original_segment_path)
           .await
           .expect("Could not refresh segment");
       assert_eq!(index.memory_segments_map.len(), 2);
@@ -1089,14 +1084,9 @@ mod tests {
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      (original_segment, _) = Segment::refresh(
-        &storage,
-        original_segment_path
-          .to_str()
-          .expect("Could not refresh segment"),
-      )
-      .await
-      .expect("Could not refresh segment");
+      (original_segment, _) = Segment::refresh(&storage, &original_segment_path)
+        .await
+        .expect("Could not refresh segment");
 
       let current_segment_log_message_count;
       let current_segment_metric_point_count;

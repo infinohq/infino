@@ -2,7 +2,6 @@
 // https://www.elastic.co/licensing/elastic-license
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::vec::Vec;
 
 use log::debug;
@@ -19,6 +18,7 @@ use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
 use crate::utils::error::SegmentSearchError;
+use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::thread;
 use crate::utils::sync::TokioMutex;
@@ -255,17 +255,15 @@ impl Segment {
     let mut lock = self.commit_lock.lock().await;
     *lock = thread::current().id();
 
-    let dir_path = Path::new(dir);
-
-    let metadata_path = dir_path.join(METADATA_FILE_NAME);
-    let terms_path = dir_path.join(TERMS_FILE_NAME);
-    let inverted_map_path = dir_path.join(INVERTED_MAP_FILE_NAME);
-    let forward_map_path = dir_path.join(FORWARD_MAP_FILE_NAME);
-    let labels_path = dir_path.join(LABELS_FILE_NAME);
-    let time_series_path = dir_path.join(TIME_SERIES_FILE_NAME);
+    let metadata_path = get_joined_path(dir, METADATA_FILE_NAME);
+    let terms_path = get_joined_path(dir, TERMS_FILE_NAME);
+    let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
+    let forward_map_path = get_joined_path(dir, FORWARD_MAP_FILE_NAME);
+    let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
+    let time_series_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
 
     let (uncompressed_terms_size, compressed_terms_size) = storage
-      .write(&self.terms, terms_path.to_str().unwrap(), sync_after_write)
+      .write(&self.terms, &terms_path, sync_after_write)
       .await?;
     debug!(
       "Serialized terms to {} bytes uncompressed, {} bytes compressed",
@@ -273,11 +271,7 @@ impl Segment {
     );
 
     let (uncompressed_inverted_map_size, compressed_inverted_map_size) = storage
-      .write(
-        &self.inverted_map,
-        inverted_map_path.to_str().unwrap(),
-        sync_after_write,
-      )
+      .write(&self.inverted_map, &inverted_map_path, sync_after_write)
       .await?;
     debug!(
       "Serialized inverted map to {} bytes uncompressed, {} bytes compressed",
@@ -285,11 +279,7 @@ impl Segment {
     );
 
     let (uncompressed_forward_map_size, compressed_forward_map_size) = storage
-      .write(
-        &self.forward_map,
-        forward_map_path.to_str().unwrap(),
-        sync_after_write,
-      )
+      .write(&self.forward_map, &forward_map_path, sync_after_write)
       .await?;
     debug!(
       "Serialized forward map to {} bytes uncompressed, {} bytes compressed",
@@ -297,11 +287,7 @@ impl Segment {
     );
 
     let (uncompressed_labels_size, compressed_labels_size) = storage
-      .write(
-        &self.labels,
-        labels_path.to_str().unwrap(),
-        sync_after_write,
-      )
+      .write(&self.labels, &labels_path, sync_after_write)
       .await?;
     debug!(
       "Serialized labels to {} bytes uncompressed, {} bytes compressed",
@@ -309,11 +295,7 @@ impl Segment {
     );
 
     let (uncompressed_time_series_size, compressed_time_series_size) = storage
-      .write(
-        &self.time_series,
-        time_series_path.to_str().unwrap(),
-        sync_after_write,
-      )
+      .write(&self.time_series, &time_series_path, sync_after_write)
       .await?;
     debug!(
       "Serialized time series to {} bytes uncompressed, {} bytes compressed",
@@ -341,11 +323,7 @@ impl Segment {
 
     // Write the metadata at the end - so that its segment size is updated
     storage
-      .write(
-        &self.metadata,
-        metadata_path.to_str().unwrap(),
-        sync_after_write,
-      )
+      .write(&self.metadata, &metadata_path, sync_after_write)
       .await?;
 
     debug!(
@@ -358,26 +336,22 @@ impl Segment {
 
   /// Read the segment from the specified directory.
   pub async fn refresh(storage: &Storage, dir: &str) -> Result<(Segment, u64), CoreDBError> {
-    let dir_path = Path::new(dir);
-    let metadata_path = dir_path.join(METADATA_FILE_NAME);
-    let terms_path = dir_path.join(TERMS_FILE_NAME);
-    let inverted_map_path = dir_path.join(INVERTED_MAP_FILE_NAME);
-    let forward_map_path = dir_path.join(FORWARD_MAP_FILE_NAME);
-    let labels_path = dir_path.join(LABELS_FILE_NAME);
-    let time_series_path = dir_path.join(TIME_SERIES_FILE_NAME);
+    let metadata_path = get_joined_path(dir, METADATA_FILE_NAME);
+    let terms_path = get_joined_path(dir, TERMS_FILE_NAME);
+    let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
+    let forward_map_path = get_joined_path(dir, FORWARD_MAP_FILE_NAME);
+    let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
+    let time_series_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
 
-    let (metadata, metadata_size): (Metadata, _) =
-      storage.read(metadata_path.to_str().unwrap()).await?;
-    let (terms, terms_size): (DashMap<String, u32>, _) =
-      storage.read(terms_path.to_str().unwrap()).await?;
+    let (metadata, metadata_size): (Metadata, _) = storage.read(&metadata_path).await?;
+    let (terms, terms_size): (DashMap<String, u32>, _) = storage.read(&terms_path).await?;
     let (inverted_map, inverted_map_size): (DashMap<u32, PostingsList>, _) =
-      storage.read(inverted_map_path.to_str().unwrap()).await?;
+      storage.read(&inverted_map_path).await?;
     let (forward_map, forward_map_size): (DashMap<u32, LogMessage>, _) =
-      storage.read(forward_map_path.to_str().unwrap()).await?;
-    let (labels, labels_size): (DashMap<String, u32>, _) =
-      storage.read(labels_path.to_str().unwrap()).await?;
+      storage.read(&forward_map_path).await?;
+    let (labels, labels_size): (DashMap<String, u32>, _) = storage.read(&labels_path).await?;
     let (time_series, time_series_size): (DashMap<u32, TimeSeries>, _) =
-      storage.read(time_series_path.to_str().unwrap()).await?;
+      storage.read(&time_series_path).await?;
     let commit_lock = TokioMutex::new(thread::current().id());
 
     let total_size = metadata_size
@@ -490,6 +464,11 @@ impl Segment {
     if time < self.metadata.get_start_time() {
       self.metadata.update_start_time(time);
     }
+  }
+
+  #[cfg(test)]
+  pub fn get_metadata_file_name() -> String {
+    METADATA_FILE_NAME.to_owned()
   }
 }
 

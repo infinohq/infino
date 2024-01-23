@@ -269,6 +269,7 @@ impl CoreDB {
 
   /// Delete an index.
   pub async fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
+    println!("#### in delete index {}", index_name);
     let index = self.index_map.remove(index_name);
     match index {
       Some(index) => {

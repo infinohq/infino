@@ -112,15 +112,13 @@ impl Storage {
   }
 
   pub async fn remove_dir(&self, dir: &str) -> Result<(), CoreDBError> {
-    // We only need to create the directory for local storage. For cloud storage such as
-    // AWS, directories are just implied hierarchies by path separator '/'.
+    println!("#### calling remove_dir {}", dir);
+
     match self.storage_type {
       StorageType::Local => {
+        println!("#### local storage, removing dir {}", dir);
         let dir_path = std::path::Path::new(dir);
-        if !dir_path.is_dir() {
-          // Directory does not exist. Create it.
-          std::fs::remove_dir_all(dir_path)?;
-        }
+        std::fs::remove_dir_all(dir_path)?;
       }
       _ => {
         let path = Path::from(dir);
