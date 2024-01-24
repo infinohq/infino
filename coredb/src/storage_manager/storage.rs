@@ -64,7 +64,11 @@ impl Storage {
     while let Some(file) = file_stream.next().await {
       match file {
         Ok(file) => {
-          self.object_store.delete(&file.location).await?;
+          println!("Deleting file: {:?}", file.location);
+          match self.object_store.delete(&file.location).await {
+            Ok(_) => {}
+            Err(e) => println!("Error deleting file: {:?}", e),
+          }
         }
         Err(e) => return Err(e.into()),
       }
