@@ -714,6 +714,20 @@ impl Index {
 
   pub async fn delete_segment(&self, segment_number: u32) -> Result<(), CoreDBError> {
     // TODO: take lock on segment to make sure other are not using it
+    // get the reference of segment from segment_number and lock it
+    let segment_ref = self
+      .memory_segments_map
+      .get(&segment_number)
+      .unwrap_or_else(|| {
+        panic!(
+          "Could not commit segment {} since it isn't in memory",
+          segment_number
+        )
+      });
+    let segment = segment_ref.value();
+    let mut lock = segment.get_lock().lock().await;
+    *lock = thread::current().id();
+
     let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
     self.storage.delete(segment_dir_path.as_str()).await?;
     Ok(())

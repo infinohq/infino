@@ -3,7 +3,6 @@
 
 //! Utilities for managing the Infino application.
 
-pub mod constants;
 pub(crate) mod docker;
 pub(crate) mod environment;
 pub(crate) mod error;

@@ -497,6 +497,11 @@ impl Segment {
       self.metadata.update_start_time(time);
     }
   }
+
+  /// Get lock on this segment.
+  pub fn get_lock(&self) -> &TokioMutex<thread::ThreadId> {
+    &self.commit_lock
+  }
 }
 
 impl Default for Segment {

@@ -46,7 +46,6 @@ use coredb::CoreDB;
 use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
-use crate::utils::constants;
 use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
@@ -99,8 +98,24 @@ async fn commit_in_loop(
   commit_interval_in_seconds: u32,
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
+  let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   loop {
     let result = state.coredb.commit(true).await;
+
+    let current_time = Utc::now().timestamp_millis() as u64;
+    if current_time - last_trigger_policy_time > 3600000 {
+      info!("Triggering retention policy on index in coredb");
+      let result = state.coredb.trigger_retention().await;
+
+      if let Err(e) = result {
+        error!(
+          "Error triggering retention policy on index in coredb: {}",
+          e
+        );
+      }
+
+      last_trigger_policy_time = current_time;
+    }
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
@@ -115,36 +130,12 @@ async fn commit_in_loop(
   }
 }
 
-async fn policy_runner(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
-  loop {
-    let result = state.coredb.trigger_retention().await;
-
-    if *shutdown_flag.lock().await {
-      info!("Received shutdown in policy runner thread. Exiting...");
-      break;
-    }
-
-    if let Err(e) = result {
-      error!(
-        "Error triggering retention policy on index in coredb: {}",
-        e
-      );
-    }
-    sleep(Duration::from_secs(30)).await;
-  }
-}
-
 /// Axum application for Infino server.
 async fn app(
   config_dir_path: &str,
   image_name: &str,
   image_tag: &str,
-) -> (
-  Router,
-  HashMap<&'static str, JoinHandle<()>>,
-  HashMap<&'static str, Arc<Mutex<bool>>>,
-  Arc<AppState>,
-) {
+) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -196,12 +187,6 @@ async fn app(
     commit_thread_shutdown_flag.clone(),
   ));
 
-  let policy_runner_thread_shutdown_flag = Arc::new(Mutex::new(false));
-  let policy_runner_handler = tokio::spawn(policy_runner(
-    shared_state.clone(),
-    policy_runner_thread_shutdown_flag.clone(),
-  ));
-
   // Build our application with a route
   let router: Router = Router::new()
     // GET methods
@@ -222,21 +207,12 @@ async fn app(
     .with_state(shared_state.clone())
     .layer(TraceLayer::new_for_http());
 
-  let mut shutdown_flag_map = HashMap::new();
-  shutdown_flag_map.insert(
-    constants::COMMIT_THREAD_SHUTDOWN_FLAG,
+  (
+    router,
+    commit_thread_handle,
     commit_thread_shutdown_flag,
-  );
-  shutdown_flag_map.insert(
-    constants::POLICY_THREAD_SHUTDOWN_FLAG,
-    policy_runner_thread_shutdown_flag,
-  );
-
-  // create vector of join handles
-  let mut join_handle_map = HashMap::new();
-  join_handle_map.insert(constants::COMMIT_THREAD_HANDLE, commit_thread_handle);
-  join_handle_map.insert(constants::POLICY_THREAD_HANDLE, policy_runner_handler);
-  (router, join_handle_map, shutdown_flag_map, shared_state)
+    shared_state,
+  )
 }
 
 #[tokio::main]
@@ -266,26 +242,8 @@ async fn main() {
   let image_tag = "3";
 
   // Create app.
-  let (app, mut thread_handle_map, shutdown_flag_map, shared_state) =
+  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) =
     app(config_dir_path, image_name, image_tag).await;
-
-  let commit_thread_handle = thread_handle_map
-    .remove(constants::COMMIT_THREAD_HANDLE)
-    .unwrap();
-
-  let commit_thread_shutdown_flag = shutdown_flag_map
-    .get(constants::COMMIT_THREAD_SHUTDOWN_FLAG)
-    .unwrap()
-    .clone();
-
-  let policy_runner_handler = thread_handle_map
-    .remove(constants::POLICY_THREAD_HANDLE)
-    .unwrap();
-
-  let policy_runner_thread_shutdown_flag = shutdown_flag_map
-    .get(constants::POLICY_THREAD_SHUTDOWN_FLAG)
-    .unwrap()
-    .clone();
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -319,12 +277,6 @@ async fn main() {
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
-
-  info!("Shutting down policy thread and waiting for it to finish...");
-  *policy_runner_thread_shutdown_flag.lock().await = true;
-  policy_runner_handler
-    .await
-    .expect("Error while completing the policy runner thread");
 
   info!("Completed Infino server shuwdown");
 }
