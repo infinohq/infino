@@ -452,6 +452,8 @@ async fn append_metric(
 }
 
 /// Search logs in CoreDB.
+/// TODO: adding debug_handler macro until we figure out the issue with AST not implementing Send trait.
+#[debug_handler]
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
