@@ -228,19 +228,21 @@ async fn main() {
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
-  let connection_string = &format!("127.0.0.1:{}", port);
+  let host: &str = shared_state.settings.get_server_settings().get_host();
+  let connection_string = &format!("{}:{}", host, port);
   let listener = TcpListener::bind(connection_string)
     .await
     .unwrap_or_else(|_| panic!("Could not listen using {}", connection_string));
+
+  info!(
+    "Starting Infino server on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
+    connection_string
+  );
 
   axum::serve(listener, app)
     .with_graceful_shutdown(shutdown_signal())
     .await
     .unwrap();
-  info!(
-    "Infino server listening on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
-    connection_string
-  );
 
   if shared_state.queue.is_some() {
     info!("Closing RabbitMQ connection...");
@@ -769,6 +771,7 @@ mod tests {
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
+      file.write_all(b"host = \"127.0.0.1\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();

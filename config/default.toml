@@ -1,7 +1,7 @@
 [coredb]
 # Storage configuration.
-storage_type = "local"                # can be "local", "aws", "gcp" or "azure"
-aws_bucket_name = "dev-infino-data"   # only relevant for storage type "aws"
+storage_type = "local"              # can be "local", "aws", "gcp" or "azure"
+aws_bucket_name = "dev-infino-data" # only relevant for storage type "aws"
 index_dir_path = "data"
 
 # Index configuration.
@@ -12,6 +12,7 @@ memory_budget_megabytes = 1024
 
 [server]
 port = 3000
+host = "127.0.0.1"
 commit_interval_in_seconds = 30
 timestamp_key = "date"
 labels_key = "labels"
