@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::StreamExt;
+use log::debug;
+use log::error;
 use object_store::path::Path;
 use object_store::{local::LocalFileSystem, ObjectStore};
 use serde::de::DeserializeOwned;
@@ -64,10 +66,10 @@ impl Storage {
     while let Some(file) = file_stream.next().await {
       match file {
         Ok(file) => {
-          println!("Deleting file: {:?}", file.location);
+          debug!("Deleting file: {:?}", file.location);
           match self.object_store.delete(&file.location).await {
             Ok(_) => {}
-            Err(e) => println!("Error deleting file: {:?}", e),
+            Err(e) => error!("Error deleting file: {:?}", e),
           }
         }
         Err(e) => return Err(e.into()),

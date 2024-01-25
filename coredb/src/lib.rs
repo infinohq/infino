@@ -312,7 +312,6 @@ impl CoreDB {
       .collect();
 
     while let Some(result) = deletion_futures.next().await {
-      // handle each future's result
       result?;
     }
 
@@ -423,5 +422,10 @@ mod tests {
       .expect("Error in get_metrics");
     assert_eq!(results.first().unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
+
+    coredb
+      .trigger_retention()
+      .await
+      .expect("Error in retention policy");
   }
 }
