@@ -1,0 +1,7 @@
+[package]
+name = "rust-apache-logs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = "4.4.18"

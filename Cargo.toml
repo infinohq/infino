@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "server", "coredb", "benches"
+    "server", "coredb", "benches", "examples/rust-apache-logs"
 ]
 resolver = "2"
 
