@@ -92,14 +92,31 @@ struct SummarizeQueryResponse {
 }
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
-/// can be asyncronously committed).
+/// can be asyncronously committed), and triggers retention policy every hour
 async fn commit_in_loop(
   state: Arc<AppState>,
   commit_interval_in_seconds: u32,
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
+  let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   loop {
     let result = state.coredb.commit(true).await;
+
+    let current_time = Utc::now().timestamp_millis() as u64;
+    // TODO: make trigger policy interval configurable
+    if current_time - last_trigger_policy_time > 3600000 {
+      info!("Triggering retention policy on index in coredb");
+      let result = state.coredb.trigger_retention().await;
+
+      if let Err(e) = result {
+        error!(
+          "Error triggering retention policy on index in coredb: {}",
+          e
+        );
+      }
+
+      last_trigger_policy_time = current_time;
+    }
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
@@ -766,6 +783,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
 
       // Write server section.

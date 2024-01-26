@@ -8,7 +8,7 @@ index_dir_path = "data"
 default_index_name = ".default"
 segment_size_threshold_megabytes = 256
 memory_budget_megabytes = 1024
-
+retention_days = 30
 
 [server]
 port = 3000
