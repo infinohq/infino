@@ -45,7 +45,7 @@ mod tests {
 
     // Create three segments: one from 10 days ago, one from 5 days ago and one from 1 day ago
     let retention_days = 7;
-    let days_to_secs = |days: u64| days * 24 * 60 * 60 as u64;
+    let days_to_secs = |days: u64| days * 24 * 60 * 60_u64;
     let segment = Segment::new();
     let mut segment1 = SegmentSummary::new(0, &segment);
     segment1.update_start_end_time(
