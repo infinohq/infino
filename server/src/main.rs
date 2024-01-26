@@ -27,7 +27,6 @@ use axum::extract::{Path, Query};
 use axum::routing::{delete, put};
 use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
-use dotenv::dotenv;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -41,11 +40,12 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
+use coredb::utils::environment::load_env;
 use coredb::utils::error::{CoreDBError, SearchLogsError};
 use coredb::CoreDB;
-use utils::error::InfinoError;
 
 use crate::queue_manager::queue::RabbitMQ;
+use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
@@ -219,11 +219,8 @@ async fn app(
 #[tokio::main]
 /// Program entry point.
 async fn main() {
-  // Load environment variables from .env file, if it exists.
-  dotenv().ok();
-
-  // Load environment variables from .env-creds file, if it exists.
-  dotenv::from_filename(".env-creds").ok();
+  // Load environment variables from ".env" and ".env-creds" file.
+  load_env();
 
   // If log level isn't set, set it to info.
   if env::var("RUST_LOG").is_err() {
@@ -248,19 +245,21 @@ async fn main() {
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
-  let connection_string = &format!("127.0.0.1:{}", port);
+  let host: &str = shared_state.settings.get_server_settings().get_host();
+  let connection_string = &format!("{}:{}", host, port);
   let listener = TcpListener::bind(connection_string)
     .await
     .unwrap_or_else(|_| panic!("Could not listen using {}", connection_string));
+
+  info!(
+    "Starting Infino server on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
+    connection_string
+  );
 
   axum::serve(listener, app)
     .with_graceful_shutdown(shutdown_signal())
     .await
     .unwrap();
-  info!(
-    "Infino server listening on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
-    connection_string
-  );
 
   if shared_state.queue.is_some() {
     info!("Closing RabbitMQ connection...");
@@ -472,6 +471,8 @@ async fn append_metric(
 }
 
 /// Search logs in CoreDB.
+/// TODO: adding debug_handler macro until we figure out the issue with AST not implementing Send trait.
+#[debug_handler]
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
@@ -695,7 +696,7 @@ async fn delete_index(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Deleting index {}", index_name);
 
-  let result = state.coredb.delete_index(&index_name);
+  let result = state.coredb.delete_index(&index_name).await;
   if result.is_err() {
     let msg = format!("Could not delete index {}", index_name);
     error!("{} with error: {}", msg, result.err().unwrap());
@@ -721,8 +722,11 @@ mod tests {
   use tower::Service;
   use urlencoding::encode;
 
+  use coredb::index_manager::index::Index;
   use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
+  use coredb::storage_manager::storage::Storage;
+  use coredb::storage_manager::storage::StorageType;
   use coredb::utils::io::get_joined_path;
   use coredb::utils::tokenize::FIELD_DELIMITER;
 
@@ -756,7 +760,7 @@ mod tests {
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
-      let default_index_name = format!("default_index_name = \"{}\"\n", "default");
+      let default_index_name = format!("default_index_name = \"{}\"\n", ".default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = use_rabbitmq
         .then(|| "yes".to_string())
@@ -780,10 +784,12 @@ mod tests {
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
+      file.write_all(b"storage_type = \"local\"\n").unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
+      file.write_all(b"host = \"127.0.0.1\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();
@@ -803,7 +809,7 @@ mod tests {
     search_text: &str,
     query: LogsQuery,
     log_messages_expected: Vec<LogMessage>,
-  ) {
+  ) -> Result<(), CoreDBError> {
     let query_start_time = query
       .start_time
       .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
@@ -846,7 +852,7 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
@@ -867,6 +873,8 @@ mod tests {
         eprintln!("Error in search_logs: {:?}", search_logs_error);
       }
     }
+
+    Ok(())
   }
 
   fn check_metric_point_vectors(expected: &Vec<MetricPoint>, received: &Vec<MetricPoint>) {
@@ -890,7 +898,7 @@ mod tests {
     config_dir_path: &str,
     query: MetricsQuery,
     metric_points_expected: Vec<MetricPoint>,
-  ) {
+  ) -> Result<(), CoreDBError> {
     let query_start_time = query
       .start_time
       .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
@@ -933,7 +941,7 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await;
+    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
@@ -944,13 +952,15 @@ mod tests {
       .expect("Could not get metrics");
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
+
+    Ok(())
   }
 
   // Only run the tests without rabbitmq, as that is the use-case we are targeting.
   // #[test_case(true ; "use rabbitmq")]
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_basic(use_rabbitmq: bool) {
+  async fn test_basic(use_rabbitmq: bool) -> Result<(), CoreDBError> {
     init();
 
     let config_dir = TempDir::new("config_test").unwrap();
@@ -1033,7 +1043,7 @@ mod tests {
       query,
       log_messages_expected,
     )
-    .await;
+    .await?;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = LogsQuery {
@@ -1048,7 +1058,7 @@ mod tests {
       query_too_old,
       Vec::new(),
     )
-    .await;
+    .await?;
 
     // **Part 2**: Test insertion and search of time series metric points.
     let num_metric_points = 100;
@@ -1087,7 +1097,7 @@ mod tests {
       start_time: None,
       end_time: None,
     };
-    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await;
+    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await?;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = MetricsQuery {
@@ -1096,7 +1106,7 @@ mod tests {
       start_time: Some(1),
       end_time: Some(10000),
     };
-    check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await;
+    check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await?;
 
     // Check whether the /flush works.
     let response = app
@@ -1113,6 +1123,8 @@ mod tests {
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
+
+    Ok(())
   }
 
   /// Write test to test Create and Delete index APIs.
@@ -1126,6 +1138,9 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
+    let storage = Storage::new(&StorageType::Local)
+      .await
+      .expect("Could not create storage");
 
     create_test_config(
       config_dir_path,
@@ -1133,7 +1148,6 @@ mod tests {
       container_name,
       use_rabbitmq,
     );
-    println!("Config dir path {}", config_dir_path);
 
     // Create the app.
     let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
@@ -1152,9 +1166,10 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Check whether the index directory exists.
+    // Check whether the metadata file in the index directory exists.
     let index_dir_path = get_joined_path(index_dir_path, index_name);
-    assert!(std::path::Path::new(&index_dir_path).exists());
+    let metadata_file_path = &format!("{}/{}", index_dir_path, Index::get_metadata_file_name());
+    assert!(storage.check_path_exists(metadata_file_path).await);
 
     // Delete the index.
     let response = app
@@ -1170,7 +1185,7 @@ mod tests {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Check whether the index directory exists.
-    assert!(!std::path::Path::new(&index_dir_path).exists());
+    assert!(!storage.check_path_exists(metadata_file_path).await);
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);

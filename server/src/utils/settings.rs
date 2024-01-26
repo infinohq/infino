@@ -12,6 +12,7 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 pub struct ServerSettings {
   commit_interval_in_seconds: u32,
   port: u16,
+  host: String,
   timestamp_key: String,
   labels_key: String,
   use_rabbitmq: bool,
@@ -26,6 +27,11 @@ impl ServerSettings {
   /// Get the port.
   pub fn get_port(&self) -> u16 {
     self.port
+  }
+
+  /// Get the host.
+  pub fn get_host(&self) -> &str {
+    &self.host
   }
 
   /// Get the key for timestamp in json.
@@ -133,6 +139,7 @@ mod tests {
     let server_settings = settings.get_server_settings();
     assert_eq!(server_settings.get_commit_interval_in_seconds(), 30);
     assert_eq!(server_settings.get_port(), 3000);
+    assert_eq!(server_settings.get_host(), "127.0.0.1");
     assert_eq!(server_settings.get_timestamp_key(), "date");
     assert_eq!(server_settings.get_labels_key(), "labels");
 

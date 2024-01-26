@@ -1,6 +1,8 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
+// Test utilities for testing with different environment variables.
+
 use std::env;
 
 use log::error;
@@ -48,9 +50,8 @@ impl OpenAIHelper {
       GPT3_5_TURBO_16K.to_string(),
       vec![chat_completion::ChatCompletionMessage {
         role: chat_completion::MessageRole::user,
-        content: prompt,
+        content: openai_api_rs::v1::chat_completion::Content::Text(prompt),
         name: None,
-        function_call: None,
       }],
     );
 
@@ -69,11 +70,12 @@ impl OpenAIHelper {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::utils::environment;
+
+  use crate::utils::test_with_env_vars::with_env_vars;
 
   #[test]
   fn test_summarize_no_openai_key() {
-    environment::with_env_vars(vec![("OPENAI_API_KEY", None)], || {
+    with_env_vars(vec![("OPENAI_API_KEY", None)], || {
       let openai_helper = OpenAIHelper::new();
       let logs = Vec::new();
       let result = openai_helper.summarize(&logs, 100);
@@ -83,7 +85,7 @@ mod tests {
 
   #[test]
   fn test_summarize_invalid_openai_key() {
-    environment::with_env_vars(vec![("OPENAI_API_KEY", Some("invalid_key"))], || {
+    with_env_vars(vec![("OPENAI_API_KEY", Some("invalid_key"))], || {
       let openai_helper = OpenAIHelper::new();
       let logs = Vec::new();
       let result = openai_helper.summarize(&logs, 100);

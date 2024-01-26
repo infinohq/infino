@@ -28,7 +28,6 @@ jarHell.enabled = false
 // OpenSearch don't support running gradle with a JVM that is in FIPS 140 mode, so skip tests.
 // WaitForHttpResourceTests tests would fail as they use JKS/PKCS12 keystores
 if (org.opensearch.gradle.info.BuildParams.inFipsJvm) {
-
     test.enabled = false
     testingConventions.enabled = false
 }
@@ -37,7 +36,7 @@ if (org.opensearch.gradle.info.BuildParams.inFipsJvm) {
 tasks.named('forbiddenApisMain').configure { onlyIf { false } }
 tasks.named('forbiddenApisTest').configure { onlyIf { false } }
 
-tasks.register("preparePluginPathDirs") {
+task preparePluginPathDirs {
     mustRunAfter clean
     doLast {
         def newPath = pathToPlugin.replace(".", "/")
@@ -53,6 +52,7 @@ publishing {
             pom {
               name = pluginName
               description = pluginDescription
+              groupId = "org.opensearch.plugin"
               licenses {
                 license {
                   name = "The Apache License, Version 2.0"
@@ -81,23 +81,22 @@ sourceSets {
     }
 }
 
-opensearchplugin {
-    name "${pluginName}-${opensearch_version}"
-    description pluginDescription
-    classname "${projectPath}.${pathToPlugin}.${pluginClassName}"
-    licenseFile rootProject.file('LICENSE.txt')
-    noticeFile rootProject.file('NOTICE.txt')
-}
-
 // This requires an additional Jar not published as part of build-tools
 loggerUsageCheck.enabled = false
 
 // No need to validate pom, as we do not upload to maven/sonatype
 validateNebulaPom.enabled = false
 
+// Buildscript needs a redundant declaration of opensearch_version. Not sure why.
 buildscript {
     ext {
         opensearch_version = System.getProperty("opensearch.version", "2.11.1")
+        opensearch_group = "org.opensearch"
+
+        // breakdown something like "3.0.0-rc1-snapshot" to the aray
+        // ["3.0.0", "rc1", "SNAPSHOT"]. We'll need this to craft
+        // the plugin version in the allprojects block
+        opensearch_version_tokens = opensearch_version.tokenize('-')
     }
 
     repositories {
@@ -112,14 +111,68 @@ buildscript {
     }
 }
 
-configurations.all {
-    resolutionStrategy {
-        force 'org.junit.platform:junit-platform-engine:1.6.0'
+ext {
+    // Function to pad version numbers for comparison
+    def padVersion = { v -> v.tokenize('.').collect { String.format('%04d', it.toInteger()) }.join('.') }
+
+    // padding the OpenSearch version
+    // grab just the version number (opensearch_version_tokens[0]) and ignore the
+    // the qualifiers like SNAPSHOT or beta etc.
+    currentVersionPadded = padVersion(opensearch_version_tokens[0])
+    version210Padded = padVersion('2.10.0')
+    version211Padded = padVersion('2.11.0')
+    version29Padded = padVersion('2.9.0')
+    version27Padded = padVersion('2.7.0')
+    version26Padded = padVersion('2.6.0')
+}
+
+allprojects {
+    group = "org.opensearch"
+    // from the version tokens generated earlier craft the plugin version.
+    // OpenSearch convention recommends that if the OpenSearch version to
+    // plugin version mapping is as follows
+    //  3.0.0 -> 3.0.0.0
+    //  3.0.0-SNAPSHOT -> 3.0.0.0-SNAPSHOT
+    // Use the opensearch_version_tokens to craft the appropriate plugin versions
+    version = opensearch_version_tokens[0] + '.0'
+    if (opensearch_version_tokens.size > 1) {
+        version += '-' + opensearch_version_tokens.drop(1).join('-')
     }
 }
 
+opensearchplugin {
+    name pluginName
+    description pluginDescription
+    classname "${projectPath}.${pathToPlugin}.${pluginClassName}"
+    licenseFile rootProject.file('LICENSE.txt')
+    noticeFile rootProject.file('NOTICE.txt')
+}
+
 dependencies {
-    testImplementation 'org.mockito:mockito-core:5.5.0'
+    def mockitoVersion
+    def jnaVersion
+    if (currentVersionPadded >= version211Padded) {
+        mockitoVersion = '5.5.0'
+        jnaVersion = '5.13.0'
+    } else if (currentVersionPadded >= version210Padded) {
+        mockitoVersion = '5.4.0'
+        jnaVersion = '5.5.0'
+    } else if (currentVersionPadded >= version29Padded) {
+        mockitoVersion = '5.4.0'
+        jnaVersion = '5.5.0'
+    } else if (currentVersionPadded >= version27Padded) {
+        mockitoVersion = '5.2.0'
+        jnaVersion = '5.5.0'
+    } else if (currentVersionPadded >= version26Padded) {
+        mockitoVersion = '5.1.0'
+        jnaVersion = '5.5.0'
+    } else {
+        mockitoVersion = '4.7.0'
+        jnaVersion = '5.5.0'
+    }
+
+    testImplementation "org.mockito:mockito-core:$mockitoVersion"
+    implementation "net.java.dev.jna:jna:$jnaVersion"
 }
 
 repositories {
