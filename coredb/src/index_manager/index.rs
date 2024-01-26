@@ -1800,11 +1800,11 @@ mod tests {
     index.append_log_message(
       Utc::now().timestamp_millis() as u64,
       &HashMap::new(),
-      &message,
+      message,
     );
 
     index.commit(false).await.expect("Could not commit");
-    let segment_number = index.get_current_segment_ref().key().clone(); // Get current cos it has been committed to.
+    let segment_number = *index.get_current_segment_ref().key(); // Get current cos it has been committed to.
 
     // try to delete segment
     index
