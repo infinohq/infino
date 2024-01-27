@@ -7,9 +7,12 @@ use std::path::Path;
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 
-use crate::storage_manager::storage::StorageType;
-
 use super::error::CoreDBError;
+use crate::storage_manager::{
+  constants::DEFAULT_CLOUD_REGION_FOR_AWS_S3,
+  constants::DEFAULT_CLOUD_REGION_FOR_GCP,
+  storage::{CloudStorageConfig, StorageType},
+};
 
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
@@ -25,7 +28,8 @@ pub struct CoreDBSettings {
   memory_budget_megabytes: f32,
   retention_days: u32,
   storage_type: String,
-  aws_bucket_name: Option<String>,
+  cloud_storage_bucket_name: Option<String>,
+  cloud_storage_region: Option<String>,
 }
 
 impl CoreDBSettings {
@@ -81,12 +85,40 @@ impl CoreDBSettings {
       "aws" => {
         let aws_bucket_name =
           self
-            .aws_bucket_name
+            .cloud_storage_bucket_name
             .to_owned()
             .ok_or(CoreDBError::InvalidConfiguration(
-              "AWS bucket name not provided".to_owned(),
+              "AWS bucket name (as cloud_storage_bucket_name) not provided".to_owned(),
             ))?;
-        Ok(StorageType::Aws(aws_bucket_name))
+
+        let aws_region = self
+          .cloud_storage_region
+          .to_owned()
+          .unwrap_or_else(|| DEFAULT_CLOUD_REGION_FOR_AWS_S3.to_owned());
+
+        Ok(StorageType::Aws(CloudStorageConfig {
+          bucket_name: aws_bucket_name,
+          region: aws_region,
+        }))
+      }
+      "gcp" => {
+        let gcp_bucket_name =
+          self
+            .cloud_storage_bucket_name
+            .to_owned()
+            .ok_or(CoreDBError::InvalidConfiguration(
+              "GCP bucket name (as cloud_storage_bucket_name) not provided".to_owned(),
+            ))?;
+
+        let gcp_region = self
+          .cloud_storage_region
+          .to_owned()
+          .unwrap_or_else(|| DEFAULT_CLOUD_REGION_FOR_GCP.to_owned());
+
+        Ok(StorageType::Gcp(CloudStorageConfig {
+          bucket_name: gcp_bucket_name,
+          region: gcp_region,
+        }))
       }
       _ => {
         let message = format!("Unknown storage type: {}", self.storage_type);
@@ -133,9 +165,11 @@ impl Settings {
       ));
     }
 
-    if settings.coredb.storage_type == "aws" && settings.coredb.aws_bucket_name.is_none() {
+    if settings.coredb.storage_type != "local"
+      && settings.coredb.cloud_storage_bucket_name.is_none()
+    {
       return Err(ConfigError::Message(
-        "AWS bucket name is not set".to_owned(),
+        "Cloud Storage bucket name is not set".to_owned(),
       ));
     }
 
