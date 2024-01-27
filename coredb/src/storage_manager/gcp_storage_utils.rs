@@ -1,5 +1,7 @@
-use crate::utils::error::CoreDBError;
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
 
+use crate::utils::error::CoreDBError;
 use google_cloud_storage::client::{Client, ClientConfig};
 use google_cloud_storage::http::buckets::get::GetBucketRequest;
 use google_cloud_storage::http::buckets::insert::{
@@ -15,7 +17,7 @@ pub struct GCPStorageUtils {
 }
 
 impl GCPStorageUtils {
-  pub async fn new() -> Result<Self, CoreDBError> {
+  pub async fn new(region: &str) -> Result<Self, CoreDBError> {
     // Load configuration from the environment and create the GCP client.
     let config = match ClientConfig::default().with_auth().await {
       Ok(cfg) => cfg,
@@ -38,7 +40,7 @@ impl GCPStorageUtils {
 
     Ok(Self {
       client,
-      region: "US-EAST1".to_owned(),
+      region: region.to_owned(),
       project_id,
     })
   }
@@ -120,7 +122,7 @@ mod tests {
     }
 
     // Check a bucket that should exist.
-    let utils = GCPStorageUtils::new().await.unwrap();
+    let utils = GCPStorageUtils::new("US-EAST5").await.unwrap();
     assert!(utils.check_bucket_exists("dev-infino-unit-test").await);
 
     // Check a bucket that does not exist.
@@ -131,7 +133,7 @@ mod tests {
     );
 
     // Create a bucket that exists - the operation should succeed.
-    let response = utils.create_bucket("dev-infino-unit-test").await;
+    let response = utils.create_bucket("dev-infino-unit-test-east5").await;
     assert!(response.is_ok());
   }
 }

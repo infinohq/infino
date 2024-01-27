@@ -7,9 +7,12 @@ use std::path::Path;
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 
-use crate::storage_manager::storage::StorageType;
-
 use super::error::CoreDBError;
+use crate::storage_manager::{
+  constants::DEFAULT_CLOUD_REGION_FOR_AWS_S3,
+  constants::DEFAULT_CLOUD_REGION_FOR_GCP,
+  storage::{CloudStorageConfig, StorageType},
+};
 
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
@@ -26,6 +29,7 @@ pub struct CoreDBSettings {
   retention_days: u32,
   storage_type: String,
   cloud_storage_bucket_name: Option<String>,
+  cloud_storage_region: Option<String>,
 }
 
 impl CoreDBSettings {
@@ -86,7 +90,16 @@ impl CoreDBSettings {
             .ok_or(CoreDBError::InvalidConfiguration(
               "AWS bucket name (as cloud_storage_bucket_name) not provided".to_owned(),
             ))?;
-        Ok(StorageType::Aws(aws_bucket_name))
+
+        let aws_region = self
+          .cloud_storage_region
+          .to_owned()
+          .unwrap_or_else(|| DEFAULT_CLOUD_REGION_FOR_AWS_S3.to_owned());
+
+        Ok(StorageType::Aws(CloudStorageConfig {
+          bucket_name: aws_bucket_name,
+          region: aws_region,
+        }))
       }
       "gcp" => {
         let gcp_bucket_name =
@@ -96,7 +109,16 @@ impl CoreDBSettings {
             .ok_or(CoreDBError::InvalidConfiguration(
               "GCP bucket name (as cloud_storage_bucket_name) not provided".to_owned(),
             ))?;
-        Ok(StorageType::Gcp(gcp_bucket_name))
+
+        let gcp_region = self
+          .cloud_storage_region
+          .to_owned()
+          .unwrap_or_else(|| DEFAULT_CLOUD_REGION_FOR_GCP.to_owned());
+
+        Ok(StorageType::Gcp(CloudStorageConfig {
+          bucket_name: gcp_bucket_name,
+          region: gcp_region,
+        }))
       }
       _ => {
         let message = format!("Unknown storage type: {}", self.storage_type);

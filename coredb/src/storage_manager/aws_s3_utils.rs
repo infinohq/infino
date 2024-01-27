@@ -1,3 +1,7 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
+use aws_config::BehaviorVersion;
 use aws_config::Region;
 use aws_sdk_s3::Client;
 
@@ -12,9 +16,14 @@ pub struct AWSS3Utils {
 }
 
 impl AWSS3Utils {
-  pub async fn new() -> Result<Self, CoreDBError> {
-    // Load configuration from the environment and create the S3 client.
-    let config = aws_config::load_defaults(aws_config::BehaviorVersion::v2023_11_09()).await;
+  pub async fn new(region: &str) -> Result<Self, CoreDBError> {
+    // Load configuration from the environment, use the region set by user and create the S3 client.
+
+    let config = aws_config::defaults(BehaviorVersion::v2023_11_09())
+      .region(Region::new(region.to_owned()))
+      .load()
+      .await;
+
     let client = Client::new(&config);
 
     // Determine the region to use for the bucket location constraint.
@@ -81,7 +90,7 @@ mod tests {
     }
 
     // Check a bucket that should exist.
-    let utils = AWSS3Utils::new().await.unwrap();
+    let utils = AWSS3Utils::new("us-east-1").await.unwrap();
     assert!(utils.check_bucket_exists("dev-infino-unit-test").await);
 
     // Check a bucket that does not exist.
