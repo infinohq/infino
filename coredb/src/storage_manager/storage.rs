@@ -3,12 +3,14 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
+use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path;
 use object_store::{local::LocalFileSystem, ObjectStore};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::storage_manager::aws_s3_utils::AWSS3Utils;
+use crate::storage_manager::gcp_storage_utils::GCPStorageUtils;
 use crate::utils::error::CoreDBError;
 
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
@@ -18,6 +20,7 @@ pub const COMPRESSION_LEVEL: i32 = 15;
 pub enum StorageType {
   Local,
   Aws(String), // AWS storage with bucket name.
+  Gcp(String), // GCP storage with bucket name.
 }
 
 #[derive(Debug)]
@@ -48,6 +51,22 @@ impl Storage {
 
       // Local storage.
       StorageType::Local => Arc::new(LocalFileSystem::new()),
+
+      // GCP Cloud Storage, creates a bucket if it does not exists
+      StorageType::Gcp(bucket_name) => {
+        let gcp_storage_utils = GCPStorageUtils::new().await?;
+        let exists = gcp_storage_utils.check_bucket_exists(bucket_name).await;
+        if !exists {
+          log::info!("Bucket {} doesn't exist. Creating it.", bucket_name);
+          gcp_storage_utils.create_bucket(bucket_name).await?;
+        }
+
+        let gcs_store = GoogleCloudStorageBuilder::from_env()
+          .with_bucket_name(bucket_name.to_owned())
+          .build()?;
+
+        Arc::new(gcs_store)
+      }
     };
 
     Ok(Self {
@@ -189,7 +208,8 @@ mod tests {
         let file = NamedTempFile::new().expect("Could not create temporary file");
         file.path().to_str().unwrap().to_owned()
       }
-      StorageType::Aws(_) => {
+      // For all other cloud storages like AWS, GCP, etc
+      _ => {
         format!("storage-test/{}", test_name)
       }
     }
@@ -201,15 +221,18 @@ mod tests {
         let dir = tempdir().expect("Could not create temporary directory");
         dir.path().to_str().unwrap().to_owned()
       }
-      StorageType::Aws(_) => {
+      // For all other cloud storages like AWS, GCP, etc
+      _ => {
         format!("storage-test/{}", test_name)
       }
     }
   }
   fn run_test(storage_type: &StorageType) -> bool {
-    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
+    // Do not run non-local storage in Github Actions, or if we don't have AWS/GCP credentials.
     if storage_type != &StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
+      && (env::var("GITHUB_ACTIONS").is_ok()
+        || env::var("AWS_ACCESS_KEY_ID").is_err()
+        || env::var("GOOGLE_APPLICATION_CREDENTIALS").is_err())
     {
       return false;
     }
@@ -219,6 +242,7 @@ mod tests {
 
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Gcp("dev-infino-unit-test".to_owned()); "with GCP storage")]
   #[tokio::test]
   async fn test_serialize_btree_map(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -261,6 +285,7 @@ mod tests {
 
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Gcp("dev-infino-unit-test".to_owned()); "with GCP storage")]
   #[tokio::test]
   async fn test_serialize_vec(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -305,6 +330,7 @@ mod tests {
 
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Gcp("dev-infino-unit-test".to_owned()); "with GCP storage")]
   #[tokio::test]
   async fn test_empty(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -341,6 +367,7 @@ mod tests {
 
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Gcp("dev-infino-unit-test".to_owned()); "with GCP storage")]
   #[tokio::test]
   async fn test_create_dir(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -368,6 +395,7 @@ mod tests {
 
   #[test_case(StorageType::Local; "with local storage")]
   #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Gcp("dev-infino-unit-test".to_owned()); "with GCP storage")]
   #[tokio::test]
   async fn test_prefix(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.

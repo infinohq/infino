@@ -50,6 +50,9 @@ pub enum CoreDBError {
 
   #[error("AWS SDK Error: {0}")]
   AwsSdkError(String),
+
+  #[error("GCP Storage Utils Error: {0}")]
+  GCPStorageUtilsError(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

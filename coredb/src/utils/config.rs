@@ -25,7 +25,7 @@ pub struct CoreDBSettings {
   memory_budget_megabytes: f32,
 
   storage_type: String,
-  aws_bucket_name: Option<String>,
+  cloud_storage_bucket_name: Option<String>,
 }
 
 impl CoreDBSettings {
@@ -77,12 +77,22 @@ impl CoreDBSettings {
       "aws" => {
         let aws_bucket_name =
           self
-            .aws_bucket_name
+            .cloud_storage_bucket_name
             .to_owned()
             .ok_or(CoreDBError::InvalidConfiguration(
-              "AWS bucket name not provided".to_owned(),
+              "AWS bucket name (as cloud_storage_bucket_name) not provided".to_owned(),
             ))?;
         Ok(StorageType::Aws(aws_bucket_name))
+      },
+      "gcp" => {
+        let gcp_bucket_name =
+        self
+          .cloud_storage_bucket_name
+          .to_owned()
+          .ok_or(CoreDBError::InvalidConfiguration(
+            "GCP bucket name (as cloud_storage_bucket_name) not provided".to_owned(),
+          ))?;
+      Ok(StorageType::Gcp(gcp_bucket_name))
       }
       _ => {
         let message = format!("Unknown storage type: {}", self.storage_type);
@@ -129,9 +139,9 @@ impl Settings {
       ));
     }
 
-    if settings.coredb.storage_type == "aws" && settings.coredb.aws_bucket_name.is_none() {
+    if settings.coredb.storage_type != "local" && settings.coredb.cloud_storage_bucket_name.is_none() {
       return Err(ConfigError::Message(
-        "AWS bucket name is not set".to_owned(),
+        "Cloud Storage bucket name is not set".to_owned(),
       ));
     }
 
