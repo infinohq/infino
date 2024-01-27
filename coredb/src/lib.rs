@@ -6,6 +6,7 @@
 pub mod index_manager;
 pub mod log;
 pub mod metric;
+pub(crate) mod policy_manager;
 pub(crate) mod request_manager;
 pub(crate) mod segment_manager;
 pub mod storage_manager;
@@ -15,6 +16,8 @@ use std::collections::HashMap;
 
 use ::log::{debug, info};
 use dashmap::DashMap;
+use futures::stream::{FuturesUnordered, StreamExt};
+use policy_manager::retention_policy::TimeBasedRetention;
 use storage_manager::storage::Storage;
 use utils::error::SearchLogsError;
 
@@ -24,10 +27,13 @@ use crate::metric::metric_point::MetricPoint;
 use crate::utils::config::Settings;
 use crate::utils::error::CoreDBError;
 
+use crate::policy_manager::retention_policy::RetentionPolicy;
+
 /// Database for storing telemetry data, mapping string keys to index objects.
 pub struct CoreDB {
   index_map: DashMap<String, Index>,
   settings: Settings,
+  policy: Box<dyn RetentionPolicy>,
 }
 
 impl CoreDB {
@@ -99,9 +105,15 @@ impl CoreDB {
             index_map.insert(default_index_name.to_string(), index);
           }
         }
+
+        // Ideally decide which Retention object to create based on the config file
+        let retention_period = coredb_settings.get_retention_days();
+        let policy = Box::new(TimeBasedRetention::new(retention_period));
+
         let coredb = CoreDB {
           index_map,
           settings,
+          policy,
         };
 
         Ok(coredb)
@@ -220,9 +232,13 @@ impl CoreDB {
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
 
+    let retention_period = settings.get_coredb_settings().get_retention_days();
+    let policy = Box::new(TimeBasedRetention::new(retention_period));
+
     Ok(CoreDB {
       index_map,
       settings,
+      policy,
     })
   }
 
@@ -286,6 +302,33 @@ impl CoreDB {
   pub fn get_default_index_name(&self) -> &str {
     self.settings.get_coredb_settings().get_default_index_name()
   }
+
+  pub fn get_retention_policy(&self) -> &dyn RetentionPolicy {
+    self.policy.as_ref()
+  }
+
+  /// Function to help with triggering the retention policy
+  pub async fn trigger_retention(&self) -> Result<(), CoreDBError> {
+    let default_index_name = self.get_default_index_name();
+    let temp_reference = self.index_map.get(default_index_name).unwrap();
+    let index = temp_reference.value();
+
+    let all_segments_summaries_vec = index.get_all_segments_summaries().await?;
+    let segment_ids_to_delete = self
+      .get_retention_policy()
+      .apply(all_segments_summaries_vec);
+
+    let mut deletion_futures: FuturesUnordered<_> = segment_ids_to_delete
+      .into_iter()
+      .map(|segment_id| index.delete_segment(segment_id))
+      .collect();
+
+    while let Some(result) = deletion_futures.next().await {
+      result?;
+    }
+
+    Ok(())
+  }
 }
 
 #[cfg(test)]
@@ -320,6 +363,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
   }
@@ -390,6 +434,11 @@ mod tests {
       .expect("Error in get_metrics");
     assert_eq!(results.first().unwrap().get_value(), 1.0);
     assert_eq!(results.get(1).unwrap().get_value(), 2.0);
+
+    coredb
+      .trigger_retention()
+      .await
+      .expect("Error in retention policy");
 
     Ok(())
   }

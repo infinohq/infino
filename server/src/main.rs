@@ -92,14 +92,31 @@ struct SummarizeQueryResponse {
 }
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
-/// can be asyncronously committed).
+/// can be asyncronously committed), and triggers retention policy every hour
 async fn commit_in_loop(
   state: Arc<AppState>,
   commit_interval_in_seconds: u32,
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
+  let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   loop {
     let result = state.coredb.commit(true).await;
+
+    let current_time = Utc::now().timestamp_millis() as u64;
+    // TODO: make trigger policy interval configurable
+    if current_time - last_trigger_policy_time > 3600000 {
+      info!("Triggering retention policy on index in coredb");
+      let result = state.coredb.trigger_retention().await;
+
+      if let Err(e) = result {
+        error!(
+          "Error triggering retention policy on index in coredb: {}",
+          e
+        );
+      }
+
+      last_trigger_policy_time = current_time;
+    }
 
     if *shutdown_flag.lock().await {
       info!("Received shutdown in commit thread. Exiting...");
@@ -228,19 +245,21 @@ async fn main() {
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
-  let connection_string = &format!("127.0.0.1:{}", port);
+  let host: &str = shared_state.settings.get_server_settings().get_host();
+  let connection_string = &format!("{}:{}", host, port);
   let listener = TcpListener::bind(connection_string)
     .await
     .unwrap_or_else(|_| panic!("Could not listen using {}", connection_string));
+
+  info!(
+    "Starting Infino server on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
+    connection_string
+  );
 
   axum::serve(listener, app)
     .with_graceful_shutdown(shutdown_signal())
     .await
     .unwrap();
-  info!(
-    "Infino server listening on {}. Use Ctrl-C or SIGTERM to gracefully exit...",
-    connection_string
-  );
 
   if shared_state.queue.is_some() {
     info!("Closing RabbitMQ connection...");
@@ -452,6 +471,8 @@ async fn append_metric(
 }
 
 /// Search logs in CoreDB.
+/// TODO: adding debug_handler macro until we figure out the issue with AST not implementing Send trait.
+#[debug_handler]
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
@@ -762,11 +783,13 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 0.1\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
+      file.write_all(b"host = \"127.0.0.1\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();

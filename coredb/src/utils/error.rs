@@ -48,6 +48,9 @@ pub enum CoreDBError {
   #[error("Search Logs Error: {0}")]
   SearchLogsError(SearchLogsError),
 
+  #[error("Segment in memory: {0}")]
+  SegmentInMemory(u32),
+
   #[error("AWS SDK Error: {0}")]
   AwsSdkError(String),
 
