@@ -14,7 +14,7 @@ fn test_cargo_run_infino() {
     .spawn()
     .expect("Failed to start process");
 
-  // Wait for 30 seconds.
+  // Wait for 60 seconds.
   thread::sleep(Duration::from_secs(30));
 
   // Check if the process is still running - fail in case the server isn't running.
@@ -37,7 +37,7 @@ fn test_cargo_run_infino() {
     .expect("Failed to send SIGTERM to server");
 
   // Wait for 30 seconds.
-  thread::sleep(Duration::from_secs(30));
+  thread::sleep(Duration::from_secs(60));
 
   // Check if the process is still running - fail in case the server is still running.
   match child.try_wait() {

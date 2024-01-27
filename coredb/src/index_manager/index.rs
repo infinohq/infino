@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
+use log::error;
 use log::{debug, info};
 use pest::error::Error as PestError;
 
@@ -704,6 +705,27 @@ impl Index {
 
   pub fn get_metadata_file_name() -> String {
     METADATA_FILE_NAME.to_owned()
+  }
+
+  pub async fn delete_segment(&self, segment_number: u32) -> Result<(), CoreDBError> {
+    // Delete the segment only if it is not in memory
+    if !self.memory_segments_map.contains_key(&segment_number) {
+      let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+      let delete_result = self.storage.remove_dir(segment_dir_path.as_str()).await;
+      match delete_result {
+        Ok(_) => {
+          debug!("Deleted segment with segment number {}", segment_number);
+        }
+        Err(e) => {
+          error!("Failed to delete file: {:?}", segment_dir_path.as_str());
+          return Err(e);
+        }
+      }
+    } else {
+      // Return error saying that the segment is in memory
+      return Err(CoreDBError::SegmentInMemory(segment_number));
+    }
+    Ok(())
   }
 }
 
@@ -1760,5 +1782,94 @@ mod tests {
         1
       );
     }
+  }
+
+  #[tokio::test]
+  async fn test_delete_segment_in_memory() {
+    // Arrange
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_delete_segment"
+    );
+
+    let storage_type = StorageType::Local;
+    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
+    let message = "test_message";
+    index.append_log_message(
+      Utc::now().timestamp_millis() as u64,
+      &HashMap::new(),
+      message,
+    );
+
+    index.commit(false).await.expect("Could not commit");
+    let segment_number = *index.get_current_segment_ref().key(); // Get current cos it has been committed to.
+
+    // try to delete segment
+    index
+      .delete_segment(segment_number)
+      .await
+      .expect_err("Segment in memory: 0");
+  }
+
+  #[tokio::test]
+  async fn test_delete_multiple_segments() {
+    // Create 20 segments and keep 4 segments only in memory
+    let num_segments_in_memory = 4;
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_limited_memory"
+    );
+    let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
+    let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
+    let storage_type = StorageType::Local;
+    let index = Index::new_with_threshold_params(
+      &storage_type,
+      &index_dir_path,
+      // This size depends on the number of log messages added in each segment in the for loop below.
+      segment_size_threshold_bytes,
+      search_memory_budget_bytes,
+    )
+    .await
+    .unwrap();
+
+    // Setting it high to test out that there is no single-threaded deadlock while commiting.
+    // Note that if you change this value, some of the assertions towards the end of this test
+    // may need to be changed.
+    let num_segments = 20;
+
+    for i in 0..num_segments {
+      let start = i * 2 * 1000;
+      let end = start + 500;
+      // Insert unique messages in each segment - these will come handy for testing later.
+      let message_start = &format!("message_{}", start);
+      let message_end = &format!("message_{}", end);
+      index.append_log_message(start, &HashMap::new(), message_start);
+      index.append_log_message(end, &HashMap::new(), message_end);
+      index.commit(false).await.expect("Could not commit index");
+    }
+
+    // We'll have num_segments segments, plus one empty segment at the end.
+    assert_eq!(
+      index.all_segments_summaries.read().await.len() as u64,
+      num_segments + 1
+    );
+
+    index.evict_from_memory_segments_map();
+    // We shouldn't have more than specified segments in memory.
+    assert!(index.memory_segments_map.len() as u64 <= num_segments_in_memory);
+
+    // Check the deleted segments count
+    let mut delete_count = 0;
+    for i in 0..num_segments {
+      let result = index.delete_segment(i.try_into().unwrap()).await;
+      if result.is_ok() {
+        delete_count += 1;
+      }
+    }
+    assert!(delete_count >= 16);
   }
 }

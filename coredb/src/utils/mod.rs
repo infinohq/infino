@@ -10,4 +10,5 @@ pub mod error;
 pub mod io;
 pub(crate) mod range;
 pub mod sync;
+pub mod time;
 pub mod tokenize;

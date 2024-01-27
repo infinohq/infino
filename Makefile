@@ -27,7 +27,7 @@ docker-check:
 
 test: rust-check docker-check
 	echo "Running tests for all the packages"
-	cargo test --all
+	RUST_BACKTRACE=1 cargo test --all
 
 build:
 	cargo build $(release)

@@ -23,7 +23,7 @@ pub struct CoreDBSettings {
   // This has to be greater than 4*segment_size_threshold_megabytes. Otherwise,
   // a ConfigError is raised while parsing.
   memory_budget_megabytes: f32,
-
+  retention_days: u32,
   storage_type: String,
   aws_bucket_name: Option<String>,
 }
@@ -69,6 +69,10 @@ impl CoreDBSettings {
     // Search memory budget is total memory budget, minus the size of one segment (typically for insertions).
     ((self.memory_budget_megabytes - self.segment_size_threshold_megabytes) * 1024.0 * 1024.0)
       as u64
+  }
+
+  pub fn get_retention_days(&self) -> u32 {
+    self.retention_days
   }
 
   pub fn get_storage_type(&self) -> Result<StorageType, CoreDBError> {
@@ -178,6 +182,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 4096\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
 
@@ -197,6 +202,9 @@ mod tests {
       coredb_settings.get_search_memory_budget_bytes(),
       (4096 - 1024) * 1024 * 1024
     );
+
+    assert_eq!(coredb_settings.get_retention_days(), 30);
+
     assert_eq!(
       coredb_settings.get_storage_type().unwrap(),
       StorageType::Local
@@ -253,6 +261,7 @@ mod tests {
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
         .unwrap();
       file.write_all(b"memory_budget_megabytes = 2048\n").unwrap();
+      file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
 
