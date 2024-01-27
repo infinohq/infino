@@ -37,9 +37,9 @@ impl GCPStorageUtils {
     let client = Client::new(config);
 
     Ok(Self {
-      client: client,
+      client,
       region: "US-EAST1".to_owned(),
-      project_id: project_id,
+      project_id,
     })
   }
 
@@ -78,7 +78,7 @@ impl GCPStorageUtils {
       }
     }
 
-    return Ok(bucket_name.to_owned());
+    Ok(bucket_name.to_owned())
   }
 
   pub async fn check_bucket_exists(&self, bucket_name: &str) -> bool {
@@ -92,12 +92,12 @@ impl GCPStorageUtils {
       .await;
 
     // Check if there's an error
-    if let Err(_) = bucket_result {
+    if bucket_result.is_err() {
       return false;
     }
 
     // If there's no error, bucket is present
-    return true;
+    true
   }
 }
 
