@@ -55,3 +55,6 @@ docker-run: docker-check
 docker-push: docker-check
 	echo "Pushing image for ${prog}"
 	docker push infinohq/infino:latest
+
+example-apache-logs:
+	cargo run $(release) --bin rust-apache-logs
