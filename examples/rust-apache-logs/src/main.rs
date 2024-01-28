@@ -7,7 +7,6 @@ use chrono::DateTime;
 use clap::{arg, Command};
 use reqwest::{self, Body};
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
@@ -120,7 +119,7 @@ async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
 
   if let Ok(lines) = read_lines(file) {
     let client = reqwest::Client::new();
-    for (_index, line) in lines.enumerate() {
+    for line in lines.enumerate() {
       num_docs += 1;
       num_docs_in_this_batch += 1;
 
