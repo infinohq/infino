@@ -113,7 +113,12 @@ impl TimeSeries {
         let block_start = *initial_times.get(i).unwrap();
 
         // The maximum block end time would be one less than the start time of the next block.
-        let block_end = initial_times.get(i + 1).unwrap() - 1;
+        let next_block_start = initial_times.get(i + 1).unwrap();
+        let block_end = if next_block_start > &0 {
+          next_block_start - 1
+        } else {
+          0
+        };
 
         if is_overlap(block_start, block_end, range_start_time, range_end_time) {
           let compressed_block = compressed_blocks.get(i).unwrap();
