@@ -313,8 +313,6 @@ impl Index {
 
     let mut json_query = json_body.to_string();
 
-    info!("JSON query is {}", &json_query);
-
     // Check if URL or JSON query is empty
     let is_url_empty = url_query.trim().is_empty();
     let is_json_empty = json_query.trim().is_empty();

@@ -1,11 +1,16 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead};
+use std::path::Path;
+use std::time::Instant;
 
 use chrono::DateTime;
 use clap::{arg, Command};
+use reqwest::{self, Body};
+use serde::{Deserialize, Serialize};
+use serde_json;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 /// An Apache log entry - for Apache access logs.
 struct ApacheLogEntry {
   date: u64,
@@ -58,7 +63,7 @@ fn parse_log_line(line: &str) -> Option<ApacheLogEntry> {
 }
 
 /// Parse arguments from the command line and return logs file name, count of lines to index, and Infino URL.
-fn get_args() -> (String, usize, String) {
+fn get_args() -> (String, i64, String) {
   // Parse command line arguments.
   let matches = Command::new("Index Apache Logs")
     .version("1.0")
@@ -72,7 +77,7 @@ fn get_args() -> (String, usize, String) {
       arg!(--count <VALUE>)
         .required(false)
         .default_value("100000")
-        .value_parser(clap::value_parser!(usize)),
+        .value_parser(clap::value_parser!(i64)),
     )
     .arg(
       arg!(--infino_url <VALUE>)
@@ -85,7 +90,7 @@ fn get_args() -> (String, usize, String) {
     .get_one::<String>("file")
     .expect("Could not get file");
   let count = matches
-    .get_one::<usize>("count")
+    .get_one::<i64>("count")
     .expect("Could not get count");
   let infino_url = matches
     .get_one::<String>("infino_url")
@@ -94,22 +99,76 @@ fn get_args() -> (String, usize, String) {
   (file.clone(), *count, infino_url.clone())
 }
 
-fn index_using_infino(file: &str, count: usize, infino_url: &str) {
-  let file = File::open(file).expect("Could not open apache.log");
-  let reader = BufReader::new(file);
-  let num_docs_per_batch = 1000;
-
-  let mut num_docs_in_this_batch = 0;
-  for line in reader.lines().take(count) {
-    let line = line.expect("Could not receive line");
-    if let Some(log_entry) = parse_log_line(&line) {
-      println!("Indexing {:?}", log_entry);
-      num_docs_in_this_batch += 1;
-    }
-  }
+// The output is wrapped in a Result to allow matching on errors.
+// Returns an Iterator to the Reader of the lines of the file.
+pub fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
+where
+  P: AsRef<Path>,
+{
+  let file = File::open(filename)?;
+  Ok(io::BufReader::new(file).lines())
 }
 
-fn main() {
+async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
+  let mut num_docs = 0;
+  let num_docs_per_batch = 1000;
+  let mut num_docs_in_this_batch = 0;
+  let mut batch_count = 0;
+  let mut logs_batch = Vec::new();
+  let now = Instant::now();
+  let append_url = &format!("{}/append_log", infino_url);
+
+  if let Ok(lines) = read_lines(file) {
+    let client = reqwest::Client::new();
+    for (_index, line) in lines.enumerate() {
+      num_docs += 1;
+      num_docs_in_this_batch += 1;
+
+      // If max_docs is less than 0, we index all the documents.
+      // Otherwise, do not indexing more than max_docs documents.
+      if max_docs > 0 && num_docs > max_docs {
+        println!(
+          "Already indexed {} documents. Not indexing anymore.",
+          max_docs
+        );
+        break;
+      }
+      if let Ok(message) = line {
+        let log = parse_log_line(&message);
+        match log {
+          Some(log) => {
+            logs_batch.push(log);
+            if num_docs_in_this_batch == num_docs_per_batch {
+              let response = client
+                .post(append_url)
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_string(&logs_batch).unwrap()))
+                .send()
+                .await;
+              assert_eq!(response.as_ref().unwrap().status(), 200);
+              logs_batch.clear();
+              num_docs_in_this_batch = 0;
+              println!("Indexed batch {}", batch_count);
+              batch_count += 1;
+            }
+          }
+          None => {
+            println!("Could not parse log line: {}", message);
+          }
+        }
+      }
+    }
+  }
+
+  let elapsed = now.elapsed().as_micros();
+  println!(
+    "Infino REST time required for insertion: {} microseconds",
+    elapsed
+  );
+}
+
+#[tokio::main]
+async fn main() {
   // Get the command line arguments.
   let (file, count, infino_url) = get_args();
 
@@ -119,5 +178,5 @@ fn main() {
   );
 
   // Index 'count' number of lines from 'file' using 'infino_url'.
-  index_using_infino(&file, count, &infino_url);
+  index_using_infino(&file, count, &infino_url).await;
 }
