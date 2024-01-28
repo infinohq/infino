@@ -123,11 +123,9 @@ impl Index {
             .metadata
             .update_segment_size_threshold_bytes(segment_size_threshold_bytes);
           index.search_memory_budget_bytes = search_memory_budget_bytes;
-          println!("#### Refreshed index");
           return Ok(index);
         }
         Err(err) => {
-          println!("#### Err while refreshing index: {:?}", err);
           // Received a error while refreshing index
           return Err(err);
         }
@@ -135,7 +133,6 @@ impl Index {
     }
 
     // The directory did not have a metadata file - so create a new index.
-    println!("#### prefix does not exist: {}", metadata_path);
 
     // Create an initial segment.
     let segment = Segment::new();
