@@ -145,11 +145,8 @@ impl Storage {
   }
 
   pub async fn remove_dir(&self, dir: &str) -> Result<(), CoreDBError> {
-    println!("#### calling remove_dir {}", dir);
-
     match self.storage_type {
       StorageType::Local => {
-        println!("#### local storage, removing dir {}", dir);
         let dir_path = std::path::Path::new(dir);
         std::fs::remove_dir_all(dir_path)?;
       }
