@@ -165,7 +165,7 @@ async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
     }
 
     // Index the last batch if it is not empty.
-    if logs_batch.len() > 0 {
+    if !logs_batch.is_empty() {
       index_logs_batch(&client, append_url, &logs_batch).await;
       println!("Indexed last batch {}", batch_count);
     }
