@@ -70,7 +70,7 @@ fn get_args() -> (String, i64, String) {
     .arg(
       arg!(--file <VALUE>)
         .required(false)
-        .default_value("examples/rust-apache-logs/data/apache-tiny.log"),
+        .default_value("examples/datasets/apache-tiny.log"),
     )
     .arg(
       arg!(--count <VALUE>)

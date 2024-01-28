@@ -39,3 +39,7 @@ docs/release
 
 # Mac OS breadcrumbs
 **/.DS_Store
+
+# 100G Apache logs dataset.
+examples/datasets/apache.log
+
