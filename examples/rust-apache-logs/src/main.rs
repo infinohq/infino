@@ -1,12 +1,11 @@
-use std::fs::File;
-use std::io::{self, BufRead};
-use std::path::Path;
 use std::time::Instant;
 
 use chrono::DateTime;
 use clap::{arg, Command};
 use reqwest::{self, Body, Client};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncBufReadExt;
+use tokio::{fs::File, io::BufReader};
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
@@ -98,16 +97,6 @@ fn get_args() -> (String, i64, String) {
   (file.clone(), *count, infino_url.clone())
 }
 
-/// The output is wrapped in a Result to allow matching on errors.
-/// Returns an Iterator to the Reader of the lines of the file.
-fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
-where
-  P: AsRef<Path>,
-{
-  let file = File::open(filename)?;
-  Ok(io::BufReader::new(file).lines())
-}
-
 async fn index_logs_batch(client: &Client, append_url: &str, logs_batch: &Vec<ApacheLogEntry>) {
   let response = client
     .post(append_url)
@@ -119,7 +108,11 @@ async fn index_logs_batch(client: &Client, append_url: &str, logs_batch: &Vec<Ap
 }
 
 /// Helper function to index max_docs from file using Infino API.
-async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
+async fn index_using_infino(
+  file_path: &str,
+  max_docs: i64,
+  infino_url: &str,
+) -> Result<(), std::io::Error> {
   let mut num_docs = 0;
   let num_docs_per_batch = 1000;
   let mut num_docs_in_this_batch = 0;
@@ -129,46 +122,46 @@ async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
   let append_url = &format!("{}/append_log", infino_url);
   let client = reqwest::Client::new();
 
-  if let Ok(lines) = read_lines(file) {
-    for line in lines {
-      // If max_docs is less than 0, we index all the documents.
-      // Otherwise, do not indexing more than max_docs documents.
-      if max_docs > 0 && num_docs >= max_docs {
-        println!(
+  let file = File::open(file_path).await.unwrap();
+  let reader = BufReader::new(file);
+  let mut lines = reader.lines();
+
+  while let Some(line) = lines.next_line().await? {
+    // If max_docs is less than 0, we index all the documents.
+    // Otherwise, do not indexing more than max_docs documents.
+    if max_docs > 0 && num_docs >= max_docs {
+      println!(
           "Reached max documents limit - {}. Exiting from the indexing loop and indexing last batch (if any).",
           max_docs
         );
-        break;
-      }
+      break;
+    }
 
-      num_docs += 1;
-      num_docs_in_this_batch += 1;
+    num_docs += 1;
+    num_docs_in_this_batch += 1;
 
-      if let Ok(message) = line {
-        let log = parse_log_line(&message);
-        match log {
-          Some(log) => {
-            logs_batch.push(log);
-            if num_docs_in_this_batch == num_docs_per_batch {
-              index_logs_batch(&client, append_url, &logs_batch).await;
-              logs_batch.clear();
-              num_docs_in_this_batch = 0;
-              println!("Indexed batch {}", batch_count);
-              batch_count += 1;
-            }
-          }
-          None => {
-            println!("Could not parse log line: {}", message);
-          }
+    let log = parse_log_line(&line);
+    match log {
+      Some(log) => {
+        logs_batch.push(log);
+        if num_docs_in_this_batch == num_docs_per_batch {
+          index_logs_batch(&client, append_url, &logs_batch).await;
+          logs_batch.clear();
+          num_docs_in_this_batch = 0;
+          println!("Indexed batch {}", batch_count);
+          batch_count += 1;
         }
       }
+      None => {
+        println!("Could not parse log line: {}", line);
+      }
     }
+  }
 
-    // Index the last batch if it is not empty.
-    if !logs_batch.is_empty() {
-      index_logs_batch(&client, append_url, &logs_batch).await;
-      println!("Indexed last batch {}", batch_count);
-    }
+  // Index the last batch if it is not empty.
+  if !logs_batch.is_empty() {
+    index_logs_batch(&client, append_url, &logs_batch).await;
+    println!("Indexed last batch {}", batch_count);
   }
 
   let elapsed = now.elapsed().as_micros();
@@ -176,6 +169,8 @@ async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
     "Infino REST time required for insertion: {} microseconds",
     elapsed
   );
+
+  Ok(())
 }
 
 #[tokio::main]
@@ -189,5 +184,7 @@ async fn main() {
   );
 
   // Index 'count' number of lines from 'file' using 'infino_url'.
-  index_using_infino(&file, count, &infino_url).await;
+  index_using_infino(&file, count, &infino_url)
+    .await
+    .expect("Could not index logs");
 }
