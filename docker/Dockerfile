@@ -4,7 +4,7 @@ FROM rust:1.75.0-bookworm as builder
 WORKDIR /usr/src/infino
 COPY . .
 
-# The built-in libgit in cargo can lead to ot of memory
+# The built-in libgit in cargo can lead to out of memory
 # errors on low memory machines. If git is installed then
 # use the system git by setting CARGO_NET_GIT_FETCH_WITH_CLI=true,
 # otherwis let cargo use its libgit.
