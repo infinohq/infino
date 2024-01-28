@@ -1,8 +1,9 @@
 [coredb]
 # Storage configuration.
-storage_type = "local"              # can be "local", "aws", "gcp" or "azure"
-aws_bucket_name = "dev-infino-data" # only relevant for storage type "aws"
+storage_type = "local"                # can be "local", "aws", "gcp" or "azure"
+cloud_storage_bucket_name = "dev-infino-data"   # only relevant if storage type is "aws", "gcp", or "azure"
 index_dir_path = "data"
+# "cloud_storage_region" can be used to set a region for the cloud provider
 
 # Index configuration.
 default_index_name = ".default"

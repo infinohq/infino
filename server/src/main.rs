@@ -193,6 +193,7 @@ async fn app(
     // GET methods
     .route("/get_index_dir", get(get_index_dir))
     .route("/ping", get(ping))
+    .route("/", get(ping))
     .route("/search_logs", get(search_logs))
     .route("/search_metrics", get(search_metrics))
     .route("/summarize", get(summarize))
@@ -979,6 +980,19 @@ mod tests {
 
     // Create the app.
     let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // Check whether the / works.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::GET)
+          .uri("/")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     // Check whether the /ping works.
     let response = app

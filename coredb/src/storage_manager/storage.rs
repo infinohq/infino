@@ -1,23 +1,35 @@
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
+use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path;
 use object_store::{local::LocalFileSystem, ObjectStore};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::storage_manager::aws_s3_utils::AWSS3Utils;
+use crate::storage_manager::constants::COMPRESSION_LEVEL;
+use crate::storage_manager::gcp_storage_utils::GCPStorageUtils;
 use crate::utils::error::CoreDBError;
 
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
-pub const COMPRESSION_LEVEL: i32 = 15;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloudStorageConfig {
+  pub bucket_name: String,
+  pub region: String,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageType {
   Local,
-  Aws(String), // AWS storage with bucket name.
+  Aws(CloudStorageConfig), // AWS storage with bucket name.
+  Gcp(CloudStorageConfig), // GCP storage with bucket name.
 }
 
 #[derive(Debug)]
@@ -31,9 +43,11 @@ impl Storage {
   pub async fn new(storage_type: &StorageType) -> Result<Self, CoreDBError> {
     let object_store: Arc<dyn ObjectStore> = match storage_type {
       // AWS storage. Create the bucket if it doesn't exist.
-      StorageType::Aws(bucket_name) => {
+      StorageType::Aws(cloud_storage_config) => {
         // Check if the bucket exists.
-        let aws_s3_utils = AWSS3Utils::new().await?;
+        let aws_s3_utils = AWSS3Utils::new(&cloud_storage_config.region).await?;
+        let bucket_name = &cloud_storage_config.bucket_name;
+
         let exists = aws_s3_utils.check_bucket_exists(bucket_name).await;
         if !exists {
           log::info!("Bucket {} doesn't exist. Creating it.", bucket_name);
@@ -48,6 +62,25 @@ impl Storage {
 
       // Local storage.
       StorageType::Local => Arc::new(LocalFileSystem::new()),
+
+      // GCP Cloud Storage, creates a bucket if it does not exist.
+      StorageType::Gcp(cloud_storage_config) => {
+        let gcp_storage_utils = GCPStorageUtils::new(&cloud_storage_config.region).await?;
+
+        let bucket_name = &cloud_storage_config.bucket_name;
+        let exists = gcp_storage_utils.check_bucket_exists(bucket_name).await;
+        if !exists {
+          log::info!("Bucket {} doesn't exist. Creating it.", bucket_name);
+          gcp_storage_utils.create_bucket(bucket_name).await?;
+        }
+
+        // Make sure to have path to json file with gcp credentials in SERVICE_ACCOUNT env varq
+        let gcs_store = GoogleCloudStorageBuilder::from_env()
+          .with_bucket_name(bucket_name.to_owned())
+          .build()?;
+
+        Arc::new(gcs_store)
+      }
     };
 
     Ok(Self {
@@ -112,11 +145,8 @@ impl Storage {
   }
 
   pub async fn remove_dir(&self, dir: &str) -> Result<(), CoreDBError> {
-    println!("#### calling remove_dir {}", dir);
-
     match self.storage_type {
       StorageType::Local => {
-        println!("#### local storage, removing dir {}", dir);
         let dir_path = std::path::Path::new(dir);
         std::fs::remove_dir_all(dir_path)?;
       }
@@ -189,7 +219,8 @@ mod tests {
         let file = NamedTempFile::new().expect("Could not create temporary file");
         file.path().to_str().unwrap().to_owned()
       }
-      StorageType::Aws(_) => {
+      // For all other cloud storages like AWS, GCP, etc
+      _ => {
         format!("storage-test/{}", test_name)
       }
     }
@@ -201,15 +232,18 @@ mod tests {
         let dir = tempdir().expect("Could not create temporary directory");
         dir.path().to_str().unwrap().to_owned()
       }
-      StorageType::Aws(_) => {
+      // For all other cloud storages like AWS, GCP, etc
+      _ => {
         format!("storage-test/{}", test_name)
       }
     }
   }
   fn run_test(storage_type: &StorageType) -> bool {
-    // Do not run non-local storage in Github Actions, or if we don't have AWS credentials.
+    // Do not run non-local storage in Github Actions, or if we don't have AWS/GCP credentials.
     if storage_type != &StorageType::Local
-      && (env::var("GITHUB_ACTIONS").is_ok() || env::var("AWS_ACCESS_KEY_ID").is_err())
+      && (env::var("GITHUB_ACTIONS").is_ok()
+        || env::var("AWS_ACCESS_KEY_ID").is_err()
+        || env::var("GOOGLE_APPLICATION_CREDENTIALS").is_err())
     {
       return false;
     }
@@ -218,7 +252,14 @@ mod tests {
   }
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws(CloudStorageConfig {
+    bucket_name: "dev-infino-unit-test".to_owned(),
+    region: "us-east-1".to_owned(),
+  }))]
+  #[test_case(StorageType::Gcp(CloudStorageConfig {
+    bucket_name: "dev-infino-unit-test".to_owned(),
+    region: "US-EAST1".to_owned(),
+  }))]
   #[tokio::test]
   async fn test_serialize_btree_map(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -260,7 +301,14 @@ mod tests {
   }
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws(CloudStorageConfig {
+    bucket_name: "dev-infino-unit-test".to_owned(),
+    region: "us-east-1".to_owned(),
+  }))]
+  #[test_case(StorageType::Gcp(CloudStorageConfig {
+    bucket_name: "dev-infino-unit-test".to_owned(),
+    region: "US-EAST1".to_owned(),
+  }))]
   #[tokio::test]
   async fn test_serialize_vec(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -304,7 +352,14 @@ mod tests {
   }
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "us-east-1".to_owned(),
+    }))]
+  #[test_case(StorageType::Gcp(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "US-EAST1".to_owned(),
+    }))]
   #[tokio::test]
   async fn test_empty(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -340,7 +395,14 @@ mod tests {
   }
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "us-east-1".to_owned(),
+    }))]
+  #[test_case(StorageType::Gcp(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "US-EAST1".to_owned(),
+   }))]
   #[tokio::test]
   async fn test_create_dir(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -367,7 +429,14 @@ mod tests {
   }
 
   #[test_case(StorageType::Local; "with local storage")]
-  #[test_case(StorageType::Aws("dev-infino-unit-test".to_owned()); "with AWS storage")]
+  #[test_case(StorageType::Aws(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "us-east-1".to_owned(),
+    }))]
+  #[test_case(StorageType::Gcp(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "US-EAST1".to_owned(),
+    }))]
   #[tokio::test]
   async fn test_prefix(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
