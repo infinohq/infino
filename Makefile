@@ -56,5 +56,8 @@ docker-push: docker-check
 	echo "Pushing image for ${prog}"
 	docker push infinohq/infino:latest
 
+# Rust example for indexing Apache logs.
+# You can run this as below (Infino server must be running to run this example):
+# `make example-apache-logs file=examples/datasets/apache-tiny.log count=100000`
 example-apache-logs:
-	cargo run $(release) --bin rust-apache-logs
+	cargo run $(release) --bin rust-apache-logs -- --file $(file) --count $(count)

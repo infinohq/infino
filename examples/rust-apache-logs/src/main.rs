@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use chrono::DateTime;
 use clap::{arg, Command};
-use reqwest::{self, Body};
+use reqwest::{self, Body, Client};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -25,7 +25,7 @@ struct ApacheLogEntry {
 fn parse_datetime(datetime_str: &str) -> Option<u64> {
   let fmt = "%d/%b/%Y:%H:%M:%S %z"; // Example: "01/Jan/2023:00:00:00 +0530"
   let datetime = DateTime::parse_from_str(datetime_str, fmt).ok()?;
-  Some(datetime.timestamp_micros() as u64)
+  Some(datetime.timestamp_millis() as u64)
 }
 
 /// Parse a log line into an ApacheLogEntry.
@@ -70,7 +70,7 @@ fn get_args() -> (String, i64, String) {
     .arg(
       arg!(--file <VALUE>)
         .required(false)
-        .default_value("examples/rust-apache-logs/data/apache-tiny.log"),
+        .default_value("examples/datasets/apache-tiny.log"),
     )
     .arg(
       arg!(--count <VALUE>)
@@ -98,9 +98,9 @@ fn get_args() -> (String, i64, String) {
   (file.clone(), *count, infino_url.clone())
 }
 
-// The output is wrapped in a Result to allow matching on errors.
-// Returns an Iterator to the Reader of the lines of the file.
-pub fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
+/// The output is wrapped in a Result to allow matching on errors.
+/// Returns an Iterator to the Reader of the lines of the file.
+fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
 where
   P: AsRef<Path>,
 {
@@ -108,6 +108,17 @@ where
   Ok(io::BufReader::new(file).lines())
 }
 
+async fn index_logs_batch(client: &Client, append_url: &str, logs_batch: &Vec<ApacheLogEntry>) {
+  let response = client
+    .post(append_url)
+    .header("Content-Type", "application/json")
+    .body(Body::from(serde_json::to_string(&logs_batch).unwrap()))
+    .send()
+    .await;
+  assert_eq!(response.as_ref().unwrap().status(), 200);
+}
+
+/// Helper function to index max_docs from file using Infino API.
 async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
   let mut num_docs = 0;
   let num_docs_per_batch = 1000;
@@ -116,35 +127,30 @@ async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
   let mut logs_batch = Vec::new();
   let now = Instant::now();
   let append_url = &format!("{}/append_log", infino_url);
+  let client = reqwest::Client::new();
 
   if let Ok(lines) = read_lines(file) {
-    let client = reqwest::Client::new();
     for line in lines {
-      num_docs += 1;
-      num_docs_in_this_batch += 1;
-
       // If max_docs is less than 0, we index all the documents.
       // Otherwise, do not indexing more than max_docs documents.
-      if max_docs > 0 && num_docs > max_docs {
+      if max_docs > 0 && num_docs >= max_docs {
         println!(
-          "Already indexed {} documents. Not indexing anymore.",
+          "Reached max documents limit - {}. Exiting from the indexing loop and indexing last batch (if any).",
           max_docs
         );
         break;
       }
+
+      num_docs += 1;
+      num_docs_in_this_batch += 1;
+
       if let Ok(message) = line {
         let log = parse_log_line(&message);
         match log {
           Some(log) => {
             logs_batch.push(log);
             if num_docs_in_this_batch == num_docs_per_batch {
-              let response = client
-                .post(append_url)
-                .header("Content-Type", "application/json")
-                .body(Body::from(serde_json::to_string(&logs_batch).unwrap()))
-                .send()
-                .await;
-              assert_eq!(response.as_ref().unwrap().status(), 200);
+              index_logs_batch(&client, append_url, &logs_batch).await;
               logs_batch.clear();
               num_docs_in_this_batch = 0;
               println!("Indexed batch {}", batch_count);
@@ -156,6 +162,12 @@ async fn index_using_infino(file: &str, max_docs: i64, infino_url: &str) {
           }
         }
       }
+    }
+
+    // Index the last batch if it is not empty.
+    if !logs_batch.is_empty() {
+      index_logs_batch(&client, append_url, &logs_batch).await;
+      println!("Indexed last batch {}", batch_count);
     }
   }
 
