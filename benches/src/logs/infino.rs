@@ -53,11 +53,7 @@ impl InfinoEngine {
         }
       }
 
-      self
-        .coredb
-        .commit(false)
-        .await
-        .expect("Could not commit coredb");
+      self.coredb.commit().await.expect("Could not commit coredb");
     }
     let elapsed = now.elapsed().as_micros();
     println!(

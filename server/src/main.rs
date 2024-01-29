@@ -100,7 +100,7 @@ async fn commit_in_loop(
 ) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   loop {
-    let result = state.coredb.commit(true).await;
+    let result = state.coredb.commit().await;
 
     let current_time = Utc::now().timestamp_millis() as u64;
     // TODO: make trigger policy interval configurable
@@ -647,8 +647,7 @@ async fn search_metrics(
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
-  // sync_after_commit flag is set to true to focibly flush the index to disk. This is used usually during tests and should be avoided in production.
-  let result = state.coredb.commit(true).await;
+  let result = state.coredb.commit().await;
 
   match result {
     Ok(result) => Ok(result),
