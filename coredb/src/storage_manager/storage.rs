@@ -97,7 +97,6 @@ impl Storage {
     &self,
     to_write: &T,
     file_path: &str,
-    _sync_after_write: bool,
   ) -> Result<(u64, u64), CoreDBError> {
     let input = serde_json::to_string(&to_write).unwrap();
     let input = input.as_bytes();
@@ -283,7 +282,7 @@ mod tests {
       expected.insert(format!("{prefix}{i}"), i);
     }
     let (uncompressed, compressed) = storage
-      .write(&expected, file_path, false)
+      .write(&expected, file_path)
       .await
       .expect("Could not write to storage");
     assert!(uncompressed > 0);
@@ -333,7 +332,7 @@ mod tests {
     }
 
     let (uncompressed, compressed) = storage
-      .write(&expected, file_path, false)
+      .write(&expected, file_path)
       .await
       .expect("Could not write to storage");
     assert!(uncompressed > 0);
@@ -378,7 +377,7 @@ mod tests {
 
     let expected: BTreeMap<String, u32> = BTreeMap::new();
     let (uncompressed, compressed) = storage
-      .write(&expected, file_path, false)
+      .write(&expected, file_path)
       .await
       .expect("Could not write to storage");
     assert!(uncompressed > 0);
@@ -460,7 +459,7 @@ mod tests {
     // Write some data, and check that the prefix with that data exists.
     let file_path = &get_temp_file_path(&storage_type, "test-prefix");
     storage
-      .write(&Vec::<String>::new(), file_path, false)
+      .write(&Vec::<String>::new(), file_path)
       .await
       .expect("Could not write to storage");
     assert!(storage.check_path_exists(file_path).await);
@@ -477,27 +476,15 @@ mod tests {
         .expect("Could not create dir");
     }
     storage
-      .write(
-        &Vec::<String>::new(),
-        &format!("{}/0/test", dir_path),
-        false,
-      )
+      .write(&Vec::<String>::new(), &format!("{}/0/test", dir_path))
       .await
       .expect("Could not write to storage");
     storage
-      .write(
-        &Vec::<String>::new(),
-        &format!("{}/1/test", dir_path),
-        false,
-      )
+      .write(&Vec::<String>::new(), &format!("{}/1/test", dir_path))
       .await
       .expect("Could not write to storage");
     storage
-      .write(
-        &Vec::<String>::new(),
-        &format!("{}/1/test-again", dir_path),
-        false,
-      )
+      .write(&Vec::<String>::new(), &format!("{}/1/test-again", dir_path))
       .await
       .expect("Could not write to storage");
 

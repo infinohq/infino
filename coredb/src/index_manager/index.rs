@@ -164,7 +164,7 @@ impl Index {
     };
 
     // Commit the empty index so that the index directory will be created.
-    index.commit(false).await.expect("Could not commit index");
+    index.commit().await.expect("Could not commit index");
 
     Ok(index)
   }
@@ -388,7 +388,6 @@ impl Index {
   async fn commit_segment(
     &self,
     segment_number: u32,
-    sync_after_write: bool,
   ) -> Result<(String, u64, u64, u64, u64), CoreDBError> {
     debug!("Committing segment with segment_number: {}", segment_number);
 
@@ -412,7 +411,7 @@ impl Index {
       io::get_joined_path(&self.index_dir_path, segment_number.to_string().as_str());
 
     let (uncompressed, compressed) = segment
-      .commit(&self.storage, segment_dir_path.as_str(), sync_after_write)
+      .commit(&self.storage, segment_dir_path.as_str())
       .await?;
 
     Ok((
@@ -453,15 +452,23 @@ impl Index {
   }
 
   /// Commit an index to disk.
-  ///
-  /// If sync_after_write is set to true, make sure that the OS buffers are flushed to
-  /// disk before returning (typically sync_after_write should be set to true in tests that refresh the index
-  /// immediately after committing).
-  pub async fn commit(&self, sync_after_write: bool) -> Result<(), CoreDBError> {
+  pub async fn commit(&self) -> Result<(), CoreDBError> {
     info!("Committing index at {}", chrono::Utc::now());
 
-    // Lock to make sure only one thread calls commit at a time.
-    let mut lock = self.index_dir_lock.lock().await;
+    // Lock to make sure only one thread calls commit at a time. If the lock isn't avilable, we simply
+    // log a message and return - so that the caller, typically on a schedule, can retry on the next
+    // scheduled run.
+    let lock = self.index_dir_lock.try_lock();
+    let mut lock = match lock {
+      Ok(lock) => lock,
+      Err(_) => {
+        info!(
+          "Could not acquire commit lock for index at path {}. Retrying in the next commit run.",
+          self.index_dir_path
+        );
+        return Ok(());
+      }
+    };
     *lock = thread::current().id();
 
     // We will be updating the self.all_segment_summaries, so acquire the lock.
@@ -472,9 +479,7 @@ impl Index {
     // Commit the current segment. This also updates the start and end times in the corresponding segment summary.
     let original_current_segment_number = self.metadata.get_current_segment_number();
     let (segment_id, start_time, end_time, uncompressed_segment_size, _compressed_segment_size) =
-      self
-        .commit_segment(original_current_segment_number, sync_after_write)
-        .await?;
+      self.commit_segment(original_current_segment_number).await?;
 
     // Update the start and end time in the summary for this segment.
     // We don't update these in append_* methods for performance, and update only in commit.
@@ -496,11 +501,7 @@ impl Index {
 
       // Write the new (empty) segment to disk.
       new_segment
-        .commit(
-          &self.storage,
-          new_segment_dir_path.as_str(),
-          sync_after_write,
-        )
+        .commit(&self.storage, new_segment_dir_path.as_str())
         .await?;
 
       // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
@@ -519,15 +520,11 @@ impl Index {
 
       // Commit the new_segment again as there might be more documents added after making it the
       // current segment.
-      self
-        .commit_segment(new_segment_number, sync_after_write)
-        .await?;
+      self.commit_segment(new_segment_number).await?;
 
       // Commit the original segment again to commit any updates from the previous commit till the
       // time of changing the current_sgement_number above.
-      self
-        .commit_segment(original_current_segment_number, sync_after_write)
-        .await?;
+      self.commit_segment(original_current_segment_number).await?;
 
       // We created a new segment - possibly exceeding the memory budget. So, evict older segments if needed.
       self.evict_from_memory_segments_map();
@@ -540,13 +537,13 @@ impl Index {
     // Write the summaries to disk.
     self
       .storage
-      .write(summaries, all_segments_file.as_str(), sync_after_write)
+      .write(summaries, all_segments_file.as_str())
       .await?;
 
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     self
       .storage
-      .write(&self.metadata, metadata_path.as_str(), sync_after_write)
+      .write(&self.metadata, metadata_path.as_str())
       .await?;
 
     Ok(())
@@ -817,7 +814,7 @@ mod tests {
       );
     }
 
-    expected.commit(false).await.expect("Could not commit");
+    expected.commit().await.expect("Could not commit");
     let received = Index::refresh(&storage_type, &index_dir_path, 1024)
       .await
       .unwrap();
@@ -986,7 +983,7 @@ mod tests {
 
       // Force commit and then refresh the index.
       // This will write one segment to disk and create a new empty segment.
-      index.commit(true).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
 
       // Read the index from disk and see that it has expected number of log messages and metric points.
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
@@ -1040,7 +1037,7 @@ mod tests {
       }
 
       // Force a commit and refresh. The index should still have only 2 segments.
-      index.commit(true).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .unwrap();
@@ -1097,7 +1094,7 @@ mod tests {
       }
 
       // Force a commit and refresh.
-      index.commit(false).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
@@ -1137,12 +1134,12 @@ mod tests {
       );
 
       // Commit and refresh a few times. The index should not change.
-      index.commit(false).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      index.commit(false).await.expect("Could not commit index");
-      index.commit(false).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
       Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .unwrap();
@@ -1204,14 +1201,14 @@ mod tests {
       // Commit after indexing more than commit_after messages.
       num_log_messages_from_last_commit += 1;
       if num_log_messages_from_last_commit > commit_after {
-        index.commit(false).await.expect("Could not commit index");
+        index.commit().await.expect("Could not commit index");
         num_log_messages_from_last_commit = 0;
         sleep(Duration::from_millis(1000));
       }
     }
 
     // Commit and sleep to ensure the index is written to disk.
-    index.commit(true).await.expect("Could not commit index");
+    index.commit().await.expect("Could not commit index");
     sleep(Duration::from_millis(1000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -1308,7 +1305,7 @@ mod tests {
           message,
         );
       }
-      index.commit(false).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
     }
 
     for i in 1..num_message_suffixes {
@@ -1363,12 +1360,12 @@ mod tests {
 
       // Commit after we have indexed more than commit_after messages.
       if num_metric_points_from_last_commit >= commit_after {
-        index.commit(false).await.expect("Could not commit index");
+        index.commit().await.expect("Could not commit index");
         num_metric_points_from_last_commit = 0;
       }
     }
     // Commit and sleep to make sure the index is written to disk.
-    index.commit(true).await.expect("Could not commit index");
+    index.commit().await.expect("Could not commit index");
     sleep(Duration::from_millis(10000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -1418,7 +1415,7 @@ mod tests {
       .unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
-    index.commit(false).await.expect("Could not commit index");
+    index.commit().await.expect("Could not commit index");
   }
 
   #[tokio::test]
@@ -1493,7 +1490,7 @@ mod tests {
       let start = i * 2 * 1000;
       index.append_log_message(start, &HashMap::new(), "message_1");
       index.append_log_message(start + 500, &HashMap::new(), "message_2");
-      index.commit(false).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
@@ -1559,7 +1556,7 @@ mod tests {
       rt.block_on(async {
         for _ in 0..100 {
           arc_index_clone
-            .commit(true)
+            .commit()
             .await
             .expect("Could not commit index");
           sleep(ten_millis);
@@ -1595,10 +1592,7 @@ mod tests {
     }
 
     // Commit again to cover the scenario that append threads run for more time than the commit thread
-    arc_index
-      .commit(true)
-      .await
-      .expect("Could not commit index");
+    arc_index.commit().await.expect("Could not commit index");
 
     let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
       .await
@@ -1644,7 +1638,7 @@ mod tests {
       .await
       .unwrap();
     index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
-    index.commit(true).await.expect("Could not commit index");
+    index.commit().await.expect("Could not commit index");
 
     // Create one more new index using same dir location
     let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
@@ -1722,7 +1716,7 @@ mod tests {
       let message_end = &format!("message_{}", end);
       index.append_log_message(start, &HashMap::new(), message_start);
       index.append_log_message(end, &HashMap::new(), message_end);
-      index.commit(false).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
@@ -1798,7 +1792,7 @@ mod tests {
       message,
     );
 
-    index.commit(false).await.expect("Could not commit");
+    index.commit().await.expect("Could not commit");
     let segment_number = *index.get_current_segment_ref().key(); // Get current cos it has been committed to.
 
     // try to delete segment
@@ -1844,7 +1838,7 @@ mod tests {
       let message_end = &format!("message_{}", end);
       index.append_log_message(start, &HashMap::new(), message_start);
       index.append_log_message(end, &HashMap::new(), message_end);
-      index.commit(false).await.expect("Could not commit index");
+      index.commit().await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.

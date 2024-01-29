@@ -246,12 +246,7 @@ impl Segment {
   }
 
   /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
-  pub async fn commit(
-    &self,
-    storage: &Storage,
-    dir: &str,
-    sync_after_write: bool,
-  ) -> Result<(u64, u64), CoreDBError> {
+  pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
     let mut lock = self.commit_lock.lock().await;
     *lock = thread::current().id();
 
@@ -262,41 +257,37 @@ impl Segment {
     let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
     let time_series_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
 
-    let (uncompressed_terms_size, compressed_terms_size) = storage
-      .write(&self.terms, &terms_path, sync_after_write)
-      .await?;
+    let (uncompressed_terms_size, compressed_terms_size) =
+      storage.write(&self.terms, &terms_path).await?;
     debug!(
       "Serialized terms to {} bytes uncompressed, {} bytes compressed",
       uncompressed_terms_size, compressed_terms_size
     );
 
     let (uncompressed_inverted_map_size, compressed_inverted_map_size) = storage
-      .write(&self.inverted_map, &inverted_map_path, sync_after_write)
+      .write(&self.inverted_map, &inverted_map_path)
       .await?;
     debug!(
       "Serialized inverted map to {} bytes uncompressed, {} bytes compressed",
       uncompressed_inverted_map_size, compressed_inverted_map_size
     );
 
-    let (uncompressed_forward_map_size, compressed_forward_map_size) = storage
-      .write(&self.forward_map, &forward_map_path, sync_after_write)
-      .await?;
+    let (uncompressed_forward_map_size, compressed_forward_map_size) =
+      storage.write(&self.forward_map, &forward_map_path).await?;
     debug!(
       "Serialized forward map to {} bytes uncompressed, {} bytes compressed",
       uncompressed_forward_map_size, compressed_forward_map_size
     );
 
-    let (uncompressed_labels_size, compressed_labels_size) = storage
-      .write(&self.labels, &labels_path, sync_after_write)
-      .await?;
+    let (uncompressed_labels_size, compressed_labels_size) =
+      storage.write(&self.labels, &labels_path).await?;
     debug!(
       "Serialized labels to {} bytes uncompressed, {} bytes compressed",
       uncompressed_labels_size, compressed_labels_size
     );
 
-    let (uncompressed_time_series_size, compressed_time_series_size) = storage
-      .write(&self.time_series, &time_series_path, sync_after_write)
-      .await?;
+    let (uncompressed_time_series_size, compressed_time_series_size) =
+      storage.write(&self.time_series, &time_series_path).await?;
     debug!(
       "Serialized time series to {} bytes uncompressed, {} bytes compressed",
       uncompressed_time_series_size, compressed_time_series_size
@@ -322,9 +313,7 @@ impl Segment {
       .update_segment_size(uncompressed_segment_size, compressed_segment_size);
 
     // Write the metadata at the end - so that its segment size is updated
-    storage
-      .write(&self.metadata, &metadata_path, sync_after_write)
-      .await?;
+    storage.write(&self.metadata, &metadata_path).await?;
 
     debug!(
       "Serialized segment to {} bytes uncompressed, {} bytes compressed",
@@ -697,7 +686,7 @@ mod tests {
 
     // Commit so that the segment is serialized to disk, and refresh it from disk.
     let (uncompressed_original_segment_size, compressed_original_segment_size) = original_segment
-      .commit(&storage, segment_dir_path, false)
+      .commit(&storage, segment_dir_path)
       .await
       .expect("Error while commmiting segment");
     assert!(uncompressed_original_segment_size > 0);
