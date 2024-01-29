@@ -460,8 +460,20 @@ impl Index {
   pub async fn commit(&self, sync_after_write: bool) -> Result<(), CoreDBError> {
     info!("Committing index at {}", chrono::Utc::now());
 
-    // Lock to make sure only one thread calls commit at a time.
-    let mut lock = self.index_dir_lock.lock().await;
+    // Lock to make sure only one thread calls commit at a time. If the lock isn't avilable, we simply
+    // log a message and return - so that the caller, typically on a schedule, can retry on the next
+    // scheduled run.
+    let lock = self.index_dir_lock.try_lock();
+    let mut lock = match lock {
+      Ok(lock) => lock,
+      Err(_) => {
+        info!(
+          "Could not acquire commit lock for index at path {}. Retrying in the next commit run.",
+          self.index_dir_path
+        );
+        return Ok(());
+      }
+    };
     *lock = thread::current().id();
 
     // We will be updating the self.all_segment_summaries, so acquire the lock.
