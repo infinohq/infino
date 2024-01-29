@@ -198,13 +198,13 @@ impl CoreDB {
   /// Commit the index to disk. If the flag sync_after_commit is set to true,
   /// the directory is sync'd immediately instead of relying on the OS to do so,
   /// hence this flag is usually set to true only in tests.
-  pub async fn commit(&self, sync_after_commit: bool) -> Result<(), CoreDBError> {
+  pub async fn commit(&self) -> Result<(), CoreDBError> {
     self
       .index_map
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .commit(sync_after_commit)
+      .commit()
       .await
   }
 
@@ -409,7 +409,7 @@ mod tests {
       2.0,
     );
 
-    coredb.commit(true).await.expect("Could not commit");
+    coredb.commit().await.expect("Could not commit");
     let coredb = CoreDB::refresh(config_dir_path).await?;
 
     let end = Utc::now().timestamp_millis() as u64;
