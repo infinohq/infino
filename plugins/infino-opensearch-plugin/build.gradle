@@ -19,8 +19,8 @@ sourceCompatibility = JavaVersion.VERSION_17
 targetCompatibility = JavaVersion.VERSION_17
 
 // We don't have to use OpenSearch license for this plugin
-tasks.named("dependencyLicenses").configure { it.enabled = false }
-dependenciesInfo.enabled = false
+licenseHeaders.enabled = false
+dependencyLicenses.enabled = false
 
 // jarhell 
 jarHell.enabled = false
@@ -227,4 +227,3 @@ task updateVersion {
         ant.replaceregexp(file:'build.gradle', match: '"opensearch.version", "\\d.*"', replace: '"opensearch.version", "' + newVersion.tokenize('-')[0] + '-SNAPSHOT"', flags:'g', byline:true)
     }
 }
-
