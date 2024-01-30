@@ -279,7 +279,7 @@ async fn main() {
     .await
     .expect("Error while completing the commit thread");
 
-  info!("Completed Infino server shuwdown");
+  info!("Completed Infino server shutdown");
 }
 
 /// Helper function to parse json input.
