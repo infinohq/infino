@@ -8,7 +8,7 @@
 	// TODO: pre-build and image that can be pulled from dockerhub
 	// or another registry intead of building it locally.
 	"build": {
-		"dockerfile": "./Dockerfile",
+		"dockerfile": "./devcontainer.dockerfile",
 		"context": "."
 	},
 	"features": {
@@ -36,14 +36,17 @@
 				// VS Code settings.json configs specific to this devcontainer env
 				// Disable rust analyzer running on save, so that it doesn't
 				// start automatically and consume CPU + Memory.
-				"rust-analyzer.checkOnSave": false
+				"rust-analyzer.checkOnSave": false,
+				"gradle.autoDetect": "off"
 			},
 			"extensions": [
 				// List of vscode extensions to be installed in the devcontainer
 				"rust-lang.rust-analyzer",
 				"tamasfe.even-better-toml",
 				"ms-vscode.makefile-tools",
-				"vscjava.vscode-java-pack"
+				"vscjava.vscode-java-pack",
+				"vscjava.vscode-gradle",
+				"vadimcn.vscode-lldb"
 			]
 		}
 	},
