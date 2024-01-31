@@ -789,7 +789,7 @@ mod tests {
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
-      file.write_all(b"host = \"127.0.0.1\"\n").unwrap();
+      file.write_all(b"host = \"0.0.0.0\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();
