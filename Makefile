@@ -60,18 +60,18 @@ docs:
 
 docker-build: docker-check
 	echo "Running docker build..."
-	docker build -t infinohq/infino:latest -f docker/infino.dockerfile .
+	docker build -t $(docker-img-tag) -f docker/infino.dockerfile .
 
 docker-build-multiarch: docker-check docker-buildx-check
 	@./scripts/build-docker-multiarch.sh --docker-img-tag $(docker-img-tag)
 
 docker-run: docker-check
 	echo "Starting docker container for ${prog}..."
-	docker run -it --rm -p 3000:3000 infinohq/infino:latest
+	docker run -it --rm -p 3000:3000 $(docker-img-tag)
 
 docker-push: docker-check
 	echo "Pushing image for ${prog}"
-	docker push infinohq/infino:latest
+	docker push $(docker-img-tag)
 
 # Rust example for indexing Apache logs.
 # You can run this as below (Infino server must be running to run this example):
