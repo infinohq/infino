@@ -17,7 +17,7 @@ run:
 	echo "Running $(prog) server..."
 	cargo run $(release) --bin $(prog)
 
-run-debug: infino
+run-debug:
 	echo "Running $(prog) server in debug mode..."
 	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
