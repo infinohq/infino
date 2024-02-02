@@ -1,11 +1,15 @@
+# Set default values for variables
 prog := infino
 debug ?=
+docker-img-tag ?= infinohq/infino:latest
+
+.PHONY: docs docker-build docker-run docker-push docker-build-multiarch
 
 ifdef debug
-  $(info in debug mode, used for building non-optimized binaries...)
+	$(info in debug mode, used for building non-optimized binaries...)
   release :=
 else
-  $(info in release mode, used for building optimized binaries...)
+ 	$(info in release mode, used for building optimized binaries...)
   release :=--release
 endif
 
@@ -13,7 +17,7 @@ run:
 	echo "Running $(prog) server..."
 	cargo run $(release) --bin $(prog)
 
-run-debug:
+run-debug: infino
 	echo "Running $(prog) server in debug mode..."
 	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
@@ -25,19 +29,21 @@ rust-check:
 docker-check:
 	@docker ps > /dev/null 2>&1 || (echo "Docker is not running. Please start Docker to run all tests." && exit 1)
 
+docker-buildx-check:
+	@docker buildx version > /dev/null 2>&1 || (echo "Docker buildx is not available. Please install the buildx plugin to build multi-arch images." && exit 1)
+
 test: rust-check docker-check
 	echo "Running tests for all the packages"
 	RUST_BACKTRACE=1 cargo test --all
 
+# cargo build $(release)
 build:
-	cargo build $(release)
+	$(info "Building $(release) server...")
 
 clean:
 	cargo clean
 	rm -rf docs/release
 	rm -rf data/
-
-.PHONY: docs
 
 docs:
 	echo "Generating documentation to docs/doc"
@@ -46,7 +52,10 @@ docs:
 
 docker-build: docker-check
 	echo "Running docker build..."
-	docker build -t infinohq/infino:latest -f docker/Dockerfile .
+	docker build -t infinohq/infino:latest -f docker/infino.dockerfile .
+
+docker-build-multiarch: docker-check docker-buildx-check
+	@./scripts/build-docker-multiarch.sh --docker-img-tag $(docker-img-tag)
 
 docker-run: docker-check
 	echo "Starting docker container for ${prog}..."
