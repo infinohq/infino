@@ -3,7 +3,7 @@ prog := infino
 debug ?=
 docker-img-tag ?= infinohq/infino:latest
 
-.PHONY: docs docker-build docker-run docker-push docker-build-multiarch
+.PHONY: docs docker-build docker-run docker-push docker-build-multiarch build-os-plugin clean-os-plugin clean-all
 
 ifdef debug
 	$(info in debug mode, used for building non-optimized binaries...)
@@ -40,10 +40,18 @@ test: rust-check docker-check
 build:
 	$(info "Building $(release) server...")
 
+build-os-plugin:
+	cd plugins/infino-opensearch-plugin && ./gradlew build
+
+clean-os-plugin:
+	cd plugins/infino-opensearch-plugin && ./gradlew clean
+
 clean:
 	cargo clean
 	rm -rf docs/release
 	rm -rf data/
+
+clean-all: clean clean-os-plugin
 
 docs:
 	echo "Generating documentation to docs/doc"
