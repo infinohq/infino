@@ -36,9 +36,8 @@ test: rust-check docker-check
 	echo "Running tests for all the packages"
 	RUST_BACKTRACE=1 cargo test --all
 
-# cargo build $(release)
 build:
-	$(info "Building $(release) server...")
+	cargo build $(release)
 
 build-os-plugin:
 	cd plugins/infino-opensearch-plugin && ./gradlew build
