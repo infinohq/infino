@@ -18,6 +18,11 @@
 mod queue_manager;
 mod utils;
 
+// If the `dhat-heap` feature is enabled, we use dhat to track heap usage.
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::collections::HashMap;
 use std::env;
 use std::result::Result;
@@ -220,6 +225,10 @@ async fn app(
 #[tokio::main]
 /// Program entry point.
 async fn main() {
+  // If the `dhat-heap` feature is enabled, we use dhat to track heap usage.
+  #[cfg(feature = "dhat-heap")]
+  let _profiler = dhat::Profiler::new_heap();
+
   // Load environment variables from ".env" and ".env-creds" file.
   load_env();
 
