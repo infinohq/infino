@@ -230,8 +230,12 @@ impl Index {
       }
 
       // Evict the segment with segment_number from memory_segments_map.
-      self.memory_segments_map.remove(&segment_number);
-      memory_evicted_so_far += uncompressed_size;
+      if let Some((_, segment)) = self.memory_segments_map.remove(&segment_number) {
+        info!("Evicting segment with segment_number {}", segment_number);
+        // Drop the segment to free the memory.
+        drop(segment);
+        memory_evicted_so_far += uncompressed_size;
+      }
     }
   }
 

@@ -43,11 +43,11 @@ pub struct Segment {
 
   /// Terms present in this segment.
   /// Applicable only for log messages.
-  pub terms: DashMap<String, u32>,
+  terms: DashMap<String, u32>,
 
   /// Inverted map - term-id to a postings list.
   /// Applicable only for log messages.
-  pub inverted_map: DashMap<u32, PostingsList>,
+  inverted_map: DashMap<u32, PostingsList>,
 
   /// Forward map - log_message-id to the corresponding log message.
   /// Applicable only for log messages.
@@ -79,17 +79,19 @@ impl Segment {
     }
   }
 
-  #[allow(dead_code)]
   pub fn get_terms(&self) -> &DashMap<String, u32> {
     &self.terms
   }
 
-  #[allow(dead_code)]
+  pub fn get_term(&self, term: &str) -> Option<u32> {
+    let result = self.terms.get(term);
+    result.map(|result| *result.value())
+  }
+
   pub fn get_inverted_map(&self) -> &DashMap<u32, PostingsList> {
     &self.inverted_map
   }
 
-  #[allow(dead_code)]
   pub fn get_forward_map(&self) -> &DashMap<u32, LogMessage> {
     &self.forward_map
   }
@@ -99,25 +101,21 @@ impl Segment {
     self.metadata.get_id()
   }
 
-  #[allow(dead_code)]
   /// Get log message count of this segment.
   pub fn get_log_message_count(&self) -> u32 {
     self.metadata.get_log_message_count()
   }
 
-  #[allow(dead_code)]
   /// Get the number of terms in this segment.
   pub fn get_term_count(&self) -> u32 {
     self.metadata.get_term_count()
   }
 
-  #[allow(dead_code)]
   /// Get the number of labels in this segment.
   pub fn get_label_count(&self) -> u32 {
     self.metadata.get_label_count()
   }
 
-  #[allow(dead_code)]
   /// Get the number of metric points in this segment.
   pub fn get_metric_point_count(&self) -> u32 {
     self.metadata.get_metric_point_count()
@@ -139,7 +137,6 @@ impl Segment {
   }
 
   /// Check if this segment is empty.
-  #[allow(dead_code)]
   pub fn is_empty(&self) -> bool {
     self.metadata.get_log_message_count() == 0
       && self.metadata.get_term_count() == 0
@@ -148,6 +145,19 @@ impl Segment {
       && self.inverted_map.is_empty()
       && self.labels.is_empty()
       && self.time_series.is_empty()
+  }
+
+  // This functions with #[cfg(test)] annotation below should only be used in testing -
+  // we should never insert directly in inverted map or in terms map.
+  // (as otherwise it would compromise integrity of the segment - e.g, we may have an entry in inverted
+  // map for a term, but not in terms or corresponding document in the forward map).
+  #[cfg(test)]
+  pub fn insert_in_inverted_map(&self, term_id: u32, postings_list: PostingsList) {
+    self.inverted_map.insert(term_id, postings_list);
+  }
+  #[cfg(test)]
+  pub fn insert_in_terms(&self, term: &str, term_id: u32) {
+    self.terms.insert(term.to_owned(), term_id);
   }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
