@@ -83,8 +83,8 @@ impl AzureStorageUtils {
     // Check if there's an error
     match get_container_contents {
       Some(result) => {
-        // if ok result exists, suggests blobs in containers, so container exists.
-        // if error, container does not exists, so return false.
+        // If the OK result exists, it suggests blobs in containers, indicating the container exists.
+        // If there is an error, the container does not exist, so return false.
         result.is_ok()
       }
       None => false,
