@@ -6,6 +6,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
+use object_store::azure::MicrosoftAzureBuilder;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path;
 use object_store::{local::LocalFileSystem, ObjectStore};
@@ -13,11 +14,13 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::storage_manager::aws_s3_utils::AWSS3Utils;
-use crate::storage_manager::constants::COMPRESSION_LEVEL;
+use crate::storage_manager::azure_storage_utils::AzureStorageUtils;
 use crate::storage_manager::gcp_storage_utils::GCPStorageUtils;
+
 use crate::utils::error::CoreDBError;
 
 // Level for zstd compression. Higher level means higher compression ratio, at the expense of speed of compression and decompression.
+use crate::storage_manager::constants::COMPRESSION_LEVEL;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CloudStorageConfig {
@@ -28,8 +31,9 @@ pub struct CloudStorageConfig {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageType {
   Local,
-  Aws(CloudStorageConfig), // AWS storage with bucket name.
-  Gcp(CloudStorageConfig), // GCP storage with bucket name.
+  Aws(CloudStorageConfig),   // AWS storage with required cloud config.
+  Gcp(CloudStorageConfig),   // GCP storage with required cloud config.
+  Azure(CloudStorageConfig), // Azure storage with required cloud config.
 }
 
 #[derive(Debug)]
@@ -54,6 +58,7 @@ impl Storage {
           aws_s3_utils.create_bucket(bucket_name).await?;
         }
 
+        // Make sure to have AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in env vars.
         let s3_store = AmazonS3Builder::from_env()
           .with_bucket_name(bucket_name.to_owned())
           .build()?;
@@ -74,12 +79,33 @@ impl Storage {
           gcp_storage_utils.create_bucket(bucket_name).await?;
         }
 
-        // Make sure to have path to json file with gcp credentials in SERVICE_ACCOUNT env varq
+        // Make sure to have path to json file with gcp credentials in SERVICE_ACCOUNT env vars.
         let gcs_store = GoogleCloudStorageBuilder::from_env()
           .with_bucket_name(bucket_name.to_owned())
           .build()?;
 
         Arc::new(gcs_store)
+      }
+
+      // Azure Cloud Storage, creates a container if it does not exist.
+      StorageType::Azure(cloud_storage_config) => {
+        let azure_storage_utils = AzureStorageUtils::new(&cloud_storage_config.region).await?;
+
+        let bucket_name = &cloud_storage_config.bucket_name;
+        let exists = azure_storage_utils
+          .check_container_exists(bucket_name)
+          .await;
+        if !exists {
+          log::info!("Bucket {} doesn't exist. Creating it.", bucket_name);
+          azure_storage_utils.create_container(bucket_name).await?;
+        }
+
+        // Make sure to have AZURE_STORAGE_ACCOUNT_KEY and AZURE_STORAGE_ACCOUNT_NAME in env vars.
+        let azure_store = MicrosoftAzureBuilder::from_env()
+          .with_container_name(bucket_name.to_owned())
+          .build()?;
+
+        Arc::new(azure_store)
       }
     };
 
@@ -242,7 +268,8 @@ mod tests {
     if storage_type != &StorageType::Local
       && (env::var("GITHUB_ACTIONS").is_ok()
         || env::var("AWS_ACCESS_KEY_ID").is_err()
-        || env::var("GOOGLE_APPLICATION_CREDENTIALS").is_err())
+        || env::var("GOOGLE_APPLICATION_CREDENTIALS").is_err()
+        || env::var("AZURE_STORAGE_ACCOUNT_KEY").is_err())
     {
       return false;
     }
@@ -256,6 +283,10 @@ mod tests {
     region: "us-east-1".to_owned(),
   }))]
   #[test_case(StorageType::Gcp(CloudStorageConfig {
+    bucket_name: "dev-infino-unit-test".to_owned(),
+    region: "US-EAST1".to_owned(),
+  }))]
+  #[test_case(StorageType::Azure(CloudStorageConfig {
     bucket_name: "dev-infino-unit-test".to_owned(),
     region: "US-EAST1".to_owned(),
   }))]
@@ -308,6 +339,10 @@ mod tests {
     bucket_name: "dev-infino-unit-test".to_owned(),
     region: "US-EAST1".to_owned(),
   }))]
+  #[test_case(StorageType::Azure(CloudStorageConfig {
+    bucket_name: "dev-infino-unit-test".to_owned(),
+    region: "US-EAST1".to_owned(),
+  }))]
   #[tokio::test]
   async fn test_serialize_vec(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -354,11 +389,15 @@ mod tests {
   #[test_case(StorageType::Aws(CloudStorageConfig {
       bucket_name: "dev-infino-unit-test".to_owned(),
       region: "us-east-1".to_owned(),
-    }))]
+  }))]
   #[test_case(StorageType::Gcp(CloudStorageConfig {
       bucket_name: "dev-infino-unit-test".to_owned(),
       region: "US-EAST1".to_owned(),
-    }))]
+  }))]
+  #[test_case(StorageType::Azure(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "US-EAST1".to_owned(),
+  }))]
   #[tokio::test]
   async fn test_empty(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -397,11 +436,15 @@ mod tests {
   #[test_case(StorageType::Aws(CloudStorageConfig {
       bucket_name: "dev-infino-unit-test".to_owned(),
       region: "us-east-1".to_owned(),
-    }))]
+  }))]
   #[test_case(StorageType::Gcp(CloudStorageConfig {
       bucket_name: "dev-infino-unit-test".to_owned(),
       region: "US-EAST1".to_owned(),
-   }))]
+  }))]
+  #[test_case(StorageType::Azure(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "US-EAST1".to_owned(),
+  }))]
   #[tokio::test]
   async fn test_create_dir(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
@@ -431,11 +474,15 @@ mod tests {
   #[test_case(StorageType::Aws(CloudStorageConfig {
       bucket_name: "dev-infino-unit-test".to_owned(),
       region: "us-east-1".to_owned(),
-    }))]
+  }))]
   #[test_case(StorageType::Gcp(CloudStorageConfig {
       bucket_name: "dev-infino-unit-test".to_owned(),
       region: "US-EAST1".to_owned(),
-    }))]
+  }))]
+  #[test_case(StorageType::Azure(CloudStorageConfig {
+      bucket_name: "dev-infino-unit-test".to_owned(),
+      region: "US-EAST1".to_owned(),
+  }))]
   #[tokio::test]
   async fn test_prefix(storage_type: StorageType) {
     // Load environment variables - esp creds for accessing non-local storage.
