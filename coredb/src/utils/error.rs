@@ -56,6 +56,9 @@ pub enum CoreDBError {
 
   #[error("GCP Storage Utils Error: {0}")]
   GCPStorageUtilsError(String),
+
+  #[error("Azure Storage Utils Error: {0}")]
+  AzureStorageUtilsError(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

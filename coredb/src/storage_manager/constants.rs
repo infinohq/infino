@@ -7,4 +7,7 @@ pub const DEFAULT_CLOUD_REGION_FOR_AWS_S3: &str = "us-east-1";
 /// Default cloud region for GCP.
 pub const DEFAULT_CLOUD_REGION_FOR_GCP: &str = "US-EAST1";
 
+/// Default cloud region for Azure.
+pub const DEFAULT_CLOUD_REGION_FOR_AZURE: &str = "us-east";
+
 pub const COMPRESSION_LEVEL: i32 = 15;
