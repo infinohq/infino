@@ -2,7 +2,7 @@
 members = [
     "server", "coredb"
 ]
-excludes = [
+exclude = [
     "benches", "examples/rust-apache-logs"
 ]
 resolver = "2"
@@ -15,3 +15,11 @@ debug-assertions = false
 [profile.test]
 debug-assertions = true
 overflow-checks = true
+
+# Custom profile for using in dhat memory profiling tool. We optimize similar to release,
+# but enable the debug info. 
+[profile.dhat]
+inherits = "release"
+opt-level = 3
+debug = true
+debug-assertions = true
