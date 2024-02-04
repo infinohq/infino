@@ -122,7 +122,7 @@ impl CoreDBSettings {
         }))
       }
       "azure" => {
-        let azure_bucket_name =
+        let azure_container_name =
           self
             .cloud_storage_bucket_name
             .to_owned()
@@ -136,7 +136,7 @@ impl CoreDBSettings {
           .unwrap_or_else(|| DEFAULT_CLOUD_REGION_FOR_AZURE.to_owned());
 
         Ok(StorageType::Azure(CloudStorageConfig {
-          bucket_name: azure_bucket_name,
+          bucket_name: azure_container_name,
           region: azure_region,
         }))
       }
