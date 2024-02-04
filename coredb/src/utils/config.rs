@@ -9,8 +9,9 @@ use serde::Deserialize;
 
 use super::error::CoreDBError;
 use crate::storage_manager::{
-  constants::DEFAULT_CLOUD_REGION_FOR_AWS_S3,
-  constants::DEFAULT_CLOUD_REGION_FOR_GCP,
+  constants::{
+    DEFAULT_CLOUD_REGION_FOR_AWS_S3, DEFAULT_CLOUD_REGION_FOR_AZURE, DEFAULT_CLOUD_REGION_FOR_GCP,
+  },
   storage::{CloudStorageConfig, StorageType},
 };
 
@@ -118,6 +119,25 @@ impl CoreDBSettings {
         Ok(StorageType::Gcp(CloudStorageConfig {
           bucket_name: gcp_bucket_name,
           region: gcp_region,
+        }))
+      }
+      "azure" => {
+        let azure_bucket_name =
+          self
+            .cloud_storage_bucket_name
+            .to_owned()
+            .ok_or(CoreDBError::InvalidConfiguration(
+              "Azure container name (as cloud_storage_bucket_name) not provided".to_owned(),
+            ))?;
+
+        let azure_region = self
+          .cloud_storage_region
+          .to_owned()
+          .unwrap_or_else(|| DEFAULT_CLOUD_REGION_FOR_AZURE.to_owned());
+
+        Ok(StorageType::Azure(CloudStorageConfig {
+          bucket_name: azure_bucket_name,
+          region: azure_region,
         }))
       }
       _ => {
