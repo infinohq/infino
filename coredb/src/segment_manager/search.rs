@@ -30,8 +30,8 @@ pub fn get_postings_lists(
   let mut shortest_list_len = usize::MAX;
 
   for (index, term) in terms.iter().enumerate() {
-    let term_id = match segment.terms.get(term) {
-      Some(term_id_ref) => *term_id_ref,
+    let term_id = match segment.get_term(term) {
+      Some(term_id) => term_id,
       None => {
         return Err(AstError::PostingsListError(format!(
           "Term not found: {}",
@@ -40,7 +40,7 @@ pub fn get_postings_lists(
       }
     };
 
-    let postings_list = match segment.inverted_map.get(&term_id) {
+    let postings_list = match segment.get_inverted_map().get(&term_id) {
       Some(postings_list_ref) => postings_list_ref,
       None => {
         return Err(AstError::PostingsListError(format!(
@@ -322,8 +322,8 @@ mod tests {
   fn create_mock_segment() -> Segment {
     let segment = Segment::new();
 
-    segment.terms.insert("term1".to_string(), 1);
-    segment.terms.insert("term2".to_string(), 2);
+    segment.insert_in_terms("term1", 1);
+    segment.insert_in_terms("term2", 2);
 
     let mock_compressed_block1 = create_mock_compressed_block(123, 8, &[0x1A, 0x2B, 0x3C, 0x4D]);
     let mock_compressed_block2 = create_mock_compressed_block(124, 8, &[0x5E, 0x6F, 0x7D, 0x8C]);
@@ -342,8 +342,8 @@ mod tests {
       vec![4, 5, 6],
     );
 
-    segment.inverted_map.insert(1, postings_list1);
-    segment.inverted_map.insert(2, postings_list2);
+    segment.insert_in_inverted_map(1, postings_list1);
+    segment.insert_in_inverted_map(2, postings_list2);
 
     segment
   }
@@ -421,7 +421,7 @@ mod tests {
   #[test]
   fn test_get_postings_lists_invalid_term_id_handling() {
     let segment = create_mock_segment();
-    segment.inverted_map.insert(999, PostingsList::new());
+    segment.insert_in_inverted_map(999, PostingsList::new());
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = get_postings_lists(&segment, &terms);
     assert!(result.is_ok());

@@ -18,6 +18,11 @@
 mod queue_manager;
 mod utils;
 
+// If the `dhat-heap` feature is enabled, we use dhat to track heap usage.
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::collections::HashMap;
 use std::env;
 use std::result::Result;
@@ -220,6 +225,10 @@ async fn app(
 #[tokio::main]
 /// Program entry point.
 async fn main() {
+  // If the `dhat-heap` feature is enabled, we use dhat to track heap usage.
+  #[cfg(feature = "dhat-heap")]
+  let _profiler = dhat::Profiler::new_heap();
+
   // Load environment variables from ".env" and ".env-creds" file.
   load_env();
 
@@ -279,7 +288,7 @@ async fn main() {
     .await
     .expect("Error while completing the commit thread");
 
-  info!("Completed Infino server shuwdown");
+  info!("Completed Infino server shutdown");
 }
 
 /// Helper function to parse json input.
@@ -789,7 +798,7 @@ mod tests {
       // Write server section.
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
-      file.write_all(b"host = \"127.0.0.1\"\n").unwrap();
+      file.write_all(b"host = \"0.0.0.0\"\n").unwrap();
       file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();

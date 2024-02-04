@@ -1,11 +1,15 @@
+# Set default values for variables
 prog := infino
 debug ?=
+docker-img-tag ?= infinohq/infino:latest
+
+.PHONY: docs docker-build docker-run docker-push docker-build-multiarch build-os-plugin clean-os-plugin clean-all
 
 ifdef debug
-  $(info in debug mode, used for building non-optimized binaries...)
+	$(info in debug mode, used for building non-optimized binaries...)
   release :=
 else
-  $(info in release mode, used for building optimized binaries...)
+ 	$(info in release mode, used for building optimized binaries...)
   release :=--release
 endif
 
@@ -17,6 +21,10 @@ run-debug:
 	echo "Running $(prog) server in debug mode..."
 	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
+run-profile:
+	echo "Running $(prog) server in profile mode..."
+	cargo run $(release) --features dhat-heap --bin $(prog)
+
 rust-check:
 	cargo fmt --all -- --check
 	cargo check
@@ -25,6 +33,9 @@ rust-check:
 docker-check:
 	@docker ps > /dev/null 2>&1 || (echo "Docker is not running. Please start Docker to run all tests." && exit 1)
 
+docker-buildx-check:
+	@docker buildx version > /dev/null 2>&1 || (echo "Docker buildx is not available. Please install the buildx plugin to build multi-arch images." && exit 1)
+
 test: rust-check docker-check
 	echo "Running tests for all the packages"
 	RUST_BACKTRACE=1 cargo test --all
@@ -32,12 +43,18 @@ test: rust-check docker-check
 build:
 	cargo build $(release)
 
+build-os-plugin:
+	cd plugins/infino-opensearch-plugin && ./gradlew build
+
+clean-os-plugin:
+	cd plugins/infino-opensearch-plugin && ./gradlew clean
+
 clean:
 	cargo clean
 	rm -rf docs/release
 	rm -rf data/
 
-.PHONY: docs
+clean-all: clean clean-os-plugin
 
 docs:
 	echo "Generating documentation to docs/doc"
@@ -46,18 +63,22 @@ docs:
 
 docker-build: docker-check
 	echo "Running docker build..."
-	docker build -t infinohq/infino:latest -f docker/Dockerfile .
+	docker build -t $(docker-img-tag) -f docker/infino.dockerfile .
+
+docker-build-multiarch: docker-check docker-buildx-check
+	@./scripts/build-docker-multiarch.sh --docker-img-tag $(docker-img-tag)
 
 docker-run: docker-check
 	echo "Starting docker container for ${prog}..."
-	docker run -it --rm -p 3000:3000 infinohq/infino:latest
+	docker run -it --rm -p 3000:3000 $(docker-img-tag)
 
 docker-push: docker-check
 	echo "Pushing image for ${prog}"
-	docker push infinohq/infino:latest
+	docker push $(docker-img-tag)
 
 # Rust example for indexing Apache logs.
 # You can run this as below (Infino server must be running to run this example):
 # `make example-apache-logs file=examples/datasets/apache-tiny.log count=100000`
-example-apache-logs: build
+example-apache-logs:
+	cd examples/rust-apache-logs && \
 	cargo run $(release) --bin rust-apache-logs -- --file $(file) --count $(count)
