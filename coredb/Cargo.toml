@@ -15,7 +15,7 @@ chrono = "0.4.23"
 config = "0.13.1"
 crossbeam = "0.8.2"
 futures = "0.3.30"
-dashmap = { version = "5.4.0", features = ["serde"] }
+dashmap = { version = "5.5.3", features = ["serde"] }
 dotenv = "0.15.0"
 google-cloud-storage = "0.15.0"
 lazy_static = "1.4.0"

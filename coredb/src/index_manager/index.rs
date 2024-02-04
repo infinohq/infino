@@ -176,7 +176,7 @@ impl Index {
 
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
   /// within the search_memory_budget_bytes.
-  fn evict_from_memory_segments_map(&self) {
+  fn shrink_to_fit(&self) {
     // Create a vector that has each segment's number, uncompressed size and end time.
     let mut segment_data: Vec<(u32, u64, u64)> = Vec::new();
     let mut memory_consumed = 0;
@@ -198,34 +198,43 @@ impl Index {
     // within the memory budget.
     let memory_to_evict = memory_consumed - self.search_memory_budget_bytes;
 
-    debug!("Now evicting memory {} bytes", memory_to_evict);
+    info!("Evicting memory {} bytes", memory_to_evict);
 
     // Sort this vector by end time in ascending order (i.e., oldest segments first).
     segment_data.sort_by_key(|&(_, _, end_time)| end_time);
 
     // Counter to track memory evicted so far.
-    let mut count = 0;
+    let mut memory_evicted_so_far = 0;
 
     // Iterate and evict the oldest segments first.
     for segment in segment_data {
-      let uncompressed_size = segment.1;
-      count += uncompressed_size;
-      if count >= memory_to_evict {
-        debug!(
-          "Already evicted {} bytes of memory, greather than or equal to {}. Not evicting further.",
-          count, memory_to_evict
-        );
-        break;
-      }
       let segment_number = segment.0;
+      let uncompressed_size = segment.1;
+
+      // Do not evict the current segment - as it would be needed for inserts.
       if segment_number == self.metadata.get_current_segment_number() {
-        // Do not evict the current segment - as it would be needed for inserts.
         debug!(
           "Not evicting the current segment with segment_number {}",
           segment_number
         );
-      } else {
-        self.memory_segments_map.remove(&segment_number);
+        continue;
+      }
+
+      // We already evicted enough memory - stop evicting.
+      if memory_evicted_so_far >= memory_to_evict {
+        debug!(
+          "Already evicted {} bytes of memory, greather than or equal to {}. Not evicting further.",
+          memory_evicted_so_far, memory_to_evict
+        );
+        break;
+      }
+
+      // Evict the segment with segment_number from memory_segments_map.
+      if let Some((_, segment)) = self.memory_segments_map.remove(&segment_number) {
+        info!("Evicting segment with segment_number {}", segment_number);
+        // Drop the segment to free the memory.
+        drop(segment);
+        memory_evicted_so_far += uncompressed_size;
       }
     }
   }
@@ -527,7 +536,7 @@ impl Index {
       self.commit_segment(original_current_segment_number).await?;
 
       // We created a new segment - possibly exceeding the memory budget. So, evict older segments if needed.
-      self.evict_from_memory_segments_map();
+      self.shrink_to_fit();
     }
 
     // Sort the summaries in reverse chronological order.
@@ -1847,7 +1856,7 @@ mod tests {
       num_segments + 1
     );
 
-    index.evict_from_memory_segments_map();
+    index.shrink_to_fit();
     // We shouldn't have more than specified segments in memory.
     assert!(index.memory_segments_map.len() as u64 <= num_segments_in_memory);
 

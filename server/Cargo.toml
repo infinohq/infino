@@ -8,6 +8,7 @@ axum = { version = "0.7.3", features = ["macros"] }
 cfg-if = "1.0"
 chrono = "0.4.31"
 config = "0.13.3"
+dhat = "0.3.2"
 env_logger = "0.10"
 hyper = { version = "1.1.0", features = ["full"] }
 lapin = "2.3.1"
@@ -44,3 +45,6 @@ tower = { version = "*", features = ["util"] }
 tempdir = "*"
 test-case = "*"
 urlencoding = "*"
+
+[features]
+dhat-heap = []    # if you are doing heap profiling

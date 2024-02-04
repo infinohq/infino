@@ -139,7 +139,7 @@ mod tests {
     let server_settings = settings.get_server_settings();
     assert_eq!(server_settings.get_commit_interval_in_seconds(), 30);
     assert_eq!(server_settings.get_port(), 3000);
-    assert_eq!(server_settings.get_host(), "127.0.0.1");
+    assert_eq!(server_settings.get_host(), "0.0.0.0");
     assert_eq!(server_settings.get_timestamp_key(), "date");
     assert_eq!(server_settings.get_labels_key(), "labels");
 
