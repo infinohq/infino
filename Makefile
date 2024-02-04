@@ -22,8 +22,9 @@ run-debug:
 	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
 run-profile:
-	echo "Running $(prog) server in profile mode..."
-	cargo run $(release) --features dhat-heap --bin $(prog)
+	echo "Building $(prog) server using profile dhat..."
+	cargo build --profile dhat
+	cargo run --features dhat-heap --bin $(prog)
 
 rust-check:
 	cargo fmt --all -- --check
@@ -78,7 +79,7 @@ docker-push: docker-check
 
 # Rust example for indexing Apache logs.
 # You can run this as below (Infino server must be running to run this example):
-# `make example-apache-logs file=examples/datasets/apache-tiny.log count=100000`
+# `make example-apache-logs file=../datasets/apache-tiny.log count=100000`
 example-apache-logs:
 	cd examples/rust-apache-logs && \
 	cargo run $(release) --bin rust-apache-logs -- --file $(file) --count $(count)
