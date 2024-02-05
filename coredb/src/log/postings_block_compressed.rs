@@ -2,62 +2,56 @@
 // https://www.elastic.co/licensing/elastic-license
 
 use bitpacking::BitPacker;
-use crossbeam::atomic::AtomicCell;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 
 use crate::log::constants::{BITPACKER, BLOCK_SIZE_FOR_LOG_MESSAGES};
 use crate::log::postings_block::PostingsBlock;
-use crate::utils::custom_serde::{atomic_cell_serde, rwlock_serde};
 use crate::utils::error::CoreDBError;
-use crate::utils::sync::RwLock;
 
 /// Represents a delta-compressed PostingsBlock.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PostingsBlockCompressed {
   /// Initial value.
-  #[serde(with = "atomic_cell_serde")]
-  initial: AtomicCell<u32>,
+  initial: u32,
 
   /// Number of bits per integer.
-  #[serde(with = "atomic_cell_serde")]
-  num_bits: AtomicCell<u8>,
+  num_bits: u8,
 
   /// Vector of compressed log_message_ids.
-  #[serde(with = "rwlock_serde")]
-  log_message_ids_compressed: RwLock<Vec<u8>>,
+  log_message_ids_compressed: Vec<u8>,
 }
 
 impl PostingsBlockCompressed {
   /// Creates an emply compressed postings block.
   pub fn new() -> Self {
     PostingsBlockCompressed {
-      initial: AtomicCell::new(0),
-      num_bits: AtomicCell::new(0),
-      log_message_ids_compressed: RwLock::new(Vec::new()),
+      initial: 0,
+      num_bits: 0,
+      log_message_ids_compressed: Vec::new(),
     }
   }
 
   pub fn new_with_params(initial: u32, num_bits: u8, log_message_ids_compressed: &[u8]) -> Self {
     PostingsBlockCompressed {
-      initial: AtomicCell::new(initial),
-      num_bits: AtomicCell::new(num_bits),
-      log_message_ids_compressed: RwLock::new(log_message_ids_compressed.to_owned()),
+      initial,
+      num_bits,
+      log_message_ids_compressed: log_message_ids_compressed.to_owned(),
     }
   }
 
   /// Get the initial value.
   pub fn get_initial(&self) -> u32 {
-    self.initial.load()
+    self.initial
   }
 
   /// Get the number of bits used to represent each integer.
   pub fn get_num_bits(&self) -> u8 {
-    self.num_bits.load()
+    self.num_bits
   }
 
   /// Gets the vector of compressed integers.
-  pub fn get_log_message_ids_compressed(&self) -> &RwLock<Vec<u8>> {
+  pub fn get_log_message_ids_compressed(&self) -> &Vec<u8> {
     &self.log_message_ids_compressed
   }
 }
@@ -70,8 +64,7 @@ impl PartialEq for PostingsBlockCompressed {
   fn eq(&self, other: &Self) -> bool {
     self.get_initial() == other.get_initial()
       && self.get_num_bits() == other.get_num_bits()
-      && *self.log_message_ids_compressed.read().unwrap()
-        == *other.log_message_ids_compressed.read().unwrap()
+      && *self.log_message_ids_compressed == *other.log_message_ids_compressed
   }
 }
 
@@ -108,13 +101,11 @@ impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
       BITPACKER.compress_sorted(initial, entire.as_slice(), &mut compressed[..], num_bits);
 
     // The compressed vector is only the first compressed_len entries.
-    let log_message_ids_compressed_vec = compressed[0..compressed_len].to_vec();
-
-    let log_message_ids_compressed = RwLock::new(log_message_ids_compressed_vec);
+    let log_message_ids_compressed = compressed[0..compressed_len].to_vec();
 
     let postings_block_compressed: Self = Self {
-      initial: AtomicCell::new(initial),
-      num_bits: AtomicCell::new(num_bits),
+      initial,
+      num_bits,
       log_message_ids_compressed,
     };
 
@@ -133,11 +124,7 @@ impl Clone for PostingsBlockCompressed {
     PostingsBlockCompressed::new_with_params(
       self.get_initial(),
       self.get_num_bits(),
-      &self
-        .get_log_message_ids_compressed()
-        .read()
-        .unwrap()
-        .clone(),
+      &self.get_log_message_ids_compressed(),
     )
   }
 }
@@ -164,7 +151,7 @@ mod tests {
     let pbc = PostingsBlockCompressed::new();
     assert_eq!(pbc.get_initial(), 0);
     assert_eq!(pbc.get_num_bits(), 0);
-    assert_eq!(pbc.log_message_ids_compressed.read().unwrap().len(), 0);
+    assert_eq!(pbc.log_message_ids_compressed.len(), 0);
   }
 
   #[test]
@@ -204,7 +191,7 @@ mod tests {
 
     assert_eq!(retval.get_initial(), 1000);
     assert_eq!(retval.get_num_bits(), 0);
-    assert!((*retval.log_message_ids_compressed.read().unwrap()).is_empty());
+    assert!((*retval.log_message_ids_compressed).is_empty());
   }
 
   #[test_case(1, 16, 128; "when last uncompressed input is 1")]
@@ -224,29 +211,13 @@ mod tests {
 
     let pb = PostingsBlock::new_with_log_message_ids(uncompressed);
     let pbc = PostingsBlockCompressed::try_from(&pb).unwrap();
-    assert_eq!(
-      pbc.log_message_ids_compressed.read().unwrap().len() as u32,
-      expected_length
-    );
+    assert_eq!(pbc.log_message_ids_compressed.len() as u32, expected_length);
 
-    for i in 0..pbc.log_message_ids_compressed.read().unwrap().len() - 1 {
-      assert_eq!(
-        pbc
-          .log_message_ids_compressed
-          .read()
-          .unwrap()
-          .get(i)
-          .unwrap(),
-        &0
-      )
+    for i in 0..pbc.log_message_ids_compressed.len() - 1 {
+      assert_eq!(pbc.log_message_ids_compressed.get(i).unwrap(), &0)
     }
     assert_eq!(
-      pbc
-        .log_message_ids_compressed
-        .read()
-        .unwrap()
-        .last()
-        .unwrap(),
+      pbc.log_message_ids_compressed.last().unwrap(),
       &expected_last_compressed
     );
   }
@@ -267,12 +238,11 @@ mod tests {
 
     assert_eq!(pbc.get_num_bits(), 1);
     assert_eq!(pbc.get_initial(), 0);
-    assert_eq!(pbc.log_message_ids_compressed.read().unwrap().len(), 16);
-    assert_eq!(*pbc.log_message_ids_compressed.read().unwrap(), expected);
+    assert_eq!(pbc.log_message_ids_compressed.len(), 16);
+    assert_eq!(*pbc.log_message_ids_compressed, expected);
 
     let mem_pb_log_message_ids = size_of_val(pb.get_log_message_ids().read().unwrap().as_slice());
-    let mem_pbc_log_message_ids_compressed =
-      size_of_val(pbc.log_message_ids_compressed.read().unwrap().as_slice());
+    let mem_pbc_log_message_ids_compressed = size_of_val(pbc.log_message_ids_compressed.as_slice());
 
     // The memory consumed by log_message_ids for uncompressed block should be equal to sizeof(u32)*128,
     // as there are 128 integers, each occupying 4 bytes.
@@ -295,8 +265,8 @@ mod tests {
     assert_eq!(pbc, pbc.clone());
 
     assert_eq!(
-      *pbc.log_message_ids_compressed.read().unwrap(),
-      *pbc.clone().log_message_ids_compressed.read().unwrap()
+      *pbc.log_message_ids_compressed,
+      *pbc.clone().log_message_ids_compressed
     );
   }
 }
