@@ -124,7 +124,7 @@ impl Clone for PostingsBlockCompressed {
     PostingsBlockCompressed::new_with_params(
       self.get_initial(),
       self.get_num_bits(),
-      &self.get_log_message_ids_compressed(),
+      self.get_log_message_ids_compressed(),
     )
   }
 }

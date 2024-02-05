@@ -6,45 +6,42 @@ use serde::{Deserialize, Serialize};
 
 use crate::metric::metricutils::compress_metric_point_vector;
 use crate::metric::time_series_block::TimeSeriesBlock;
-use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::CoreDBError;
-use crate::utils::sync::RwLock;
 
 /// Represents a compressed time series block.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TimeSeriesBlockCompressed {
-  // Vector of compressed log_message_ids, wrapped in RwLock.
-  #[serde(with = "rwlock_serde")]
-  metric_points_compressed: RwLock<Vec<u8>>,
+  // Vector of compressed log_message_ids.
+  metric_points_compressed: Vec<u8>,
 }
 
 impl TimeSeriesBlockCompressed {
   /// Create an empty block.
   pub fn new() -> Self {
     TimeSeriesBlockCompressed {
-      metric_points_compressed: RwLock::new(Vec::new()),
+      metric_points_compressed: Vec::new(),
     }
   }
 
   /// Create a block from given compressed metric points vector.
-  pub fn new_with_metric_points_compressed_vec(metric_points_compressed_vec: Vec<u8>) -> Self {
+  pub fn new_with_metric_points_compressed_vec(metric_points_compressed: Vec<u8>) -> Self {
     TimeSeriesBlockCompressed {
-      metric_points_compressed: RwLock::new(metric_points_compressed_vec),
+      metric_points_compressed,
     }
   }
 
   /// Get the compressed vector of metric points, wrapped in RwLock.
-  pub fn get_metric_points_compressed(&self) -> &RwLock<Vec<u8>> {
+  pub fn get_metric_points_compressed(&self) -> &Vec<u8> {
     &self.metric_points_compressed
   }
 }
 
 impl PartialEq for TimeSeriesBlockCompressed {
   fn eq(&self, other: &Self) -> bool {
-    let metric_points_lock = self.metric_points_compressed.read().unwrap();
-    let other_metric_points_lock = other.metric_points_compressed.read().unwrap();
+    let metric_points = self.get_metric_points_compressed();
+    let other_metric_points = other.get_metric_points_compressed();
 
-    *metric_points_lock == *other_metric_points_lock
+    *metric_points == *other_metric_points
   }
 }
 
@@ -94,14 +91,14 @@ mod tests {
 
     // Check that a newly created compressed time series block is empty.
     let tsbc = TimeSeriesBlockCompressed::new();
-    assert_eq!(tsbc.metric_points_compressed.read().unwrap().len(), 0);
+    assert_eq!(tsbc.metric_points_compressed.len(), 0);
   }
 
   #[test]
   fn test_default() {
     // Check that a default compressed time series block is empty.
     let tsbc = TimeSeriesBlockCompressed::default();
-    assert_eq!(tsbc.metric_points_compressed.read().unwrap().len(), 0);
+    assert_eq!(tsbc.metric_points_compressed.len(), 0);
   }
 
   #[test]
@@ -169,7 +166,7 @@ mod tests {
     assert_eq!(mem_decompressed, BLOCK_SIZE_FOR_TIME_SERIES * 16);
 
     // Make sure that the compressed data is at least 1/10th of the original data size.
-    let mem_compressed = size_of_val(&compressed.metric_points_compressed.read().unwrap()[..]);
+    let mem_compressed = size_of_val(&compressed.metric_points_compressed[..]);
     assert!(10 * mem_compressed < mem_decompressed);
   }
 }
