@@ -135,10 +135,7 @@ impl TryFrom<&PostingsBlockCompressed> for PostingsBlock {
 
     BITPACKER.decompress_sorted(
       initial,
-      &postings_block_compressed
-        .get_log_message_ids_compressed()
-        .read()
-        .unwrap(),
+      postings_block_compressed.get_log_message_ids_compressed(),
       &mut decompressed[..],
       num_bits,
     );
