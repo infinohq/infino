@@ -33,7 +33,7 @@ impl AzureStorageUtils {
     );
 
     Ok(Self {
-      client: service_client.to_owned(),
+      client: service_client,
     })
   }
 
@@ -57,12 +57,12 @@ impl AzureStorageUtils {
             // StatusCode 409 (CONFLICT) indicates that the resource already exists
             debug!("Container already exists");
           } else {
-            return Err(CoreDBError::AzureStorageUtilsError(base_error.to_owned()));
+            return Err(CoreDBError::AzureStorageUtilsError(base_error));
           }
         }
 
         _ => {
-          return Err(CoreDBError::AzureStorageUtilsError(base_error.to_string()));
+          return Err(CoreDBError::AzureStorageUtilsError(base_error));
         }
       }
     }
@@ -83,13 +83,9 @@ impl AzureStorageUtils {
     // Check if there's an error
     match get_container_contents {
       Some(result) => {
-        if result.is_err() {
-          // Container does not exist
-          false
-        } else {
-          //Container exists if no error
-          true
-        }
+        // If the OK result exists, it suggests blobs in containers, indicating the container exists.
+        // If there is an error, the container does not exist, so return false.
+        result.is_ok()
       }
       None => false,
     }
