@@ -8,6 +8,17 @@ pub const FIELD_DELIMITER: char = '~';
 // Tokenize a given string. Note that FIELD_DELIMITER is a special character that we
 // use a field separator in queries, and so we do not tokenize on "~".
 pub fn tokenize(input: &str) -> Vec<String> {
+  if !input.contains(FIELD_DELIMITER) {
+    // Input does not have FIELD_DELIMITER, so just do unicode_words().
+    // This improves performance in this hot method, as we do not need to split
+    // the input on FIELD_DELIMITER.
+    let tokens: Vec<&str> = input.unicode_words().collect();
+    return tokens.iter().map(|x| x.to_string()).collect();
+  }
+
+  // Input has FIELD_DELIMITER, so we need to do a bit more work.
+  // We need to split the input on FIELD_DELIMITER, and then tokenize each segment.
+
   // First, create different segments based on FIELD_DELIMITER separator.
   let segments: Vec<&str> = input.split(FIELD_DELIMITER).collect();
 
