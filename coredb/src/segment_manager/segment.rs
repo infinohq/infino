@@ -185,7 +185,7 @@ impl Segment {
       {
         let entry = self
           .terms
-          .entry(term.to_owned())
+          .entry(term)
           .or_insert(self.metadata.fetch_increment_term_count());
         term_id = *entry;
       }

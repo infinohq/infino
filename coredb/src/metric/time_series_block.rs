@@ -120,11 +120,7 @@ impl TryFrom<&TimeSeriesBlockCompressed> for TimeSeriesBlock {
   fn try_from(
     time_series_block_compressed: &TimeSeriesBlockCompressed,
   ) -> Result<Self, Self::Error> {
-    let metric_points_compressed_lock = time_series_block_compressed
-      .get_metric_points_compressed()
-      .read()
-      .unwrap();
-    let metric_points_compressed = &*metric_points_compressed_lock;
+    let metric_points_compressed = time_series_block_compressed.get_metric_points_compressed();
     let metric_points_decompressed = decompress_numeric_vector(metric_points_compressed).unwrap();
     let time_series_block = TimeSeriesBlock::new_with_metric_points(metric_points_decompressed);
 
