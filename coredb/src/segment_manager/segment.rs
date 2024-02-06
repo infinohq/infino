@@ -530,7 +530,11 @@ mod tests {
       "query": {
         "bool": {
           "must": [
-            { "match": { "_all" : "test" } }
+            { "match": { 
+              "_all" : {
+                "query": "test" } 
+              } 
+            }
           ]
         }
       }
@@ -559,12 +563,15 @@ mod tests {
     let mut segment = Segment::new();
     populate_segment(&mut segment);
 
-    // Construct the query DSL as a JSON string for a Should query
     let query_dsl = r#"{
       "query": {
         "bool": {
           "should": [
-            { "match": { "_all" : "test" } }
+            { "match": { 
+              "_all" : {
+                "query": "test" } 
+              } 
+            }
           ]
         }
       }
@@ -575,6 +582,7 @@ mod tests {
     match QueryDslParser::parse(Rule::start, query_dsl) {
       Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
         Ok(results) => {
+          println!("Results are: {:#?}", results);
           assert!(results
             .iter()
             .any(|log| log.get_text().contains("another") || log.get_text().contains("different")));
