@@ -14,243 +14,556 @@
 //! Lucene's query language. Strings intended to be parsed with Lucene's parser are included with a
 //! rule called "query_string", so any time we encounter a "query_string" term in the generated parser
 //! we hand over to a different parser in lucene_query.rs with a separate grammar file named lucene_grammar.pest.
+//!
+//! Since in observability results are ranked in reverse chronological order, any Query DSL rules related
+//! to relevance and ranking are marked as silent in this grammar and are ignored.
+//!
+//! This grammar is whitespace-permissive.
 
-/// Note that parser error messages are not intuitive. If you have any problems parsing your input, copy
-/// this grammar into the live parser at https://pest.rs/ and debug with your json input.
-///
-/// This grammar is whitespace-permissive.
+// NOTES
+// 
+// 1. There are implicit dependencies on grammar verification, for example the order
+// of query rules or whether rules are AND'd or OR'd. The query code assumes this grammar
+// is correct and the Pest parser validates the input before query code is executed. This is thus
+// a brittle area of code since there we do not have unit tests for grammar verification.
+// 
+// 2. Parser error messages are not intuitive. If you have any problems parsing your input, copy
+// this grammar into the live parser at https://pest.rs/ and debug with your json input.
+// 
+// 3. This grammar focuses on query syntax verification. Query.rs determines what Infino actually supports.
 
-// **** Top-level JSON processing ****
+// TODO: Write unit test for grammar verification.
 
-start = { start_brace ~ (query_section ~ aggregation_section? ~ highlight_section? ~ suggest_section? ~ filter_section? ~ sort_section? ~ pagination_section? ~ script_fields_section?) ~ end_brace }
+// **** Top-level Query DSL processing ****
 
-query_section       = { "\"query\"" ~ colon ~ start_brace ~ query ~ end_brace }
-aggregation_section = { comma ~ "\"aggs\"" ~ colon ~ start_brace ~ (aggregation ~ (comma ~ aggregation)*)? ~ end_brace }
-highlight_section   = { comma ~ "\"highlight\"" ~ colon ~ start_brace ~ highlight_fields ~ end_brace }
-suggest_section     = { comma ~ "\"suggest\"" ~ colon ~ start_brace ~ suggesters ~ end_brace }
-filter_section      = { comma ~ "\"filter\"" ~ colon ~ start_brace ~ filter ~ end_brace }
+start = { start_brace ~ (query_section ~ (comma ~ aggregation_section)? ~ (comma ~ highlight_section)? ~ (comma ~ suggest_section)? ~ (comma ~ filter_section)? ~ (comma ~ sort_section)? ~ (comma ~ pagination_section)? ~ (comma ~ script_fields_section)?) ~ end_brace }
 
-// **** Query processing - Note that query_strings are handled by a separate lucene syntax parser ****
+query_section       = { quote ~ "query" ~ quote ~ colon ~ query_root }
+aggregation_section = { quote ~ "aggs" ~ quote ~ colon ~ aggregations }
+highlight_section   = { quote ~ "highlight" ~ quote ~ colon ~ highlights }
+suggest_section     = { quote ~ "suggest" ~ quote ~ colon ~ suggests }
+filter_section      = { quote ~ "filter" ~ quote ~ colon ~ filters }
 
-query = { ws ~ (bool_query | match_query | term_query | range_query | exists_query | ids_query | prefix_query | wildcard_query | dis_max_query | constant_score_query | script_query | geo_distance_query | more_like_this_query | start_braceed_query | geo_shape_query | script_score_query | function_score_query | query_string_query | geo_polygon_query | span_term_query | span_first_query | span_near_query | span_or_query | span_not_query | boosting_query | common_set_of_terms_query | fuzzy_query | regexp_query | simple_query_string_query | percolate_query | pinned_query | rank_feature_query | geo_bounding_box_query | geo_shape_query | start_braceed_query | has_child_query) ~ ws }
+aggregations = { start_brace ~ (aggregation ~ (comma ~ aggregation)*)? ~ end_brace }
+highlights   = { start_brace ~ highlight_fields ~ end_brace }
+suggests     = { start_brace ~ suggesters ~ end_brace }
+filters      = { start_brace ~ filter ~ end_brace }
 
-match_query               = { "\"match\"" ~ colon ~ start_brace ~ (search_on_field | search_on_all) ~ end_brace }
-term_query                = { "\"term\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ end_brace }
-bool_query                = { "\"bool\"" ~ colon ~ start_brace ~ (must_clauses? ~ should_clauses? ~ must_not_clauses? ~ filter_clauses?) ~ end_brace }
-range_query               = { "\"range\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ range_expression ~ end_brace }
-exists_query              = { "\"exists\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ end_brace }
-ids_query                 = { "\"ids\"" ~ colon ~ start_brace ~ "\"values\"" ~ colon ~ start_bracket ~ quoted_string ~ (comma ~ quoted_string)* ~ end_bracket ~ end_brace }
-prefix_query              = { "\"prefix\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ end_brace }
-wildcard_query            = { "\"wildcard\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ end_brace }
-span_term_query           = { "\"span_term\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ end_brace }
-span_first_query          = { "\"span_first\"" ~ colon ~ start_brace ~ "\"match\"" ~ colon ~ query ~ comma ~ "\"end\"" ~ colon ~ number ~ end_brace }
-span_near_query           = { "\"span_near\"" ~ colon ~ start_brace ~ "\"clauses\"" ~ colon ~ start_bracket ~ span_clause ~ (comma ~ span_clause)* ~ end_bracket ~ span_near_options? ~ end_brace }
-span_or_query             = { "\"span_or\"" ~ colon ~ start_brace ~ "\"clauses\"" ~ colon ~ start_bracket ~ span_clause ~ (comma ~ span_clause)* ~ end_bracket ~ end_brace }
-span_not_query            = { "\"span_not\"" ~ colon ~ start_brace ~ "\"include\"" ~ colon ~ span_clause ~ comma ~ "\"exclude\"" ~ colon ~ span_clause ~ end_brace }
-script_query              = { "\"script\"" ~ colon ~ start_brace ~ "\"script\"" ~ start_brace ~ "\"source\"" ~ colon ~ quoted_string ~ comma ~ "\"params\"" ~ colon ~ start_bracket ~ (script_param ~ (comma ~ script_param)*)? ~ end_brace ~ end_brace }
-geo_distance_query        = { "\"geo_distance\"" ~ colon ~ start_brace ~ "\"distance\"" ~ colon ~ quoted_string ~ comma ~ fieldname ~ colon ~ start_bracket ~ "\"lat\"" ~ colon ~ number ~ comma ~ "\"lon\"" ~ colon ~ number ~ end_brace ~ end_brace }
-more_like_this_query      = { "\"more_like_this\"" ~ colon ~ start_brace ~ "\"fields\"" ~ colon ~ start_bracket ~ (fieldname ~ (comma ~ fieldname)*)? ~ end_bracket ~ comma ~ "\"like\"" ~ colon ~ start_bracket ~ (quoted_string ~ (comma ~ quoted_string)*)? ~ end_bracket ~ more_like_this_options? ~ end_brace }
-geo_polygon_query         = { "\"geo_polygon\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"points\"" ~ colon ~ start_bracket ~ geo_point ~ (comma ~ geo_point)* ~ end_bracket ~ end_brace }
-geo_shape_query           = { "\"geo_shape\"" ~ colon ~ start_brace ~ fieldname ~ start_brace ~ "\"shape\"" ~ colon ~ quoted_string ~ "\"relation\"" ~ colon ~ ("intersects" | "disjoint" | "within") ~ end_brace ~ end_brace }
-script_score_query        = { "\"script_score\"" ~ colon ~ start_brace ~ "\"query\"" ~ start_brace ~ query ~ end_brace ~ comma ~ "\"script\"" ~ colon ~ start_brace ~ "\"source\"" ~ colon ~ quoted_string ~ comma ~ "\"params\"" ~ colon ~ start_bracket ~ (script_param ~ (comma ~ script_param)*)? ~ end_brace ~ end_brace }
-function_score_query      = { "\"function_score\"" ~ colon ~ start_brace ~ "\"query\"" ~ start_brace ~ query ~ end_brace ~ comma ~ "\"functions\"" ~ colon ~ start_bracket ~ function_score_function ~ (comma ~ function_score_function)* ~ end_bracket ~ end_brace }
-boosting_query            = { "\"boosting\"" ~ colon ~ start_brace ~ "\"positive\"" ~ start_brace ~ query ~ end_brace ~ comma ~ "\"negative\"" ~ colon ~ start_brace ~ query ~ end_brace ~ comma ~ "\"negative_boost\"" ~ colon ~ number ~ end_brace }
-fuzzy_query               = { "\"fuzzy\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ comma ~ "\"fuzziness\"" ~ colon ~ quoted_string ~ end_brace }
-regexp_query              = { "\"regexp\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ end_brace }
-simple_query_string_query = { "\"simple_query_string\"" ~ colon ~ start_brace ~ "\"query\"" ~ colon ~ quoted_string ~ comma ~ "\"fields\"" ~ colon ~ start_bracket ~ fieldname ~ (comma ~ fieldname)* ~ end_bracket ~ simple_query_string_options? ~ end_brace }
-common_set_of_terms_query = { "\"common_set_of_terms\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"query\"" ~ colon ~ quoted_string ~ comma ~ "\"cutoff_frequency\"" ~ colon ~ number ~ comma ~ "\"low_freq_operator\"" ~ colon ~ simple_boolean ~ "\"high_freq_operator\"" ~ colon ~ simple_boolean ~ "\"minimum_should_match\"" ~ colon ~ quoted_string ~ end_brace }
-constant_score_query      = { "\"constant_score\"" ~ colon ~ start_brace ~ "\"filter\"" ~ colon ~ filter ~ end_brace }
-dis_max_query             = { "\"dis_max\"" ~ colon ~ start_brace ~ "\"queries\"" ~ colon ~ start_bracket ~ query ~ (comma ~ query)* ~ end_bracket ~ dis_max_options? ~ end_brace }
-query_string_query        = { "\"query_string\"" ~ colon ~ start_brace ~ "\"query\"" ~ colon ~ end_brace }
-has_child_query           = { "\"has_child\"" ~ colon ~ start_brace ~ "\"type\"" ~ colon ~ quoted_string ~ comma ~ "\"query\"" ~ colon ~ query ~ (comma ~ "\"score_mode\"" ~ colon ~ parent_child_score_mode)? ~ (comma ~ "\"min_children\"" ~ colon ~ number)? ~ (comma ~ "\"max_children\"" ~ colon ~ number)? ~ end_brace }
-geo_bounding_box_query    = { "\"geo_bounding_box\"" ~ colon ~ start_bracket ~ fieldname ~ start_brace ~ "\"top_left\"" ~ colon ~ geo_point ~ comma ~ "\"bottom_right\"" ~ colon ~ geo_point ~ end_brace ~ end_brace }
-start_braceed_query       = { "\"start_braceed\"" ~ colon ~ start_brace ~ "\"path\"" ~ colon ~ fieldname ~ comma ~ "\"query\"" ~ colon ~ start_brace ~ query ~ end_brace ~ (comma ~ "\"score_mode\"" ~ colon ~ start_braceed_score_mode)? ~ end_brace }
-percolate_query           = { "\"percolate\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"document\"" ~ colon ~ object ~ end_brace }
-pinned_query              = { "\"pinned\"" ~ colon ~ start_brace ~ "\"ids\"" ~ colon ~ start_bracket ~ (quoted_string ~ (comma ~ quoted_string)*)? ~ end_bracket ~ comma ~ "\"organic\"" ~ colon ~ query ~ end_brace }
-rank_feature_query        = { "\"rank_feature\"" ~ colon ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ end_brace }
+// Queries
+query_root     = { (leaf_query | compound_query) }
+leaf_query     = { term_level_query | full_text_query | script_query | geo_distance_query | xy_point_query | neural_query | neural_sparse_query | wrapper_query | distance_feature_query | more_like_this_query | geo_shape_query | script_score_query | function_score_query | query_string_query | span_term_query | span_first_query | span_near_query | span_or_query | span_not_query | boosting_query | fuzzy_query | regexp_query | simple_query_string_query | percolate_query | rank_feature_query | geo_bounding_box_query | geo_shape_query }
+compound_query = { bool_query | boosting_query | dis_max_query | constant_score_query | function_score_query | hybrid_query }
 
-// If we are at the end of the boolean query, do not accept a comma so we keep with JSON semantics
-must_clauses     = { "\"must\"" ~ bracketed_query ~ (comma | (&(end_brace | end_bracket) ~ "")?) }
-should_clauses   = { "\"should\"" ~ bracketed_query ~ (comma | (&(end_brace | end_bracket) ~ "")?) }
-must_not_clauses = { "\"must_not\"" ~ bracketed_query ~ (comma | (&(end_brace | end_bracket) ~ "")?) }
+full_text_query  = { match_query | match_bool_prefix_query | match_phrase_query | match_phrase_prefix_query | multi_match_query | query_string_query | simple_query_string_query | interval_query }
+term_level_query = { term_query | terms_query | terms_set_query | range_query | exists_query | ids_query | prefix_query | wildcard_query }
 
-filter_clauses          = { "\"filter\"" ~ bracketed_query }
-filter_must_clauses     = { "\"must\"" ~ bracketed_query }
-filter_should_clauses   = { "\"should\"" ~ bracketed_query }
-filter_must_not_clauses = { "\"must_not\"" ~ bracketed_query }
-span_clause             = { "\"span_term\"" ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ end_brace }
+// **** LEAF QUERIES *****
 
-// Search a given field for a set of set_of_terms
-search_on_field = { "\"" ~ fieldname ~ "\"" ~ colon ~ set_of_terms }
+// *** Term Queries
 
-// _all was deprecated in ElasticSearch 6.0 for performance reasons but
-// in Infino OpenSearch we have made such searches efficient so we will
-// support this syntax
-search_on_all = { "\"_all\"" ~ colon ~ quoted_string }
+// Term Queries: https://opensearch.org/docs/latest/query-dsl/term/term/
+term_query  = { start_brace ~ quote ~ "term" ~ quote ~ colon ~ term_search ~ end_brace }
+term_search = { start_brace ~ fieldname ~ colon ~ start_brace ~ term ~ end_brace ~ end_brace }
+term        = { value ~ (comma ~ boost)? ~ (comma ~ case_insensitive)? }
 
-// **** Result processing ****
+// Terms Queries: https://opensearch.org/docs/latest/query-dsl/term/terms/
+terms_query  = { start_brace ~ quote ~ "terms" ~ quote ~ colon ~ terms_search ~ end_brace }
+terms_search = { start_brace ~ (fieldname | boost) ~ colon ~ start_bracket ~ terms ~ end_bracket ~ end_brace }
+terms        = { index ~ comma ~ id ~ comma ~ path ~ (comma ~ routing)? }
 
-sort_section    = { "\"sort\"" ~ colon ~ start_bracket ~ (sort_expression ~ (comma ~ sort_expression)*)? ~ end_bracket }
-sort_expression = { fieldname ~ colon ~ start_brace ~ "\"order\"" ~ colon ~ ("asc" | "desc") ~ end_brace }
+// Terms Set Queries: https://opensearch.org/docs/latest/query-dsl/term/terms-set/
+terms_set_query  = { start_brace ~ quote ~ "terms_set" ~ quote ~ colon ~ terms_set_search ~ end_brace }
+terms_set_search = { start_brace ~ fieldname ~ colon ~ terms_set ~ end_brace }
+terms_set        = { (terms_set_array | minimum_should_match_field | minimum_should_match_script) }
+terms_set_array  = { start_bracket ~ (term ~ (comma ~ term)*)? ~ end_bracket }
 
-pagination_section = { size_param ~ comma ~ from_param }
-size_param         = { "\"size\"" ~ colon ~ number }
-from_param         = { "\"from\"" ~ colon ~ number }
+// Range Queries: https://opensearch.org/docs/latest/query-dsl/term/range/
+range_query  = { start_brace ~ quote ~ "range" ~ quote ~ colon ~ range_search ~ end_brace }
+range_search = { start_brace ~ fieldname ~ colon ~ range_array ~ end_brace }
+range_array  = { start_brace ~ (range ~ (comma ~ range)*)? ~ end_brace }
+range        = { (gte | lte | gt | lt | format | boost | time_zone | relation) }
 
-filter       = { bool_filter | term_filter | range_filter }
-bool_filter  = { "\"bool\"" ~ start_brace ~ (filter_must_clauses ~ filter_should_clauses? ~ filter_must_not_clauses?)? ~ end_brace }
-term_filter  = { "\"term\"" ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"value\"" ~ colon ~ quoted_string ~ end_brace }
-range_filter = { "\"range\"" ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ range_expression ~ end_brace }
+// IDs Queries: https://opensearch.org/docs/latest/query-dsl/term/ids/
+ids_query  = { start_brace ~ quote ~ "ids" ~ quote ~ colon ~ ids_search ~ end_brace }
+ids_search = { start_brace ~ quote ~ "values" ~ quote ~ colon ~ id_array ~ end_brace }
+id_array   = { quote ~ "terms" ~ quote ~ colon ~ start_bracket ~ id_element ~ (comma ~ id_element)* ~ end_bracket }
+id_element = { string }
 
-// **** Query options - will largely be ignored by Infino ****
+// Prefix Queries: https://opensearch.org/docs/latest/query-dsl/term/prefix/
+prefix_query  = { start_brace ~ quote ~ "prefix" ~ quote ~ colon ~ prefix_search ~ end_brace }
+prefix_search = { start_brace ~ (field | (fieldname ~ colon ~ prefix_array)) ~ end_brace }
+prefix_array  = { start_brace ~ (prefix ~ (comma ~ prefix)*)? ~ end_brace }
+prefix        = { (field | case_insensitive | rewrite) }
 
-span_near_options           = { comma ~ "\"slop\"" ~ colon ~ number ~ comma ~ "\"in_order\"" ~ colon ~ boolean }
-simple_query_string_options = { comma ~ "\"default_operator\"" ~ colon ~ ("and" | "or") ~ comma ~ "\"analyzer\"" ~ colon ~ quoted_string ~ comma ~ "\"flags\"" ~ colon ~ quoted_string ~ comma ~ "\"lenient\"" ~ colon ~ boolean ~ comma ~ "\"minimum_should_match\"" ~ colon ~ quoted_string ~ comma ~ "\"quote_field_suffix\"" ~ colon ~ quoted_string }
-dis_max_options             = { comma ~ "\"tie_breaker\"" ~ colon ~ number ~ comma ~ "\"boost\"" ~ colon ~ number }
-more_like_this_options      = { comma ~ "\"min_term_freq\"" ~ colon ~ number ~ comma ~ "\"max_query_set_of_terms\"" ~ colon ~ number }
+// Regexp Queries: https://opensearch.org/docs/latest/query-dsl/term/regexp/
+regexp_query  = { start_brace ~ quote ~ "regexp" ~ quote ~ colon ~ regexp_search ~ end_brace }
+regexp_search = { start_brace ~ (regexp_field | (fieldname ~ colon ~ regexp_array)) ~ end_brace }
+regexp_array  = { start_brace ~ (regexp ~ (comma ~ regexp)*)? ~ end_brace }
+regexp        = { (regexp_field | case_insensitive | rewrite | flags | max_determinized_states) }
 
-// **** UX options - add html to response, etc. ****
+// Wildcard Queries: https://opensearch.org/docs/latest/query-dsl/term/wildcard/
+wildcard_query  = { start_brace ~ quote ~ "wildcard" ~ quote ~ colon ~ wildcard_search ~ end_brace }
+wildcard_search = { start_brace ~ fieldname ~ colon ~ start_brace ~ (wildcard ~ (comma ~ wildcard)*)? ~ end_brace ~ end_brace }
+wildcard        = { (wildcard_value | boost | case_insensitive) }
 
-highlight_fields        = { "\"fields\"" ~ colon ~ start_bracket ~ (highlight_field ~ (comma ~ highlight_field)*)? ~ end_brace }
-highlight_field         = { fieldname ~ colon ~ start_bracket ~ highlight_field_options? ~ end_brace }
-highlight_field_options = { fragment_size_option? ~ number_of_fragments_option? ~ pre_tags_option? ~ post_tags_option? }
+// Fuzzy Queries: https://opensearch.org/docs/latest/query-dsl/term/fuzzy/
+fuzzy_query  = { start_brace ~ quote ~ "fuzzy" ~ quote ~ colon ~ fuzzy_search ~ end_brace }
+fuzzy_search = { start_brace ~ fieldname ~ colon ~ (fuzzy ~ (comma ~ fuzzy)*)? ~ end_brace ~ end_brace }
+fuzzy        = { (value | fuzziness | max_expansions | prefix_length | rewrite | transpositions) }
 
-fragment_size_option       = { "\"fragment_size\"" ~ colon ~ number }
-number_of_fragments_option = { "\"number_of_fragments\"" ~ colon ~ number }
-pre_tags_option            = { "\"pre_tags\"" ~ colon ~ array_of_strings }
-post_tags_option           = { "\"post_tags\"" ~ colon ~ array_of_strings }
+// Exists Queries: https://opensearch.org/docs/latest/query-dsl/term/exists/
+exists_query  = { start_brace ~ quote ~ "exists" ~ quote ~ colon ~ exists_search ~ end_brace }
+exists_search = { start_brace ~ quote ~ "field" ~ quote ~ string ~ end_brace }
 
-// **** Scoring - these will largely be ignored in Infino **** //
+// *** Full Text Queries
 
-parent_child_score_mode     = { "\"none" | "avg" | "sum" | "max" | "min" }
-start_braceed_score_mode    = { "\"avg" | "sum" | "min" | "max" | "none" }
-function_score_function     = { linear_decay_function | exp_decay_function | gauss_decay_function | field_value_factor_function }
-linear_decay_function       = { "\"linear\"" ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"origin\"" ~ colon ~ number ~ comma ~ "\"scale\"" ~ colon ~ number ~ end_brace }
-exp_decay_function          = { "\"exp\"" ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"origin\"" ~ colon ~ number ~ comma ~ "\"scale\"" ~ colon ~ number ~ end_brace }
-gauss_decay_function        = { "\"gauss\"" ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"origin\"" ~ colon ~ number ~ comma ~ "\"scale\"" ~ colon ~ number ~ end_brace }
-field_value_factor_function = { "\"field_value_factor\"" ~ start_brace ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"factor\"" ~ colon ~ number ~ comma ~ "\"modifier\"" ~ colon ~ ("none" | "log" | "log1p" | "log2p" | "ln" | "ln1p" | "ln2p" | "square" | "sqrt" | "reciprocal") ~ "}" ~ ws }
+// Match Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match/
+match_query  = { start_brace ~ quote ~ "match" ~ quote ~ colon ~ match_search ~ end_brace }
+match_search = { start_brace ~ ((quote ~ "_all" ~ quote) | fieldname) ~ colon ~ (match_string | match_array) ~ end_brace }
+match_array  = { start_brace ~ query ~ (comma ~ match_terms)* ~ end_brace }
+match_terms  = { (auto_generate_synonyms_phrase_query | analyzer | enable_position_increments | boost | fuzziness | fuzzy_rewrite | fuzzy_transpositions | case_insensitive | lenient | max_expansions | minimum_should_match | operator | prefix_length | zero_terms_query) }
 
-// **** Scripting - these will largely be ignored in Infino ****
+// Match Boolean Prefix Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match-bool-prefix/
+match_bool_prefix_query  = { start_brace ~ quote ~ "match_bool_prefix" ~ quote ~ colon ~ match_bool_prefix_search ~ end_brace }
+match_bool_prefix_search = { start_brace ~ fieldname ~ colon ~ match_bool_prefix_array ~ end_brace }
+match_bool_prefix_array  = { start_brace ~ query ~ (comma ~ match_bool_prefix)* ~ end_brace }
+match_bool_prefix        = { (analyzer | fuzziness | fuzzy_rewrite | fuzzy_transpositions | max_expansions | minimum_should_match | operator | prefix_length) }
 
-script                = { "\"script\"" ~ start_brace ~ (script_content ~ (comma ~ script_content)*)? ~ end_brace }
-script_field          = { fieldname ~ colon ~ script ~ ws }
-script_fields_section = { "\"script_fields\"" ~ colon ~ start_bracket ~ (script_field ~ (comma ~ script_field)*)? ~ end_brace }
-script_param          = { fieldname ~ colon ~ (quoted_string | number | boolean) }
-script_content        = { script_param | script_source | script_lang | script_params }
-script_source         = { "\"source\"" ~ colon ~ quoted_string ~ ws }
-script_lang           = { "\"lang\"" ~ colon ~ quoted_string ~ ws }
-script_params         = { "\"params\"" ~ start_brace ~ (pair ~ (comma ~ pair)*)? ~ end_brace }
+// Match Phrase Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
+match_phrase_query  = { start_brace ~ quote ~ "match_phrase" ~ quote ~ colon ~ match_phrase_search ~ end_brace }
+match_phrase_search = { start_brace ~ fieldname ~ colon ~ match_phrase_array ~ end_brace }
+match_phrase_array  = { start_brace ~ query ~ (comma ~ match_phrase)* ~ end_brace }
+match_phrase        = { (analyzer | slop | zero_terms_query) }
 
-scripted_metric_aggregation = { ws ~ "\"scripted_metric\"" ~ colon ~ start_bracket ~ (scripted_metric_params ~ (comma ~ scripted_metric_params)*)? ~ end_brace }
-scripted_metric_params      = { ws ~ "\"init_script\"" ~ colon ~ script | "\"map_script\"" ~ colon ~ script | "\"combine_script\"" ~ colon ~ script | "\"reduce_script\"" ~ colon ~ script }
+// Match Phrase Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
+match_phrase_prefix_query  = { start_brace ~ quote ~ "match_phrase_prefix" ~ quote ~ colon ~ match_phrase_prefix_search ~ end_brace }
+match_phrase_prefix_search = { start_brace ~ fieldname ~ colon ~ match_phrase_prefix_array ~ end_brace }
+match_phrase_prefix_array  = { start_brace ~ query ~ (comma ~ match_phrase_prefix)* ~ end_brace }
+match_phrase_prefix        = { (analyzer | slop | zero_terms_query) }
 
-// **** Aggregation Support ****
+// Multi Match Queries: https://opensearch.org/docs/latest/query-dsl/full-text/multi-match/
+multi_match_query  = { start_brace ~ quote ~ "multi_match" ~ quote ~ colon ~ multi_match_search ~ end_brace }
+multi_match_search = { start_brace ~ query ~ (comma ~ multi_match)* ~ end_brace }
+multi_match        = { (auto_generate_synonyms_phrase_query | analyzer | boost | fields | fuzziness | fuzzy_rewrite | fuzzy_transpositions | lenient | max_expansions | minimum_should_match | operator | prefix_length | slop | tie_breaker | multi_match_query_type | zero_terms_query) }
 
-aggregation_type = {
-    set_of_terms_aggregation
-  | avg_aggregation
-  | max_aggregation
-  | min_aggregation
-  | sum_aggregation
-  | histogram_aggregation
-  | date_histogram_aggregation
-  | filters_aggregation
-  | significant_set_of_terms_aggregation
-  | geo_distance_aggregation
-  | scripted_metric_aggregation
-}
+// Query String Queries: https://opensearch.org/docs/latest/query-dsl/full-text/query-string/
+query_string_query  = { start_brace ~ quote ~ "query_string_" ~ quote ~ colon ~ query_string_search ~ end_brace }
+query_string_search = { start_brace ~ lucene_query ~ (comma ~ query_string)* ~ end_brace }
+query_string        = { (allow_leading_wildcard | analyze_wildcard | analyzer | boost | default_field | default_operator | enable_position_increments | fields | fuzziness | fuzzy_rewrite | fuzzy_transpositions | lenient | max_determinized_states | minimum_should_match | phrase_slop | quote_analyzer | quote_field_suffix | rewrite | time_zone) }
 
-pipeline_aggregation_type = {
-    avg_bucket_aggregation
-  | sum_bucket_aggregation
-  | moving_avg_aggregation
-  | cumulative_sum_aggregation
-}
+// Simple Query String Queries: https://opensearch.org/docs/latest/query-dsl/full-text/simple-query-string/
+simple_query_string_query  = { start_brace ~ quote ~ "simple_query_string_" ~ quote ~ colon ~ simple_query_string_search ~ end_brace }
+simple_query_string_search = { start_brace ~ lucene_query ~ (comma ~ simple_query_string)* ~ end_brace }
+simple_query_string        = { (analyze_wildcard | analyzer | auto_generate_synonyms_phrase_query | default_operator | fields | flags | fuzzy_max_expansion | fuzzy_transpositions | fuzzy_prefix_length | lenient | minimum_should_match | quote_field_suffix) }
 
-aggregation                          = { fieldname ~ start_brace ~ (aggregation_type | pipeline_aggregation_type) ~ end_brace }
-histogram_aggregation                = { "\"histogram\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"interval\"" ~ colon ~ number ~ end_bracket }
-date_histogram_aggregation           = { "\"date_histogram\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"interval\"" ~ colon ~ quoted_string ~ end_bracket }
-filters_aggregation                  = { "\"filters\"" ~ colon ~ start_bracket ~ "\"filters\"" ~ colon ~ start_brace ~ (fieldname ~ colon ~ query ~ (comma ~ query)*)? ~ end_brace ~ end_bracket }
-significant_set_of_terms_aggregation = { "\"significant_set_of_terms\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
-geo_distance_aggregation             = { "\"geo_distance\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ comma ~ "\"ranges\"" ~ colon ~ start_brace ~ (range_expression ~ (comma ~ range_expression)*)? ~ end_brace ~ end_bracket }
-avg_aggregation                      = { "\"avg\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
-max_aggregation                      = { "\"max\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
-min_aggregation                      = { "\"min\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
-sum_aggregation                      = { "\"sum\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
-avg_bucket_aggregation               = { "\"avg_bucket\"" ~ colon ~ start_bracket ~ "\"buckets_path\"" ~ colon ~ quoted_string ~ end_bracket }
-sum_bucket_aggregation               = { "\"sum_bucket\"" ~ colon ~ start_bracket ~ "\"buckets_path\"" ~ colon ~ quoted_string ~ end_bracket }
-moving_avg_aggregation               = { "\"moving_avg\"" ~ colon ~ start_bracket ~ "\"buckets_path\"" ~ colon ~ quoted_string ~ end_bracket }
-cumulative_sum_aggregation           = { "\"cumulative_sum\"" ~ colon ~ start_bracket ~ "\"buckets_path\"" ~ colon ~ quoted_string ~ end_bracket }
-set_of_terms_aggregation             = { "\"set_of_terms\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ (comma ~ set_of_terms_aggregation_option)* ~ end_brace }
+// Interval Queries: https://opensearch.org/docs/latest/query-dsl/full-text/intervals/
+interval_query           = { start_brace ~ quote ~ "intervals" ~ quote ~ colon ~ interval_search ~ end_brace }
+interval_search          = { start_brace ~ (fieldname ~ colon ~ interval_array) ~ end_brace }
+interval_array           = { start_brace ~ (interval ~ (comma ~ interval)*)? ~ end_brace }
+interval                 = { (match_interval | wildcard_interval) }
+match_interval           = { start_brace ~ quote ~ "match" ~ quote ~ colon ~ match_interval_body ~ end_brace }
+match_interval_body      = { start_brace ~ (interval_clause ~ (comma ~ interval_clause)*)? ~ end_brace }
+wildcard_interval        = { start_brace ~ quote ~ "wildcard" ~ quote ~ colon ~ wildcard_interval_body ~ end_brace }
+wildcard_interval_body   = { start_brace ~ (wildcard_interval_clause ~ (comma ~ wildcard_interval_clause)*)? ~ end_brace }
+wildcard_interval_clause = { (wildcard_within | wildcard_before | wildcard_after | wildcard_not_within | wildcard_not_before | wildcard_not_after) }
+interval_clause          = { (within | before | after | not_within | not_before | not_after) }
 
-// **** Aggregation Options ****
+// *** Geographic and XY queries
 
-set_of_terms_aggregation_option = { (size_option | order_option | min_doc_count_option | shard_size_option | include_option | exclude_option | missing_option) }
+// Geographic Queries: https://opensearch.org/docs/latest/query-dsl/geo-and-xy/geographic/
+geo_distance_query     = { start_brace ~ quote ~ "geo_distance" ~ quote ~ colon ~ geo_distance_search ~ end_brace }
+geo_distance_search    = { start_brace ~ fieldname ~ colon ~ geo_distance_array ~ end_brace }
+geo_distance_array     = { start_brace ~ (geo_distance_parameter ~ (comma ~ geo_distance_parameter)*)? ~ end_brace }
+geo_distance_parameter = { (distance | distance_type | validation_method | ignore_unmapped | precision | coerce) }
 
-size_option          = { "\"size\"" ~ colon ~ number }
-order_option         = { "\"order\"" ~ colon ~ start_bracket ~ (order_key | order_subagg) ~ end_bracket }
-min_doc_count_option = { "\"min_doc_count\"" ~ colon ~ number }
-shard_size_option    = { "\"shard_size\"" ~ colon ~ number }
-include_option       = { "\"include\"" ~ colon ~ string }
-exclude_option       = { "\"exclude\"" ~ colon ~ string }
-missing_option       = { "\"missing\"" ~ colon ~ value }
+geo_bounding_box_query     = { start_brace ~ quote ~ "geo_bounding_box" ~ quote ~ colon ~ geo_bounding_box_search ~ end_brace }
+geo_bounding_box_search    = { start_brace ~ fieldname ~ colon ~ geo_bounding_box_array ~ end_brace }
+geo_bounding_box_array     = { start_brace ~ (geo_bounding_box_parameter ~ (comma ~ geo_bounding_box_parameter)*)? ~ end_brace }
+geo_bounding_box_parameter = { (top_left | bottom_right | wkt) }
 
-order_key       = { "\"_key\"" ~ colon ~ order_direction }
-order_subagg    = { fieldname ~ colon ~ order_direction }
-order_direction = { "\"asc\"" | "\"desc\"" }
+geo_shape_query     = { start_brace ~ quote ~ "geo_shape" ~ quote ~ colon ~ geo_shape_search ~ end_brace }
+geo_shape_search    = { start_brace ~ fieldname ~ colon ~ geo_shape_array ~ end_brace }
+geo_shape_array     = { start_brace ~ (geo_shape_parameter ~ (comma ~ geo_shape_parameter)*)? ~ end_brace }
+geo_shape_parameter = { (shape | indexed_shape | relation | strategy | precision | distance_error_pct) }
 
-// **** Suggestions support ****
+// XY Queries: https://opensearch.org/docs/latest/query-dsl/geo-and-xy/xy/
+xy_point_query     = { start_brace ~ quote ~ "xy_point" ~ quote ~ colon ~ xy_point_search ~ end_brace }
+xy_point_search    = { start_brace ~ fieldname ~ colon ~ xy_point_array ~ end_brace }
+xy_point_array     = { start_brace ~ (xy_point_parameter ~ (comma ~ xy_point_parameter)*)? ~ end_brace }
+xy_point_parameter = { (coordinate | validation_method | ignore_unmapped | precision) }
 
-suggesters           = { fieldname ~ colon ~ start_bracket ~ suggester_type ~ end_bracket }
-suggester_type       = { term_suggester | phrase_suggester | completion_suggester }
-term_suggester       = { "\"term\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
-phrase_suggester     = { "\"phrase\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
-completion_suggester = { "\"completion\"" ~ colon ~ start_bracket ~ "\"field\"" ~ colon ~ fieldname ~ end_bracket }
+// *** Specialized queries
 
-range_expression = { range_term ~ (comma ~ range_term)* }
-range_term       = { (gte | lte | gt | lt) ~ colon ~ term_value }
+// Distance Feature Queries: https://opensearch.org/docs/latest/query-dsl/specialized/distance-feature/
+distance_feature_query  = { start_brace ~ quote ~ "distance_feature" ~ quote ~ colon ~ distance_feature_search ~ end_brace }
+distance_feature_search = { start_brace ~ field ~ comma ~ origin ~ comma ~ pivot ~ end_brace }
+
+// More Like This Queries: https://opensearch.org/docs/latest/query-dsl/specialized/more-like-this/
+more_like_this_query  = { start_brace ~ quote ~ "more_like_this" ~ quote ~ colon ~ more_like_this_search ~ end_brace }
+more_like_this_search = { start_brace ~ more_like_this_fields ~ colon ~ like ~ (comma ~ unlike)? ~ (comma ~ min_term_freq)? ~ end_brace }
+more_like_this_fields = { start_bracket ~ (fieldname ~ (comma ~ fieldname)*)? ~ end_bracket }
+like                  = { start_bracket ~ (string ~ (comma ~ string)*)? ~ end_bracket }
+unlike                = { start_bracket ~ (string ~ (comma ~ string)*)? ~ end_bracket }
+min_term_freq         = { integer }
+
+// Script Queries: https://opensearch.org/docs/latest/query-dsl/specialized/script/
+script_query  = { start_brace ~ quote ~ "script" ~ quote ~ colon ~ script_search ~ end_brace }
+script_search = { start_brace ~ script_source ~ (comma ~ script_lang)? ~ (comma ~ script_params)? ~ end_brace }
+script_source = { quote ~ "source" ~ quote ~ colon ~ string }
+script_lang   = { quote ~ "lang" ~ quote ~ colon ~ string }
+script_params = { start_brace ~ (param ~ (comma ~ param)*)? ~ end_brace }
+param         = { string ~ colon ~ value }
+
+// Percolate Queries: https://opensearch.org/docs/latest/query-dsl/specialized/percolate/
+percolate_query  = { start_brace ~ quote ~ "percolate" ~ quote ~ colon ~ percolate_search ~ end_brace }
+percolate_search = { start_brace ~ field ~ colon ~ document ~ (comma ~ documents)? ~ end_brace }
+field            = { fieldname }
+document         = { json_object }
+documents        = { start_bracket ~ json_object ~ (comma ~ json_object)* ~ end_bracket }
+
+// Rank Feature Queries: https://opensearch.org/docs/latest/query-dsl/specialized/rank-feature/
+rank_feature_query  = { start_brace ~ quote ~ "rank_feature" ~ quote ~ colon ~ rank_feature_search ~ end_brace }
+rank_feature_search = { start_brace ~ field ~ (comma ~ boost)? ~ end_brace }
+
+// Script Score Queries: https://opensearch.org/docs/latest/query-dsl/specialized/script-score/
+script_score_query  = { start_brace ~ quote ~ "script_score" ~ quote ~ colon ~ script_score_search ~ end_brace }
+script_score_search = { start_brace ~ query_root ~ comma ~ script ~ end_brace }
+script              = { start_brace ~ script_source ~ (comma ~ script_params)? ~ end_brace }
+
+// Neural Queries: https://opensearch.org/docs/latest/query-dsl/specialized/neural/
+neural_query  = { start_brace ~ quote ~ "neural" ~ quote ~ colon ~ neural_search ~ end_brace }
+neural_search = { start_brace ~ model_id ~ comma ~ field ~ (comma ~ model_params)? ~ end_brace }
+model_id      = { quote ~ "model_id" ~ quote ~ colon ~ string }
+model_params  = { quote ~ "params" ~ quote ~ colon ~ start_brace ~ (param ~ (comma ~ param)*)? ~ end_brace }
+
+// Neural Sparse Queries: https://opensearch.org/docs/latest/query-dsl/specialized/neural-sparse/
+neural_sparse_query  = { start_brace ~ quote ~ "neural_sparse" ~ quote ~ colon ~ neural_sparse_search ~ end_brace }
+neural_sparse_search = { start_brace ~ sparse_model_id ~ comma ~ sparse_field ~ (comma ~ sparse_model_params)? ~ end_brace }
+sparse_model_id      = { quote ~ "model_id" ~ quote ~ colon ~ string }
+sparse_field         = { quote ~ "field" ~ quote ~ colon ~ fieldname }
+sparse_model_params  = { quote ~ "params" ~ quote ~ colon ~ start_brace ~ (sparse_param ~ (comma ~ sparse_param)*)? ~ end_brace }
+sparse_param         = { string ~ colon ~ value }
+
+// Wrapper Queries: https://opensearch.org/docs/latest/query-dsl/specialized/wrapper/
+wrapper_query  = { start_brace ~ quote ~ "wrapper" ~ quote ~ colon ~ wrapper_search ~ end_brace }
+wrapper_search = { start_brace ~ quote ~ "query" ~ quote ~ colon ~ json_or_yaml_query ~ end_brace }
+
+// JSON or YAML formatted string
+json_or_yaml_query = { string }
+
+// *** Span Queries: https://opensearch.org/docs/latest/query-dsl/span-query/
+
+span_query = { span_term_query | span_near_query | span_or_query | span_not_query | span_first_query | span_containing_query | span_field_masking_query | span_multi_term_query | span_within_query }
+
+span_term_query            = { start_brace ~ quote ~ "span_term" ~ quote ~ colon ~ span_term_details ~ end_brace }
+span_term_details          = { start_brace ~ fieldname ~ colon ~ value ~ end_brace }
+span_near_query            = { start_brace ~ quote ~ "span_near" ~ quote ~ colon ~ span_near_details ~ end_brace }
+span_near_details          = { start_brace ~ quote ~ "clauses" ~ quote ~ colon ~ span_clauses ~ comma ~ quote ~ "slop" ~ quote ~ colon ~ integer ~ comma ~ quote ~ "in_order" ~ quote ~ colon ~ boolean ~ end_brace }
+span_or_query              = { start_brace ~ quote ~ "span_or" ~ quote ~ colon ~ span_or_details ~ end_brace }
+span_or_details            = { start_brace ~ quote ~ "clauses" ~ quote ~ colon ~ span_clauses ~ end_brace }
+span_not_query             = { start_brace ~ quote ~ "span_not" ~ quote ~ colon ~ span_not_details ~ end_brace }
+span_not_details           = { start_brace ~ quote ~ "include" ~ quote ~ colon ~ span_query ~ comma ~ quote ~ "exclude" ~ quote ~ colon ~ span_query ~ end_brace }
+span_first_query           = { start_brace ~ quote ~ "span_first" ~ quote ~ colon ~ span_first_details ~ end_brace }
+span_first_details         = { start_brace ~ quote ~ "match" ~ quote ~ colon ~ span_query ~ comma ~ quote ~ "end" ~ quote ~ colon ~ integer ~ end_brace }
+span_containing_query      = { start_brace ~ quote ~ "span_containing" ~ quote ~ colon ~ span_containing_details ~ end_brace }
+span_containing_details    = { start_brace ~ quote ~ "little" ~ quote ~ colon ~ span_query ~ comma ~ quote ~ "big" ~ quote ~ colon ~ span_query ~ end_brace }
+span_field_masking_query   = { start_brace ~ quote ~ "field_masking_span" ~ quote ~ colon ~ span_field_masking_details ~ end_brace }
+span_field_masking_details = { start_brace ~ quote ~ "query" ~ quote ~ colon ~ span_query ~ comma ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_brace }
+span_multi_term_query      = { start_brace ~ quote ~ "span_multi" ~ quote ~ colon ~ span_multi_term_details ~ end_brace }
+span_multi_term_details    = { start_brace ~ quote ~ "match" ~ quote ~ colon ~ multi_term_query ~ end_brace }
+multi_term_query           = { term_query | range_query | prefix_query | wildcard_query | regexp_query | fuzzy_query }
+span_within_query          = { start_brace ~ quote ~ "span_within" ~ quote ~ colon ~ span_within_details ~ end_brace }
+span_within_details        = { start_brace ~ quote ~ "little" ~ quote ~ colon ~ span_query ~ comma ~ quote ~ "big" ~ quote ~ colon ~ span_query ~ end_brace }
+span_clauses               = { start_bracket ~ (span_query ~ (comma ~ span_query)*)? ~ end_bracket }
+
+// *** COMPOUND queries ****
+
+// Boolean Queries: https://opensearch.org/docs/latest/query-dsl/compound/bool/
+bool_query  = { start_brace ~ quote ~ "bool" ~ quote ~ colon ~ bool_search ~ end_brace }
+bool_search = { start_brace ~ (must_clauses? ~ must_not_clauses? ~ should_clauses? ~ filter_clauses? ~ minimum_should_match? ~ boost?) ~ end_brace }
+
+// Boosting Queries: https://opensearch.org/docs/latest/query-dsl/compound/boosting/
+boosting_query  = { start_brace ~ quote ~ "boosting" ~ quote ~ colon ~ boosting_search ~ end_brace }
+boosting_search = { start_brace ~ quote ~ "positive" ~ quote ~ colon ~ query ~ comma ~ quote ~ "negative" ~ quote ~ colon ~ query ~ comma ~ quote ~ "negative_boost" ~ quote ~ colon ~ float ~ end_brace }
+
+// Constant Score Queries: https://opensearch.org/docs/latest/query-dsl/compound/constant-score/
+constant_score_query  = { start_brace ~ quote ~ "constant_score" ~ quote ~ colon ~ constant_score_search ~ end_brace }
+constant_score_search = { start_brace ~ quote ~ "filter" ~ quote ~ colon ~ query ~ comma ~ quote ~ "boost" ~ quote ~ colon ~ float ~ end_brace }
+
+// Disjunction Max Queries: https://opensearch.org/docs/latest/query-dsl/compound/disjunction-max/
+dis_max_query  = { start_brace ~ quote ~ "dis_max" ~ quote ~ colon ~ dis_max_search ~ end_brace }
+dis_max_search = { start_brace ~ quote ~ "queries" ~ quote ~ colon ~ start_bracket ~ query ~ (comma ~ query)* ~ end_bracket ~ comma ~ quote ~ "tie_breaker" ~ quote ~ colon ~ float ~ comma ~ quote ~ "boost" ~ quote ~ colon ~ float ~ end_brace }
+
+// Function Score Queries: https://opensearch.org/docs/latest/query-dsl/compound/function-score/
+function_score_query        = { start_brace ~ quote ~ "function_score" ~ quote ~ colon ~ function_score_search ~ end_brace }
+function_score_search       = { start_brace ~ (query? ~ functions? ~ score_mode? ~ boost_mode? ~ max_boost? ~ min_score? ~ boost?) ~ end_brace }
+functions                   = { linear_decay_function | exp_decay_function | gauss_decay_function | field_value_factor_function }
+linear_decay_function       = { quote ~ "linear" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "origin" ~ quote ~ colon ~ number ~ comma ~ quote ~ "scale" ~ quote ~ colon ~ number ~ end_brace }
+exp_decay_function          = { quote ~ "exp" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "origin" ~ quote ~ colon ~ number ~ comma ~ quote ~ "scale" ~ quote ~ colon ~ number ~ end_brace }
+gauss_decay_function        = { quote ~ "gauss" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "origin" ~ quote ~ colon ~ number ~ comma ~ quote ~ "scale" ~ quote ~ colon ~ number ~ end_brace }
+field_value_factor_function = { quote ~ "field_value_factor" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "factor" ~ quote ~ colon ~ number ~ comma ~ quote ~ "modifier" ~ quote ~ colon ~ ("none" | "log" | "log1p" | "log2p" | "ln" | "ln1p" | "ln2p" | "square" | "sqrt" | "reciprocal") ~ end_brace }
+
+// Hybrid Queries: https://opensearch.org/docs/latest/query-dsl/compound/hybrid/
+hybrid_query     = { start_brace ~ quote ~ "hybrid" ~ quote ~ colon ~ hybrid_search ~ end_brace }
+hybrid_search    = { start_brace ~ text_query ~ comma ~ structured_query ~ end_brace }
+text_query       = { quote ~ "text" ~ quote ~ colon ~ (match_query | multi_match_query | query_string_query | simple_query_string_query) }
+structured_query = { quote ~ "structured" ~ quote ~ colon ~ (term_query | range_query | bool_query) }
+
+// **** Scripting
+
+script_field                = { fieldname ~ colon ~ script_clause }
+script_fields_section       = { quote ~ "script_fields" ~ quote ~ colon ~ start_bracket ~ (script_field ~ (comma ~ script_field)*)? ~ end_bracket }
+scripted_metric_aggregation = { quote ~ "scripted_metric" ~ quote ~ colon ~ start_brace ~ (scripted_metric_params ~ (comma ~ scripted_metric_params)*)? ~ end_brace }
+scripted_metric_params      = { init_script | map_script | combine_script | reduce_script }
+
+// **** Highlights
+
+highlight_fields        = { quote ~ "fields" ~ quote ~ colon ~ start_bracket ~ (highlight_field ~ (comma ~ highlight_field)*)? ~ end_bracket }
+highlight_field         = { fieldname ~ colon ~ start_brace ~ highlight_field_element? ~ end_brace }
+highlight_field_element = { fragment_size? ~ number_of_fragments? ~ pre_tags? ~ post_tags? }
+
+// *** Aggregations : https://opensearch.org/docs/latest/aggregations/
+aggregation                          = { start_brace ~ fieldname ~ colon ~ aggregation_body ~ end_brace }
+aggregation_body                     = { start_brace ~ (aggregation_type ~ (comma ~ aggregation_element)*)? ~ end_brace }
+aggregation_type                     = { terms_aggregation | avg_aggregation | max_aggregation | min_aggregation | sum_aggregation | histogram_aggregation | date_histogram_aggregation | filters_aggregation | significant_set_of_terms_aggregation | geo_distance_aggregation | scripted_metric_aggregation | avg_bucket_aggregation | sum_bucket_aggregation | moving_avg_aggregation | cumulative_sum_aggregation | set_of_terms_aggregation }
+aggregation_element                  = { size | order | min_doc_count | shard_size | include | exclude | missing | script | field }
+avg_aggregation                      = { quote ~ "avg" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_bracket }
+avg_bucket_aggregation               = { quote ~ "avg_bucket" ~ quote ~ colon ~ start_bracket ~ quote ~ "buckets_path" ~ quote ~ colon ~ string ~ end_bracket }
+cumulative_sum_aggregation           = { quote ~ "cumulative_sum" ~ quote ~ colon ~ start_bracket ~ quote ~ "buckets_path" ~ quote ~ colon ~ string ~ end_bracket }
+date_histogram_aggregation           = { quote ~ "date_histogram" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "interval" ~ quote ~ colon ~ string ~ end_bracket }
+filters_aggregation                  = { quote ~ "filters" ~ quote ~ colon ~ start_bracket ~ quote ~ "filters" ~ quote ~ colon ~ start_brace ~ (fieldname ~ colon ~ query ~ (comma ~ query)*)? ~ end_brace ~ end_bracket }
+geo_distance_aggregation             = { quote ~ "geo_distance" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "ranges" ~ quote ~ colon ~ start_brace ~ (range_expression ~ (comma ~ range_expression)*)? ~ end_brace ~ end_bracket }
+histogram_aggregation                = { quote ~ "histogram" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "interval" ~ quote ~ colon ~ number ~ end_bracket }
+max_aggregation                      = { quote ~ "max" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_bracket }
+min_aggregation                      = { quote ~ "min" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_bracket }
+moving_avg_aggregation               = { quote ~ "moving_avg" ~ quote ~ colon ~ start_bracket ~ quote ~ "buckets_path" ~ quote ~ colon ~ string ~ end_bracket }
+set_of_terms_aggregation             = { quote ~ "set_of_terms" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ (comma ~ set_of_terms_aggregation_type)* ~ end_bracket }
+set_of_terms_aggregation_type        = { size | order | min_doc_count | shard_size | include | exclude | missing }
+significant_set_of_terms_aggregation = { quote ~ "significant_set_of_terms" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_bracket }
+sum_aggregation                      = { quote ~ "sum" ~ quote ~ colon ~ start_bracket ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_bracket }
+sum_bucket_aggregation               = { quote ~ "sum_bucket" ~ quote ~ colon ~ start_bracket ~ quote ~ "buckets_path" ~ quote ~ colon ~ string ~ end_bracket }
+terms_aggregation                    = { quote ~ "terms" ~ quote ~ colon ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ (comma ~ terms_aggregations)* ~ end_brace }
+terms_aggregations                   = { (size | order | min_doc_count | shard_size | include | exclude | missing)* }
+
+// **** Elements ****
+// _ means we ignore the rule as it is not supported in Infino
+// 
+// In general, scoring-related operations are ignored as Infino results
+// are ranked chronologically
+after                               = { quote ~ "after" ~ quote ~ colon ~ integer }
+allow_leading_wildcard              = { quote ~ "allow_leading_wildcard" ~ quote ~ colon ~ boolean }
+analyze_wildcard                    = { quote ~ "analyze_wildcard" ~ quote ~ colon ~ boolean }
+analyzer                            = { quote ~ "analyzer" ~ quote ~ colon ~ string }
+auto_generate_synonyms_phrase_query = { quote ~ "auto_generate_synonyms_phrase_query" ~ quote ~ colon ~ boolean }
+array_of_strings                    = { start_bracket ~ (string ~ (comma ~ string)*)? ~ end_bracket }
+before                              = { quote ~ "before" ~ quote ~ colon ~ integer }
+bool_filter                         = { quote ~ "bool" ~ quote ~ start_brace ~ (filter_must_clauses ~ filter_should_clauses? ~ filter_must_not_clauses?)? ~ end_brace }
+boost                               = { quote ~ "boost" ~ quote ~ colon ~ float }
+boost_mode                          = { quote ~ "boost_mode" ~ quote ~ colon ~ ("replace" | mode) }
+bottom_right                        = { quote ~ "bottom_right" ~ quote ~ colon ~ geo_point }
+case_insensitive                    = { quote ~ "case_insensitive" ~ quote ~ colon ~ boolean }
+coerce                              = { quote ~ "coerce" ~ quote ~ colon ~ boolean }
+combine_script                      = { quote ~ "combine_script" ~ quote ~ colon ~ script_clause }
+completion_suggester                = { quote ~ "completion" ~ quote ~ colon ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_brace }
+coordinate                          = { quote ~ "coordinate" ~ quote ~ colon ~ (float | integer) }
+date                                = { quote ~ "yyyy-MM-dd'T'HH:mm:ss.SSSZ" ~ quote | quote ~ "yyyy-MM-dd'T'HH:mm:ss.SSS" ~ quote | quote ~ "yyyy-MM-dd'T'HH:mm:ss" ~ quote }
+default_field                       = { quote ~ "default_field" ~ quote ~ colon ~ string }
+default_operator                    = { quote ~ "default_operator" ~ quote ~ colon ~ string }
+distance                            = { quote ~ "distance" ~ quote ~ colon ~ float }
+distance_error_pct                  = { quote ~ "distance_error_pct" ~ quote ~ colon ~ float }
+distance_type                       = { quote ~ "distance_type" ~ quote ~ colon ~ (quote ~ "arc" ~ quote | quote ~ "plane" ~ quote) }
+enable_position_increments          = { quote ~ "enable_position_increments" ~ quote ~ colon ~ boolean }
+envelope                            = { geo_type ~ "envelope" ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ start_bracket ~ envelope_coordinates ~ end_bracket }
+envelope_coordinates                = { start_brace ~ top_left ~ comma ~ bottom_right ~ end_brace }
+exclude                             = { quote ~ "exclude" ~ quote ~ colon ~ string }
+field_element                       = { string }
+fieldname                           = { quote ~ word ~ quote }
+fields                              = { start_bracket ~ quote ~ "fields" ~ quote ~ colon ~ field_element ~ (comma ~ field_element)* ~ end_bracket }
+filter                              = { bool_filter | term_filter | range_filter }
+filter_clauses                      = { quote ~ "filter" ~ quote ~ query_array }
+filter_must_clauses                 = { quote ~ "must" ~ quote ~ query_array }
+filter_must_not_clauses             = { quote ~ "must_not" ~ quote ~ query_array }
+filter_should_clauses               = { quote ~ "should" ~ quote ~ query_array }
+flags                               = { quote ~ "flags" ~ quote ~ colon ~ quote ~ "" ~ ("ALL" | "AND" | "ESCAPE" | "FUZZY" | "NEAR" | "NONE" | "NOT" | "OR" | "PHRASE" | "PRECEDENCE" | "PREFIX" | "SLOP" | "WHITESPACE") ~ quote ~ "" }
+format                              = { quote ~ "format" ~ quote ~ colon ~ string }
+fragment_size                       = { quote ~ "fragment_size" ~ quote ~ colon ~ number }
+from_param                          = { quote ~ "from" ~ quote ~ colon ~ number }
+fuzziness                           = { quote ~ "fuzziness" ~ quote ~ colon ~ quote ~ "" ~ ("AUTO" | "0" | positive_integer) ~ quote ~ "" }
+fuzzy_max_expansion                 = { quote ~ "fuzzy_max_expansion" ~ quote ~ colon ~ integer }
+fuzzy_prefix_length                 = { quote ~ "fuzzy_prefix_length" ~ quote ~ colon ~ integer }
+fuzzy_rewrite                       = { quote ~ "fuzzy_transpositions" ~ quote ~ colon ~ quote ~ "" ~ ("constant_score" | "scoring_boolean" | "constant_score_boolean" | "top_terms_N" | "top_terms_boost_N" | "top_terms_blended_freqs_N") ~ quote ~ "" }
+fuzzy_transpositions                = { quote ~ "fuzzy_transpositions" ~ quote ~ colon ~ boolean }
+geo_coordinate                      = { start_bracket ~ (float ~ comma ~ float) ~ end_bracket }
+geo_point                           = { start_brace ~ quote ~ "lat" ~ quote ~ colon ~ number ~ comma ~ quote ~ "lon" ~ quote ~ colon ~ number ~ end_brace }
+geo_shape                           = { geo_type ~ geo_shape_type ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ geo_shape_element }
+geo_shape_element                   = { (geometry_collection | line_string | multi_line_string | multi_point | multi_polygon | point | polygon | envelope) }
+geo_shape_type                      = { ("geometryCollection" | "lineString" | "multiLineString" | "multiPoint" | "multiPolygon" | "point" | "polygon" | "envelope") }
+geo_type                            = { quote ~ "" ~ "type" ~ quote ~ "" ~ colon ~ quote ~ "" }
+geometry_collection                 = { geo_type ~ "geometryCollection" ~ quote ~ "" ~ comma ~ quote ~ "geometries" ~ quote ~ colon ~ start_bracket ~ (geo_shape ~ (comma ~ geo_shape)*)? ~ end_bracket }
+gt                                  = { quote ~ "gt" ~ quote ~ colon ~ (number | date) }
+gte                                 = { quote ~ "gte" ~ quote ~ colon ~ (number | date) }
+id                                  = { quote ~ "id" ~ quote ~ colon ~ positive_integer }
+ignore_unmapped                     = { quote ~ "ignore_unmapped" ~ quote ~ colon ~ boolean }
+include                             = { quote ~ "include" ~ quote ~ colon ~ string }
+index                               = { quote ~ "index" ~ quote ~ colon ~ string }
+indexed_shape                       = { quote ~ "indexed_shape" ~ quote ~ colon ~ indexed_shape_value }
+indexed_shape_value                 = { start_brace ~ quote ~ "id" ~ quote ~ colon ~ integer ~ comma ~ quote ~ "type" ~ quote ~ colon ~ string ~ comma ~ quote ~ "index" ~ quote ~ colon ~ string ~ end_brace }
+init_script                         = { quote ~ "init_script" ~ quote ~ colon ~ script_clause }
+ISO_8601_UTC_offset                 = { quote ~ "Z" ~ quote | quote ~ "+HH:mm" ~ quote | quote ~ "-HH:mm" ~ quote }
+lenient                             = { quote ~ "lenient" ~ quote ~ colon ~ boolean }
+line_string                         = { geo_type ~ "lineString" ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ start_bracket ~ (geo_coordinate ~ (comma ~ geo_coordinate)*)? ~ end_bracket }
+linear_ring                         = { start_bracket ~ (geo_coordinate ~ (comma ~ geo_coordinate)*)? ~ end_bracket }
+lt                                  = { quote ~ "lt" ~ quote ~ colon ~ (number | date) }
+lte                                 = { quote ~ "lte" ~ quote ~ colon ~ (number | date) }
+map_script                          = { quote ~ "map_script" ~ quote ~ colon ~ script_clause }
+match_string                        = { string }
+max_boost                           = { quote ~ "max_boost" ~ quote ~ colon ~ float }
+max_determinized_states             = { quote ~ "max_determinized_states" ~ quote ~ colon ~ integer }
+max_expansions                      = { quote ~ "max_expansions" ~ quote ~ colon ~ positive_integer }
+min_doc_count                       = { quote ~ "min_doc_count" ~ quote ~ colon ~ number }
+min_score                           = { quote ~ "min_score" ~ quote ~ colon ~ float }
+minimum_should_match                = { quote ~ "minimum_should_match" ~ quote ~ colon ~ quote ~ "" ~ minimum_should_match_element+ ~ quote ~ "" }
+minimum_should_match_element        = { (number | "<" | percentage) }
+minimum_should_match_field          = { quote ~ "minimum_should_match_field" ~ quote ~ colon ~ string }
+minimum_should_match_script         = { quote ~ "minimum_should_match_script" ~ quote ~ colon ~ string }
+missing                             = { quote ~ "missing" ~ quote ~ colon ~ value }
+mode                                = { ("sum" | "avg" | "max" | "min" | "multiply") }
+multi_line_string                   = { geo_type ~ "multiLineString" ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ start_bracket ~ (line_string ~ (comma ~ line_string)*)? ~ end_bracket }
+multi_match_query_type              = { quote ~ "type" ~ quote ~ colon ~ quote ~ "" ~ ("best_fields" | "most_fields" | "cross_fields" | "phrase" | "phrase_prefix" | "bool_prefix") ~ quote ~ "" }
+multi_point                         = { geo_type ~ "multiPoint" ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ start_bracket ~ (geo_coordinate ~ (comma ~ geo_coordinate)*)? ~ end_bracket }
+multi_polygon                       = { geo_type ~ "multiPolygon" ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ start_bracket ~ (polygon ~ (comma ~ polygon)*)? ~ end_bracket }
+must_clauses                        = { quote ~ "must" ~ quote ~ colon ~ query_array }
+must_not_clauses                    = { quote ~ "must_not" ~ quote ~ colon ~ query_array }
+non_negative_integer                = { "0" | positive_integer }
+not_after                           = { quote ~ "not_after" ~ quote ~ colon ~ integer }
+not_before                          = { quote ~ "not_before" ~ quote ~ colon ~ integer }
+not_within                          = { quote ~ "not_within" ~ quote ~ colon ~ integer }
+number_of_fragments                 = { quote ~ "number_of_fragments" ~ quote ~ colon ~ number }
+operator                            = { quote ~ "operator" ~ quote ~ colon ~ (quote ~ "OR" ~ quote | quote ~ "AND" ~ quote) }
+order                               = { quote ~ "order" ~ quote ~ colon ~ start_brace ~ (order_key | order_subagg) ~ end_brace }
+order_direction                     = { quote ~ "asc" ~ quote | quote ~ "desc" ~ quote }
+order_key                           = { quote ~ "_key" ~ quote ~ colon ~ order_direction }
+order_subagg                        = { fieldname ~ colon ~ order_direction }
+origin                              = { quote ~ "origin" ~ quote ~ colon ~ (string | number) }
+pagination_section                  = { size_param ~ comma ~ from_param }
+path                                = { quote ~ "path" ~ quote ~ colon ~ string }
+percentage                          = { number ~ "%" }
+phrase_slop                         = { quote ~ "phrase_slop" ~ quote ~ colon ~ positive_integer }
+phrase_suggester                    = { quote ~ "phrase" ~ quote ~ colon ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_brace }
+pivot                               = { quote ~ "pivot" ~ quote ~ colon ~ string }
+point                               = { geo_type ~ "point" ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ geo_coordinate }
+polygon                             = { geo_type ~ "polygon" ~ quote ~ "" ~ comma ~ quote ~ "coordinates" ~ quote ~ colon ~ start_bracket ~ (linear_ring ~ (comma ~ linear_ring)*)? ~ end_bracket }
+post_tags                           = { quote ~ "post_tags" ~ quote ~ colon ~ array_of_strings }
+pre_tags                            = { quote ~ "pre_tags" ~ quote ~ colon ~ array_of_strings }
+precision                           = { quote ~ "precision" ~ quote ~ colon ~ integer }
+prefix_length                       = { quote ~ "prefix_length" ~ quote ~ colon ~ non_negative_integer }
+query                               = { quote ~ "query" ~ quote ~ colon ~ string }
+query_array                         = { start_bracket ~ (query_root ~ (comma ~ query_root)*)? ~ end_bracket }
+quote_analyzer                      = { quote ~ "quote_analyzer" ~ quote ~ colon ~ string }
+quote_field_suffix                  = { quote ~ "quote_field_suffix" ~ quote ~ colon ~ string }
+range_expression                    = { start_brace ~ quote ~ "to" ~ quote ~ colon ~ number ~ comma ~ quote ~ "from" ~ quote ~ colon ~ number ~ end_brace }
+range_filter                        = { quote ~ "range" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ range_search ~ end_brace }
+reduce_script                       = { quote ~ "reduce_script" ~ quote ~ colon ~ script_clause }
+regexp_field                        = { fieldname ~ colon ~ string }
+relation                            = { quote ~ "relation" ~ quote ~ colon ~ (quote ~ "INTERSECTS" ~ quote | quote ~ "DISJOINT" ~ quote | quote ~ "WITHIN" ~ quote | quote ~ "CONTAINS" ~ quote) }
+rewrite                             = { quote ~ "rewrite" ~ quote ~ colon ~ quote ~ "" ~ ("constant_score" | "scoring_boolean" | "constant_score_boolean" | "top_terms_N" | "top_terms_boost_N" | "top_terms_blended_freqs_N") ~ quote ~ "" }
+routing                             = { quote ~ "routing" ~ quote ~ colon ~ string }
+score_mode                          = { quote ~ "score_mode" ~ quote ~ colon ~ mode }
+script_clause                       = { quote ~ "script" ~ quote ~ colon ~ script }
+shape                               = { quote ~ "shape" ~ quote ~ colon ~ (geometry_collection | line_string | multi_line_string | multi_point | multi_polygon | point | polygon | envelope) }
+shard_size                          = { quote ~ "shard_size" ~ quote ~ colon ~ number }
+should_clauses                      = { quote ~ "should" ~ quote ~ colon ~ query_array }
+size                                = { quote ~ "size" ~ quote ~ colon ~ number }
+size_param                          = { quote ~ "size" ~ quote ~ colon ~ number }
+slop                                = { quote ~ "slop" ~ quote ~ colon ~ non_negative_integer }
+sort_expression                     = { fieldname ~ colon ~ start_brace ~ quote ~ "order" ~ quote ~ colon ~ ("asc" | "desc") ~ end_brace }
+sort_section                        = { quote ~ "sort" ~ quote ~ colon ~ start_bracket ~ (sort_expression ~ (comma ~ sort_expression)*)? ~ end_bracket }
+strategy                            = { quote ~ "strategy" ~ quote ~ colon ~ (quote ~ "recursive" ~ quote | quote ~ "term" ~ quote) }
+suggester_type                      = { term_suggester | phrase_suggester | completion_suggester }
+suggesters                          = { fieldname ~ colon ~ start_brace ~ suggester_type ~ end_brace }
+term_filter                         = { quote ~ "term" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ quote ~ "value" ~ quote ~ colon ~ string ~ end_brace }
+term_suggester                      = { quote ~ "term" ~ quote ~ colon ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ end_brace }
+tie_breaker                         = { quote ~ "tie_breaker" ~ quote ~ colon ~ float }
+time_zone                           = { quote ~ "time_zone" ~ quote ~ colon ~ (time_zone_ID | ISO_8601_UTC_offset) }
+time_zone_ID                        = { string }
+top_left                            = { quote ~ "top_left" ~ quote ~ colon ~ geo_point }
+transpositions                      = { quote ~ "transpositions" ~ quote ~ colon ~ boolean }
+validation_method                   = { quote ~ "validation_method" ~ quote ~ colon ~ (quote ~ "STRICT" ~ quote | quote ~ "IGNORE_MALFORMED" ~ quote | quote ~ "COERCE" ~ quote) }
+value                               = { quote ~ "value" ~ quote ~ colon ~ string }
+wildcard_after                      = { quote ~ "after" ~ quote ~ colon ~ string }
+wildcard_before                     = { quote ~ "before" ~ quote ~ colon ~ string }
+wildcard_not_after                  = { quote ~ "not_after" ~ quote ~ colon ~ string }
+wildcard_not_before                 = { quote ~ "not_before" ~ quote ~ colon ~ string }
+wildcard_not_within                 = { quote ~ "not_within" ~ quote ~ colon ~ string }
+wildcard_value                      = { quote ~ "value" ~ quote ~ colon ~ string }
+wildcard_within                     = { quote ~ "within" ~ quote ~ colon ~ string }
+within                              = { quote ~ "within" ~ quote ~ colon ~ integer }
+wkt                                 = { quote ~ "wkt" ~ quote ~ colon ~ string }
+zero_terms_query                    = { quote ~ "lt" ~ quote ~ colon ~ (quote ~ "all" ~ quote | quote ~ "none" ~ quote) }
 
 // **** Low-level semantic definitions ****
+// _ prefix means silent; lets Pest know that these rules shouldn't create an AST node
+// @ prefix means atomix; lets Pest know to create a single token (i.e. a string or a number) instead
+// of multiple characters in the AST
+alpha_num_char   = _{ ASCII_ALPHANUMERIC | "_" }
+boolean          =  { ("true" | "false") }
+colon            = _{ ws ~ ":" ~ ws }
+comma            = _{ ws ~ "," ~ ws }
+digits           = @{ ASCII_DIGIT+ }
+end_brace        = _{ ws ~ "}" ~ ws }
+end_bracket      = _{ ws ~ "]" ~ ws }
+string           = @{ quote ~ (escaped_char | normal_char)+ ~ quote }
+escaped_char     = _{ "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
+float            = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
+hex_digit        = @{ ASCII_HEX_DIGIT }
+integer          = @{ ASCII_DIGIT+ }
+normal_char      = _{ !("\"" | "\\") ~ ANY }
+number           =  { (integer | float) }
+positive_integer = @{ ASCII_DIGIT+ }
+quote            = _{ "\"" }
+start_brace      = _{ ws ~ "{" ~ ws }
+start_bracket    = _{ ws ~ "[" ~ ws }
+unicode_escape   = @{ "\"u\"" ~ hex_digit ~ hex_digit ~ hex_digit ~ hex_digit }
+word             = @{ alpha_num_char+ }
+ws               = _{ (" " | "\t" | NEWLINE)* }
 
-value            = { string | number | object | array | boolean | "null" }
-array            = { start_bracket ~ (value ~ (comma ~ value)*)? ~ end_bracket }
-geo_point        = { start_brace ~ "\"lat\"" ~ colon ~ number ~ comma ~ "\"lon\"" ~ colon ~ number ~ end_brace }
-object           = { start_brace ~ (pair ~ (comma ~ pair)*)? ~ end_brace }
-pair             = { string ~ colon ~ value }
-array_of_strings = { start_bracket ~ (quoted_string ~ (comma ~ quoted_string)*)? ~ end_bracket }
-fieldname        = { word }
+// simple_boolean = @{ colon ~ ws ~ ("and" | "or") ~ ws } - this is needed somewhere but I can't remember
 
-// **** Supported string blocks ****
+// **** JSON Syntax ****
 
-boolean       = @{ "true" | "false" }
-string        = @{ (escaped_char | normal_char)+ }
-set_of_terms  = @{ "\"" ~ term_value+ ~ "\"" }
-term_value    = @{ ws ~ (word | digits | quoted_string) ~ ws }
-quoted_string = @{ "\"" ~ string+ ~ "\"" }
-word          = @{ alpha_num_char+ }
-digits        = @{ ASCII_DIGIT+ }
-number        = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
-gte           = @{ "\"gte\"" }
-lte           = @{ "\"lte\"" }
-gt            = @{ "\"gt\"" }
-lt            = @{ "\"lt\"" }
+json_object = { start_brace ~ json_pair ~ (comma ~ json_pair)* ~ end_brace }
+json_pair   = { string ~ colon ~ json_value }
+json_value  = { string | number | object | json_array | boolean | null }
+object      = { json_object }
+json_array  = { start_bracket ~ json_value ~ (comma ~ json_value)* ~ end_bracket }
+null        = { "null" }
 
-// **** Supported character processing ****
+// **** Lucene Query Syntax
 
-escaped_char   =  { "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
-normal_char    =  { !("\"" | "\\") ~ ANY }
-unicode_escape = @{ "\"u\"" ~ hex_digit ~ hex_digit ~ hex_digit ~ hex_digit }
-hex_digit      = _{ ASCII_HEX_DIGIT }
-ws             = _{ (" " | "\t" | NEWLINE)* }
-alpha_num_char = _{ ASCII_ALPHANUMERIC | "_" }
-
-// **** Helper rules for readability ****
-
-bracketed_query =  { colon ~ start_bracket ~ start_brace ~ query ~ end_brace ~ end_bracket }
-start_brace     = @{ ws ~ "{" ~ ws }
-end_brace       = @{ ws ~ "}" ~ ws }
-start_bracket   = @{ ws ~ "[" ~ ws }
-end_bracket     = @{ ws ~ "]" ~ ws }
-colon           = @{ ws ~ ":" ~ ws }
-comma           = @{ ws ~ "," ~ ws }
-simple_boolean  = @{ colon ~ ws ~ ("and" | "or") ~ ws }
+lucene_query             =  { lucene_or_query }
+lucene_or_query          =  { lucene_and_query ~ (lucene_ws ~ ("OR" | "||") ~ lucene_ws ~ lucene_query)? | lucene_and_query }
+lucene_and_query         =  { lucene_not_query ~ (lucene_ws ~ ("AND" | "&&") ~ lucene_ws ~ lucene_query)? | lucene_not_query }
+lucene_not_query         =  { "NOT" ~ lucene_ws ~ lucene_query | lucene_modified_term }
+lucene_modified_term     =  { ("+" | "-")? ~ lucene_primary }
+lucene_primary           =  { "(" ~ lucene_ws ~ lucene_query ~ lucene_ws ~ ")" ~ lucene_boost? | lucene_dismax | lucene_field_group | lucene_term }
+lucene_dismax            =  { "dismax" ~ "{" ~ lucene_ws ~ lucene_query ~ lucene_ws ~ "}" ~ lucene_boost? }
+lucene_field_group       =  { lucene_complex_fieldname ~ ":" ~ "(" ~ lucene_ws ~ lucene_query ~ lucene_ws ~ ")" ~ lucene_boost? }
+lucene_term              =  { lucene_complex_fieldname ~ ":" ~ lucene_ws ~ lucene_term_value | lucene_term_value }
+lucene_term_value        =  { lucene_proximity | lucene_extended_range | lucene_fuzzy | lucene_wildcard | lucene_regex | lucene_sloppy_phrase | lucene_function_boost | lucene_boosted_word | lucene_word | lucene_quoted_string | lucene_escaped_char }
+lucene_proximity         =  { quote ~ "" ~ lucene_word ~ "+" ~ "~" ~ lucene_digits ~ quote ~ "" }
+lucene_extended_range    =  { "[" ~ lucene_term_value ~ "TO" ~ lucene_term_value ~ "]" | "{" ~ lucene_term_value ~ "TO" ~ lucene_term_value ~ "}" | ("<" | "<=" | ">" | ">=") ~ lucene_term_value }
+lucene_fuzzy             =  { lucene_word ~ "~" ~ (lucene_digits ~ ("." ~ lucene_digits)?)? }
+lucene_wildcard          =  { lucene_any_char* ~ ("*" | "?") ~ lucene_any_char* }
+lucene_regex             =  { "/" ~ lucene_any_char* ~ "/" }
+lucene_sloppy_phrase     =  { quote ~ "" ~ lucene_any_char* ~ quote ~ "" ~ "~" ~ lucene_digits }
+lucene_function_boost    =  { "{" ~ lucene_any_char+ ~ "}" ~ lucene_boost? }
+lucene_boosted_word      =  { lucene_word ~ lucene_boost }
+lucene_word              = @{ lucene_alpha_num_char+ }
+lucene_quoted_string     =  { quote ~ "" ~ lucene_any_char* ~ quote ~ "" ~ lucene_boost? }
+lucene_escaped_char      =  { "\\" ~ ANY }
+lucene_complex_fieldname = @{ lucene_alpha_num_char+ | quote ~ "" ~ lucene_any_char+ ~ quote ~ "" }
+lucene_boost             =  { "^" ~ lucene_digits }
+lucene_ws                = _{ " " | "\t" | "\n" | "\r" }
+lucene_digits            = @{ ASCII_DIGIT+ }
+lucene_alpha_num_char    = _{ ASCII_ALPHANUMERIC | "_" }
+lucene_any_char          = _{ ANY }
