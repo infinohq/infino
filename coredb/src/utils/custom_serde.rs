@@ -14,7 +14,8 @@ pub mod rwlock_serde {
     S: Serializer,
     T: Serialize,
   {
-    T::serialize(&*val.read().unwrap(), s)
+    let inner = &*val.read().unwrap();
+    T::serialize(inner, s)
   }
 
   /// Deserialize the type and wrap it in RwLock.
@@ -24,6 +25,37 @@ pub mod rwlock_serde {
     T: Deserialize<'de>,
   {
     Ok(RwLock::new(T::deserialize(d)?))
+  }
+}
+
+/// Custom serde serialize and deserialize implementation for Arc<RwLock>.
+pub mod arc_rwlock_serde {
+  use crate::utils::sync::{Arc, RwLock};
+  use serde::de::Deserializer;
+  use serde::ser::Serializer;
+  use serde::{Deserialize, Serialize};
+
+  /// Serialize the type wrapped in RwLock.
+  #[allow(dead_code)]
+  pub fn serialize<S, T>(val: &Arc<RwLock<T>>, s: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+    T: Serialize,
+  {
+    let cloned = val.clone();
+    let inner = &cloned.read().unwrap();
+    T::serialize(inner, s)
+  }
+
+  /// Deserialize the type and wrap it in RwLock.
+  #[allow(dead_code)]
+  pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<RwLock<T>>, D::Error>
+  where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+  {
+    let rwlock_val = Arc::new(RwLock::new(T::deserialize(d)?));
+    Ok(rwlock_val)
   }
 }
 
