@@ -40,6 +40,7 @@ impl Segment {
 
     let mut results = HashSet::new();
 
+    // Pop the nodes off the stack and process
     while let Some(node) = stack.pop_front() {
       let processing_result = self.process_query(&node);
 
@@ -61,7 +62,7 @@ impl Segment {
     Ok(results)
   }
 
-  /// Dispatcher for query processing
+  /// General dispatcher for query processing
   fn process_query(&self, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     match node.as_rule() {
       Rule::term_query => self.process_term_query(node),
@@ -146,7 +147,6 @@ impl Segment {
             .unwrap_or(false);
         }
         _ => {
-          // For nodes that can contain other nodes, push their children onto the stack
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
           }
@@ -202,7 +202,6 @@ impl Segment {
       }
     }
 
-    // Perform a full text search with tokenization of the query
     if let Some(query_str) = query_string {
       self.process_search(self.process_query_text(query_str, fieldname, case_insensitive))
     } else {
@@ -279,7 +278,6 @@ impl Segment {
 
     while let Some(node) = queue.pop_front() {
       for child_node in node.into_inner() {
-        // Use the helper function to process the node.
         match self.process_query(&child_node) {
           Ok(node_results) => {
             exclude_results.extend(node_results);
