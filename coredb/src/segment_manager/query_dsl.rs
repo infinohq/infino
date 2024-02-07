@@ -6,9 +6,9 @@
 //! Uses the Pest parser with Pest-formatted PEG grammars: https://pest.rs/
 //! which validates syntax.
 //!
-//! This code walks the AST via stack recursion (i.e. we maintain our own stack, processing
-//! Infino-supported nodes on the stack and pushing any children of transitory nodes onto
-//! the stack).
+//! Walks the AST via an iterator. We maintain our own stack, processing
+//! Infino-supported nodes as they are popped off the stack and pushing children of
+//! transitory nodes onto the stack for further processing.
 
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::AstError;
@@ -29,6 +29,7 @@ use pest_derive::Parser;
 pub struct QueryDslParser;
 
 impl Segment {
+  /// Walk the AST using an iterator and process each node
   pub fn traverse_ast(&self, nodes: &Pairs<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack = VecDeque::new();
 
@@ -52,7 +53,6 @@ impl Segment {
           }
         }
         Err(e) => {
-          // For other errors, propagate the error upwards
           return Err(e);
         }
       }
@@ -61,6 +61,7 @@ impl Segment {
     Ok(results)
   }
 
+  /// Dispatcher for query processing
   fn process_query(&self, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     match node.as_rule() {
       Rule::term_query => self.process_term_query(node),
@@ -73,6 +74,7 @@ impl Segment {
     }
   }
 
+  /// Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
   fn process_bool_query(&self, bool_query_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(bool_query_node.clone());
@@ -117,6 +119,7 @@ impl Segment {
     Ok(combined_results)
   }
 
+  /// Term Query Processor: https://opensearch.org/docs/latest/query-dsl/term/term/
   fn process_term_query(&self, term_query_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(term_query_node.clone());
@@ -151,7 +154,6 @@ impl Segment {
       }
     }
 
-    // Perform an exact match search on the fieldname
     if let Some(query_str) = query_string {
       self.process_search(self.process_query_text(query_str, fieldname, case_insensitive))
     } else {
@@ -161,6 +163,7 @@ impl Segment {
     }
   }
 
+  /// Match Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match/
   fn process_match_query(&self, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(node.clone());
@@ -192,7 +195,6 @@ impl Segment {
             .unwrap_or(true);
         }
         _ => {
-          // For nodes that can contain other nodes, push their children onto the stack
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
           }
@@ -210,34 +212,7 @@ impl Segment {
     }
   }
 
-  fn process_search(&self, terms: Vec<String>) -> Result<HashSet<u32>, AstError> {
-    // Extract the terms and perform the search
-    let mut results = Vec::new();
-
-    // Get postings lists for the query terms
-    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) = self
-      .get_postings_lists(&terms)
-      .map_err(|e| AstError::TraverseError(format!("Error getting postings lists: {:?}", e)))?;
-
-    if postings_lists.is_empty() {
-      debug!("No posting list found. Returning empty handed.");
-      return Ok(HashSet::new());
-    }
-
-    self
-      .get_matching_doc_ids(
-        &postings_lists,
-        &last_block_list,
-        &initial_values_list,
-        shortest_list_index,
-        &mut results,
-      )
-      .map_err(|e| AstError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
-
-    // Convert the vector results to a Hashset
-    Ok(results.into_iter().collect())
-  }
-
+  /// Boolean Query Processor - Must: https://opensearch.org/docs/latest/query-dsl/compound/bool/
   fn process_must_clause(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut queue = VecDeque::new();
     queue.push_back(root_node.clone());
@@ -267,6 +242,7 @@ impl Segment {
     Ok(results)
   }
 
+  /// Boolean Query Processor - Should: https://opensearch.org/docs/latest/query-dsl/compound/bool/
   fn process_should_clause(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut queue = VecDeque::new();
     queue.push_back(root_node.clone());
@@ -290,6 +266,7 @@ impl Segment {
     Ok(results)
   }
 
+  /// Boolean Query Processor - Must Not: https://opensearch.org/docs/latest/query-dsl/compound/bool/
   fn process_must_not_clause(
     &self,
     root_node: &Pair<Rule>,
@@ -323,6 +300,7 @@ impl Segment {
     )
   }
 
+  /// Prep the query terms for the search
   fn process_query_text(
     &self,
     query_string: &str,
@@ -351,6 +329,36 @@ impl Segment {
       .collect();
 
     transformed_terms
+  }
+
+  /// Search the index for the terms extracted from the AST
+  fn process_search(&self, terms: Vec<String>) -> Result<HashSet<u32>, AstError> {
+    // Extract the terms and perform the search
+    let mut results = Vec::new();
+
+    // Get postings lists for the query terms
+    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) = self
+      .get_postings_lists(&terms)
+      .map_err(|e| AstError::TraverseError(format!("Error getting postings lists: {:?}", e)))?;
+
+    if postings_lists.is_empty() {
+      debug!("No posting list found. Returning empty handed.");
+      return Ok(HashSet::new());
+    }
+
+    // Now get the doc IDs in the posting lists
+    self
+      .get_matching_doc_ids(
+        &postings_lists,
+        &last_block_list,
+        &initial_values_list,
+        shortest_list_index,
+        &mut results,
+      )
+      .map_err(|e| AstError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
+
+    // Convert the result vector to a Hashset
+    Ok(results.into_iter().collect())
   }
 }
 

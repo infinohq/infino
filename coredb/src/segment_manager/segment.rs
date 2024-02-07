@@ -78,19 +78,23 @@ impl Segment {
     }
   }
 
+  /// Get the terms in this segment.
   pub fn get_terms(&self) -> &DashMap<String, u32> {
     &self.terms
   }
 
+  /// Get the term entry in this segment.
   pub fn get_term(&self, term: &str) -> Option<u32> {
     let result = self.terms.get(term);
     result.map(|result| *result.value())
   }
 
+  /// Get the inverted map for this segment.
   pub fn get_inverted_map(&self) -> &DashMap<u32, PostingsList> {
     &self.inverted_map
   }
 
+  /// Get the forward map for this segment.
   pub fn get_forward_map(&self) -> &DashMap<u32, LogMessage> {
     &self.forward_map
   }

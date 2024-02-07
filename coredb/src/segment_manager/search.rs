@@ -10,7 +10,7 @@ use crate::utils::error::AstError;
 use log::debug;
 
 impl Segment {
-  // Get the posting lists belonging to a set of matching terms in the query
+  /// Get the posting lists belonging to a set of matching terms in the query
   #[allow(clippy::type_complexity)]
   pub fn get_postings_lists(
     &self,
@@ -99,7 +99,7 @@ impl Segment {
     ))
   }
 
-  // Get the matching doc IDs corresponding to a set of posting lists
+  /// Get the matching doc IDs corresponding to a set of posting lists
   pub fn get_matching_doc_ids(
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
