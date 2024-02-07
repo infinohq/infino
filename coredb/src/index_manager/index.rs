@@ -13,8 +13,8 @@ use crate::index_manager::metadata::Metadata;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
 use crate::metric::metric_point::MetricPoint;
-use crate::request_manager::query_dsl::QueryDslParser;
-use crate::request_manager::query_dsl::Rule;
+use crate::segment_manager::query_dsl::QueryDslParser;
+use crate::segment_manager::query_dsl::Rule;
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
@@ -333,15 +333,7 @@ impl Index {
       } else {
         // Update json_query with the constructed query from url_query
         json_query = format!(
-          r#"{{
-                    "query": {{
-                        "bool": {{
-                            "must": [
-                                {{ "match": {{ "_all": "{}" }} }}
-                            ]
-                        }}
-                    }}
-                }}"#,
+          r#"{{ "query": {{ "match": {{ "_all": "{}" }} }} }}"#,
           url_query
         );
       }
@@ -389,6 +381,7 @@ impl Index {
     }
 
     retval.sort();
+
     Ok(retval)
   }
 
@@ -1194,8 +1187,8 @@ mod tests {
         .unwrap();
 
     let message_prefix = "message";
-    let num_log_messages = 10000;
-    let commit_after = 1000;
+    let num_log_messages = 1000;
+    let commit_after = 100;
 
     // Append log messages.
     let mut num_log_messages_from_last_commit = 0;

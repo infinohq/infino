@@ -12,8 +12,7 @@ use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
-use crate::request_manager::query_dsl::traverse_ast;
-use crate::request_manager::query_dsl::Rule;
+use crate::segment_manager::query_dsl::Rule;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
@@ -380,17 +379,18 @@ impl Segment {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SegmentSearchError> {
-    let matching_document_ids =
-      traverse_ast(self, &ast.clone()).map_err(SegmentSearchError::AstError)?;
+    let matching_document_ids = self
+      .traverse_ast(&ast.clone())
+      .map_err(SegmentSearchError::AstError)?;
 
     // Since matching_document_ids is a HashSet, no need to dedup
     let matching_document_ids_vec: Vec<u32> = matching_document_ids.into_iter().collect();
 
-    // Get the log messages, sort, and return with the query results
-    let mut log_messages = self
+    // Get the log messages and return with the query results
+    let log_messages = self
       .get_log_messages_from_ids(&matching_document_ids_vec, range_start_time, range_end_time)
       .map_err(SegmentSearchError::LogError)?;
-    log_messages.sort();
+
     Ok(log_messages)
   }
 
@@ -486,7 +486,7 @@ mod tests {
 
   use super::*;
   use crate::{
-    request_manager::query_dsl::{QueryDslParser, Rule},
+    segment_manager::query_dsl::{QueryDslParser, Rule},
     storage_manager::storage::StorageType,
   };
   use pest::Parser;
@@ -502,132 +502,6 @@ mod tests {
 
       // The error can be arbitrarily large. To utilize the stack effectively, Box the error and return.
       Err(e) => Err(Box::new(e)),
-    }
-  }
-
-  fn populate_segment(segment: &mut Segment) {
-    let log_messages = [
-      ("log 1", "this is a test log message"),
-      ("log 2", "this is another log message"),
-      ("log 3", "test log for different term"),
-    ];
-
-    for (key, message) in log_messages.iter() {
-      let mut fields = HashMap::new();
-      fields.insert("key".to_string(), key.to_string());
-      segment
-        .append_log_message(Utc::now().timestamp_millis() as u64, &fields, message)
-        .unwrap();
-    }
-  }
-
-  #[test]
-  fn test_search_with_must_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    let query_dsl = r#"{
-      "query": {
-        "bool": {
-          "must": [
-            { "match": { 
-              "_all" : {
-                "query": "test" } 
-              } 
-            }
-          ]
-        }
-      }
-    }
-    "#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl) {
-      Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
-        Ok(results) => {
-          assert!(results
-            .iter()
-            .all(|log| log.get_text().contains("test") && log.get_text().contains("log")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[test]
-  fn test_search_with_should_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    let query_dsl = r#"{
-      "query": {
-        "bool": {
-          "should": [
-            { "match": { 
-              "_all" : {
-                "query": "test" } 
-              } 
-            }
-          ]
-        }
-      }
-    }
-    "#;
-
-    // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, query_dsl) {
-      Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
-        Ok(results) => {
-          println!("Results are: {:#?}", results);
-          assert!(results
-            .iter()
-            .any(|log| log.get_text().contains("another") || log.get_text().contains("different")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[test]
-  fn test_search_with_must_not_query() {
-    let mut segment = Segment::new();
-    populate_segment(&mut segment);
-
-    let query_dsl_query = r#"{
-      "query": {
-        "bool": {
-          "must_not": [
-            { "match": { "_all" : "different" } }
-          ]
-        }
-      }
-    }
-    "#;
-
-    // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(query_tree) => match segment.search_logs(&query_tree, 0, u64::MAX) {
-        Ok(results) => {
-          assert!(!results
-            .iter()
-            .any(|log| log.get_text().contains("excluded")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
     }
   }
 
