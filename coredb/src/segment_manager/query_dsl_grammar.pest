@@ -280,7 +280,8 @@ span_clauses               = { start_bracket ~ (span_query ~ (comma ~ span_query
 
 // Boolean Queries: https://opensearch.org/docs/latest/query-dsl/compound/bool/
 bool_query  = { start_brace ~ quote ~ "bool" ~ quote ~ colon ~ bool_search ~ end_brace }
-bool_search = { start_brace ~ (must_clauses? ~ must_not_clauses? ~ should_clauses? ~ filter_clauses? ~ minimum_should_match? ~ boost?) ~ end_brace }
+bool_search = { start_brace ~ (bool_clause ~ (comma ~ bool_clause)*)? ~ end_brace }
+bool_clause = { must_clauses | must_not_clauses | should_clauses | filter_clauses }
 
 // Boosting Queries: https://opensearch.org/docs/latest/query-dsl/compound/boosting/
 boosting_query  = { start_brace ~ quote ~ "boosting" ~ quote ~ colon ~ boosting_search ~ end_brace }
@@ -377,7 +378,6 @@ envelope                            = { geo_type ~ "envelope" ~ quote ~ "" ~ com
 envelope_coordinates                = { start_brace ~ top_left ~ comma ~ bottom_right ~ end_brace }
 exclude                             = { quote ~ "exclude" ~ quote ~ colon ~ string }
 field_element                       = { string }
-fieldname                           = { quote ~ word ~ quote }
 fields                              = { start_bracket ~ quote ~ "fields" ~ quote ~ colon ~ field_element ~ (comma ~ field_element)* ~ end_bracket }
 filter                              = { bool_filter | term_filter | range_filter }
 filter_clauses                      = { quote ~ "filter" ~ quote ~ query_array }
@@ -514,6 +514,7 @@ end_brace        = _{ ws ~ "}" ~ ws }
 end_bracket      = _{ ws ~ "]" ~ ws }
 string           = @{ quote ~ (escaped_char | normal_char)+ ~ quote }
 escaped_char     = _{ "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
+fieldname        = @{ quote ~ (alpha_num_char | " ")+ ~ quote }
 float            = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
 hex_digit        = @{ ASCII_HEX_DIGIT }
 integer          = @{ ASCII_DIGIT+ }
@@ -524,7 +525,6 @@ quote            = _{ "\"" }
 start_brace      = _{ ws ~ "{" ~ ws }
 start_bracket    = _{ ws ~ "[" ~ ws }
 unicode_escape   = @{ "\"u\"" ~ hex_digit ~ hex_digit ~ hex_digit ~ hex_digit }
-word             = @{ alpha_num_char+ }
 ws               = _{ (" " | "\t" | NEWLINE)* }
 
 // simple_boolean = @{ colon ~ ws ~ ("and" | "or") ~ ws } - this is needed somewhere but I can't remember
