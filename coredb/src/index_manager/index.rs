@@ -1187,8 +1187,8 @@ mod tests {
         .unwrap();
 
     let message_prefix = "message";
-    let num_log_messages = 1000;
-    let commit_after = 100;
+    let num_log_messages = 10000;
+    let commit_after = 1000;
 
     // Append log messages.
     let mut num_log_messages_from_last_commit = 0;
