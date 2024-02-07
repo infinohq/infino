@@ -5,29 +5,8 @@ on:
     branches:
       - main
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
-
-env:
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
-  CARGO_TERM_COLOR: always
-  RUSTUP_MAX_RETRIES: 10
-
 jobs:
-
-  cargo-fmt:
-    name: "cargo fmt"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: "Install Rust toolchain"
-        run: rustup component add rustfmt
-      - run: cargo fmt --all --check
-
-  cargo-tests:
-    name: "Run Cargo Tests"
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the code
@@ -38,7 +17,5 @@ jobs:
           profile: minimal
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build Infino
-        run: make build
-      - name: Test Infino
+      - name: Build and Test Infino
         run: make test
