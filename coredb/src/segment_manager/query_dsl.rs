@@ -303,7 +303,8 @@ impl Segment {
       query_text.to_owned()
     };
 
-    let terms = tokenize(&query);
+    let mut terms = Vec::new();
+    tokenize(&query, &mut terms);
 
     // If fieldname is provided, concatenate it with each term; otherwise, use the term as is
     let transformed_terms: Vec<String> = terms
@@ -312,7 +313,7 @@ impl Segment {
         if let Some(field) = fieldname {
           format!("{}~{}", field, term)
         } else {
-          term
+          term.to_owned()
         }
       })
       .collect();
