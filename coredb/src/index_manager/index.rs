@@ -945,7 +945,7 @@ mod tests {
 
       // Create an index with a small segment size threshold.
       let index =
-        Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
+        Index::new_with_threshold_params(&storage_type, &index_dir_path, 1500, 1024 * 1024)
           .await
           .unwrap();
 

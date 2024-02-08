@@ -13,4 +13,4 @@ lazy_static! {
 // We compress blocks of 128 inetgers. Do not modify this if
 // BitPacker4x compression is being used. For more details, see
 // https://docs.rs/bitpacking/latest/bitpacking/
-pub(super) static BLOCK_SIZE_FOR_LOG_MESSAGES: usize = 128;
+pub const BLOCK_SIZE_FOR_LOG_MESSAGES: usize = 128;
