@@ -75,7 +75,7 @@ impl Segment {
     }
   }
 
-  // Boolean Queries: https://opensearch.org/docs/latest/query-dsl/compound/bool/
+  // Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
   fn process_bool_query(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
