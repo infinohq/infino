@@ -886,7 +886,7 @@ mod tests {
     Ok(())
   }
 
-  fn check_metric_point_vectors(expected: &Vec<MetricPoint>, received: &Vec<MetricPoint>) {
+  fn check_metric_point_vectors(expected: &[MetricPoint], received: &[MetricPoint]) {
     assert_eq!(expected.len(), received.len());
 
     // The time series is sorted by time - and in tests we may insert multiple values at the same time instant.
