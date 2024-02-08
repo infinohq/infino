@@ -21,7 +21,6 @@ pub struct PostingsBlock<const N: usize> {
   #[serde(with = "atomic_cell_serde")]
   num_log_messages: AtomicCell<usize>,
 
-  // TODO: Use Arc<RwLock...> serde as well.
   /// Array of log messages.
   #[serde_as(as = "Arc<RwLock<[_; N]>>")]
   log_message_ids: Arc<RwLock<[u32; N]>>,
