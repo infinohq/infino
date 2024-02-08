@@ -654,8 +654,6 @@ mod tests {
     );
 
     assert!(result.is_ok());
-    // Assuming the mock segment's posting lists for "term1" and "term2" have unique and some common document IDs.
-    // Adjust the expected length based on the mock data you set up in `create_mock_segment`.
     assert!(
       !accumulator.is_empty(),
       "Accumulator should not be empty for non-empty postings lists"
@@ -697,8 +695,7 @@ mod tests {
     );
 
     assert!(result.is_ok());
-    // Assuming the mock segment's posting list for "term1" has unique document IDs.
-    // The accumulator should contain all document IDs from the single postings list.
+
     assert!(
       !accumulator.is_empty(),
       "Accumulator should not be empty for a single non-empty postings list"
@@ -714,7 +711,6 @@ mod tests {
   #[test]
   fn test_get_matching_doc_ids_with_logical_or_overlapping_ids() {
     let segment = create_mock_segment();
-    // Assuming "term1" and "term2" have overlapping document IDs.
     let (postings_lists, last_block_list, _, _) = segment
       .get_postings_lists(&["term1".to_string(), "term2".to_string()])
       .unwrap();
@@ -727,7 +723,6 @@ mod tests {
     );
 
     assert!(result.is_ok());
-    // Ensure duplicates are removed
     let unique_ids: std::collections::HashSet<_> = accumulator.iter().collect();
     assert_eq!(
       unique_ids.len(),
