@@ -8,7 +8,7 @@
 //! consisting of compressed postings blocks. Each postings block contains a vector of log message
 //! IDs and is wrapped in a read-write lock for thread safety.
 
-mod constants;
+pub(super) mod constants;
 pub mod log_message;
 pub(super) mod postings_block;
 pub(super) mod postings_block_compressed;

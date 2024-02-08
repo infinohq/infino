@@ -22,7 +22,7 @@ pub struct PostingsList {
   // The last block, whish is uncompressed. Note that we only compress blocks that have 128 (i.e., BLOCK_SIZE_FOR_LOG_MESSAGES)
   // integers - so the last block may have upto BLOCK_SIZE_FOR_LOG_MESSAGES integers is stored in uncompressed form.
   #[serde(with = "rwlock_serde")]
-  last_block: RwLock<PostingsBlock>,
+  last_block: RwLock<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>>,
 
   // Store the initial value in each block separately. This is valuable for fast lookups during postings list intersections.
   // Also known as 'skip pointers' in information retrieval literature.
@@ -44,7 +44,7 @@ impl PostingsList {
   #[cfg(test)]
   pub fn new_with_params(
     compressed_blocks: Vec<PostingsBlockCompressed>,
-    last_block: PostingsBlock,
+    last_block: PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>,
     initial_values: Vec<u32>,
   ) -> Self {
     PostingsList {
@@ -104,7 +104,7 @@ impl PostingsList {
   }
 
   /// Get the last postings block, wrapped in RwLock.
-  pub fn get_last_postings_block(&self) -> &RwLock<PostingsBlock> {
+  pub fn get_last_postings_block(&self) -> &RwLock<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> {
     &self.last_block
   }
 
@@ -117,13 +117,13 @@ impl PostingsList {
     // Flatten the compressed postings blocks.
     for postings_block_compressed in postings_list_compressed {
       let postings_block = PostingsBlock::try_from(postings_block_compressed).unwrap();
-      let mut log_message_ids = (*postings_block.get_log_message_ids().read().unwrap()).clone();
-      retval.append(&mut log_message_ids);
+      let log_message_ids = postings_block.get_log_message_ids();
+      retval.append(&mut log_message_ids.to_vec());
     }
 
     // Flatten the last block.
-    let mut log_message_ids = (*last_block.get_log_message_ids().read().unwrap()).clone();
-    retval.append(&mut log_message_ids);
+    let log_message_ids = last_block.get_log_message_ids();
+    retval.append(&mut log_message_ids.to_vec());
 
     retval
   }
@@ -180,17 +180,12 @@ mod tests {
     assert_eq!(pl.get_initial_values().read().unwrap().len(), 1);
 
     // Check that the first entry in the last block is the same as what we appended.
-    assert_eq!(
-      pl.get_last_postings_block()
-        .read()
-        .unwrap()
-        .get_log_message_ids()
-        .read()
-        .unwrap()
-        .first()
-        .unwrap(),
-      &(100_u32)
-    );
+    let last_block_log_message_ids = pl
+      .get_last_postings_block()
+      .read()
+      .unwrap()
+      .get_log_message_ids();
+    assert_eq!(last_block_log_message_ids[0], 100_u32);
 
     // Check that the first entry in the initial values is the same as what we appended.
     assert_eq!(
@@ -259,17 +254,12 @@ mod tests {
 
     // The last block should have only 1 entry, which would be second_block_initial_value.
     assert_eq!(pl.get_last_postings_block().read().unwrap().len(), 1);
-    assert_eq!(
-      pl.get_last_postings_block()
-        .read()
-        .unwrap()
-        .get_log_message_ids()
-        .read()
-        .unwrap()
-        .first()
-        .unwrap(),
-      &second_block_initial_value
-    );
+    let last_block_log_message_ids = pl
+      .get_last_postings_block()
+      .read()
+      .unwrap()
+      .get_log_message_ids();
+    assert_eq!(last_block_log_message_ids[0], second_block_initial_value);
   }
 
   #[test]
