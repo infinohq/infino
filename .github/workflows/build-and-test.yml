@@ -16,7 +16,5 @@ jobs:
           profile: minimal
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build Infino
-        run: make build
-      - name: Test Infino
+      - name: Build and Test Infino
         run: make test
