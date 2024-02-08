@@ -75,28 +75,26 @@ impl Segment {
     }
   }
 
-  /// Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
-  fn process_bool_query(&self, bool_query_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  // Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
+  fn process_bool_query(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
-    stack.push_back(bool_query_node.clone());
+    stack.push_back(root_node.clone());
 
     let mut must_results = HashSet::new();
     let mut should_results = HashSet::new();
     let mut must_not_results = HashSet::new();
 
+    // Process each subtree separately, then combine the logical results afterwards.
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
         Rule::must_clauses => {
-          let results = self.process_must_clause(&node)?;
-          must_results.extend(results);
+          must_results = self.process_bool_subtree(&node, true)?;
         }
         Rule::should_clauses => {
-          let results = self.process_should_clause(&node)?;
-          should_results.extend(results);
+          should_results = self.process_bool_subtree(&node, false)?;
         }
         Rule::must_not_clauses => {
-          let results = self.process_must_not_clause(&node, &must_results)?;
-          must_not_results.extend(results);
+          must_not_results = self.process_bool_subtree(&node, false)?;
         }
         _ => {
           for inner_node in node.into_inner() {
@@ -106,27 +104,69 @@ impl Segment {
       }
     }
 
-    let mut combined_results = if !should_results.is_empty() {
-      must_results.union(&should_results).cloned().collect()
+    // Start with combining must and should results. If there are must results,
+    // should results only add to it, not replace it.
+    let combined_results = if !must_results.is_empty() || !should_results.is_empty() {
+      let mut combined = must_results;
+      if !should_results.is_empty() {
+        combined.extend(should_results.iter());
+      }
+      combined
     } else {
-      must_results
+      HashSet::new()
     };
 
-    combined_results = combined_results
+    // Now get final results after excluding must_not results
+    let final_results = combined_results
       .difference(&must_not_results)
       .cloned()
-      .collect();
+      .collect::<HashSet<u32>>();
 
-    Ok(combined_results)
+    Ok(final_results)
+  }
+
+  fn process_bool_subtree(
+    &self,
+    root_node: &Pair<Rule>,
+    must: bool,
+  ) -> Result<HashSet<u32>, AstError> {
+    let mut queue = VecDeque::new();
+    queue.push_back(root_node.clone());
+
+    let mut results = HashSet::new();
+
+    while let Some(node) = queue.pop_front() {
+      match self.process_query(&node) {
+        Ok(node_results) => {
+          if must {
+            if results.is_empty() {
+              results = node_results;
+            } else {
+              results = results.intersection(&node_results).cloned().collect();
+            }
+          } else {
+            results.extend(node_results);
+          }
+        }
+        Err(AstError::UnsupportedQuery(_)) => {
+          for child_node in node.into_inner() {
+            queue.push_back(child_node);
+          }
+        }
+        Err(e) => return Err(e),
+      }
+    }
+
+    Ok(results)
   }
 
   /// Term Query Processor: https://opensearch.org/docs/latest/query-dsl/term/term/
-  fn process_term_query(&self, term_query_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  fn process_term_query(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
-    stack.push_back(term_query_node.clone());
+    stack.push_back(root_node.clone());
 
     let mut fieldname: Option<&str> = None;
-    let mut query_string: Option<&str> = None;
+    let mut query_text: Option<&str> = None;
     let mut case_insensitive = true;
 
     while let Some(node) = stack.pop_front() {
@@ -137,7 +177,7 @@ impl Segment {
           }
         }
         Rule::value => {
-          query_string = node.into_inner().next().map(|v| v.as_str());
+          query_text = node.into_inner().next().map(|v| v.as_str());
         }
         Rule::case_insensitive => {
           case_insensitive = node
@@ -154,8 +194,16 @@ impl Segment {
       }
     }
 
-    if let Some(query_str) = query_string {
-      self.process_search(self.process_query_text(query_str, fieldname, case_insensitive))
+    // "AND" is needed even though term queries only have a single term.
+    // Our tokenizer breaks up query text on spaces, etc. so we need to match
+    // everything in the query text if they end up as different terms.
+    //
+    // TODO: This is technically incorrect as the term should be an exact string match.
+    if let Some(query_str) = query_text {
+      self.process_search(
+        self.analyze_query_text(query_str, fieldname, case_insensitive),
+        "AND",
+      )
     } else {
       Err(AstError::UnsupportedQuery(
         "Query string is missing".to_string(),
@@ -164,12 +212,13 @@ impl Segment {
   }
 
   /// Match Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match/
-  fn process_match_query(&self, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  fn process_match_query(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
-    stack.push_back(node.clone());
+    stack.push_back(root_node.clone());
 
     let mut fieldname: Option<&str> = None;
-    let mut query_string: Option<&str> = None;
+    let mut query_text: Option<&str> = None;
+    let mut term_operator: &str = "OR"; // Match queries default to OR
     let mut case_insensitive = true;
 
     while let Some(node) = stack.pop_front() {
@@ -179,13 +228,11 @@ impl Segment {
             fieldname = Some(field.as_str());
           }
         }
-        Rule::match_string => {
-          query_string = node.into_inner().next().map(|v| v.as_str());
+        Rule::operator => {
+          term_operator = node.into_inner().next().map_or("OR", |v| v.as_str());
         }
-        Rule::match_array => {
-          if let Some(query_node) = node.into_inner().find(|n| n.as_rule() == Rule::query) {
-            query_string = query_node.into_inner().next().map(|v| v.as_str());
-          }
+        Rule::match_string | Rule::query => {
+          query_text = node.into_inner().next().map(|v| v.as_str());
         }
         Rule::case_insensitive => {
           case_insensitive = node
@@ -202,8 +249,11 @@ impl Segment {
       }
     }
 
-    if let Some(query_str) = query_string {
-      self.process_search(self.process_query_text(query_str, fieldname, case_insensitive))
+    if let Some(query_str) = query_text {
+      self.process_search(
+        self.analyze_query_text(query_str, fieldname, case_insensitive),
+        term_operator,
+      )
     } else {
       Err(AstError::UnsupportedQuery(
         "Query string is missing".to_string(),
@@ -211,105 +261,18 @@ impl Segment {
     }
   }
 
-  /// Boolean Query Processor - Must: https://opensearch.org/docs/latest/query-dsl/compound/bool/
-  fn process_must_clause(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
-    let mut queue = VecDeque::new();
-    queue.push_back(root_node.clone());
-
-    let mut results = HashSet::new();
-    let mut first = true;
-
-    while let Some(node) = queue.pop_front() {
-      match self.process_query(&node) {
-        Ok(node_results) => {
-          if first {
-            results = node_results;
-            first = false;
-          } else {
-            results = results.intersection(&node_results).cloned().collect();
-          }
-        }
-        Err(AstError::UnsupportedQuery(_)) => {
-          for child_node in node.into_inner() {
-            queue.push_back(child_node);
-          }
-        }
-        Err(e) => return Err(e),
-      }
-    }
-
-    Ok(results)
-  }
-
-  /// Boolean Query Processor - Should: https://opensearch.org/docs/latest/query-dsl/compound/bool/
-  fn process_should_clause(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
-    let mut queue = VecDeque::new();
-    queue.push_back(root_node.clone());
-
-    let mut results = HashSet::new();
-
-    while let Some(node) = queue.pop_front() {
-      match self.process_query(&node) {
-        Ok(node_results) => {
-          results.extend(node_results);
-        }
-        Err(AstError::UnsupportedQuery(_)) => {
-          for child_node in node.into_inner() {
-            queue.push_back(child_node);
-          }
-        }
-        Err(e) => return Err(e),
-      }
-    }
-
-    Ok(results)
-  }
-
-  /// Boolean Query Processor - Must Not: https://opensearch.org/docs/latest/query-dsl/compound/bool/
-  fn process_must_not_clause(
-    &self,
-    root_node: &Pair<Rule>,
-    include_results: &HashSet<u32>,
-  ) -> Result<HashSet<u32>, AstError> {
-    let mut queue = VecDeque::new();
-    queue.push_back(root_node.clone());
-
-    let mut exclude_results = HashSet::new();
-
-    while let Some(node) = queue.pop_front() {
-      for child_node in node.into_inner() {
-        match self.process_query(&child_node) {
-          Ok(node_results) => {
-            exclude_results.extend(node_results);
-          }
-          Err(AstError::UnsupportedQuery(_)) => {
-            queue.push_back(child_node);
-          }
-          Err(e) => return Err(e),
-        }
-      }
-    }
-
-    Ok(
-      include_results
-        .difference(&exclude_results)
-        .cloned()
-        .collect(),
-    )
-  }
-
   /// Prep the query terms for the search
-  fn process_query_text(
+  fn analyze_query_text(
     &self,
-    query_string: &str,
+    query_text: &str,
     fieldname: Option<&str>,
     case_insensitive: bool,
   ) -> Vec<String> {
     // Prepare the query string, applying lowercase if case_insensitive is set
     let query = if case_insensitive {
-      query_string.to_lowercase()
+      query_text.to_lowercase()
     } else {
-      query_string.to_owned()
+      query_text.to_owned()
     };
 
     let terms = tokenize(&query);
@@ -330,9 +293,13 @@ impl Segment {
   }
 
   /// Search the index for the terms extracted from the AST
-  fn process_search(&self, terms: Vec<String>) -> Result<HashSet<u32>, AstError> {
+  fn process_search(
+    &self,
+    terms: Vec<String>,
+    term_operator: &str,
+  ) -> Result<HashSet<u32>, AstError> {
     // Extract the terms and perform the search
-    let mut results = Vec::new();
+    let mut results = HashSet::new();
 
     // Get postings lists for the query terms
     let (postings_lists, last_block_list, initial_values_list, shortest_list_index) = self
@@ -345,18 +312,23 @@ impl Segment {
     }
 
     // Now get the doc IDs in the posting lists
-    self
-      .get_matching_doc_ids(
-        &postings_lists,
-        &last_block_list,
-        &initial_values_list,
-        shortest_list_index,
-        &mut results,
-      )
-      .map_err(|e| AstError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
+    if term_operator == "OR" {
+      self
+        .get_matching_doc_ids_with_logical_or(&postings_lists, &last_block_list, &mut results)
+        .map_err(|e| AstError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
+    } else {
+      self
+        .get_matching_doc_ids_with_logical_and(
+          &postings_lists,
+          &last_block_list,
+          &initial_values_list,
+          shortest_list_index,
+          &mut results,
+        )
+        .map_err(|e| AstError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
+    }
 
-    // Convert the result vector to a Hashset
-    Ok(results.into_iter().collect())
+    Ok(results)
   }
 }
 
@@ -407,6 +379,12 @@ mod tests {
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
         Ok(results) => {
+          assert_eq!(
+            results.len(),
+            2,
+            "There should be exactly 2 logs matching the query."
+          );
+
           assert!(results
             .iter()
             .all(|log| log.get_text().contains("test") && log.get_text().contains("log")));
@@ -440,6 +418,12 @@ mod tests {
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
         Ok(results) => {
+          assert_eq!(
+            results.len(),
+            2,
+            "There should be exactly 2 logs matching the query."
+          );
+
           assert!(results
             .iter()
             .any(|log| log.get_text().contains("another") || log.get_text().contains("different")));
@@ -494,7 +478,7 @@ mod tests {
         "query": {
             "bool": {
                 "must": [
-                    { "match": { "_all": { "query": "log" } } }
+                    { "match": { "_all": { "query": "this" } } }
                 ],
                 "should": [
                     { "match": { "_all": { "query": "test" } } }
@@ -509,6 +493,12 @@ mod tests {
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
         Ok(results) => {
+          assert_eq!(
+            results.len(),
+            2,
+            "There should be exactly 2 logs matching the query."
+          );
+
           assert!(results.iter().all(|log| {
             log.get_text().contains("log")
               && (log.get_text().contains("test") || !log.get_text().contains("different"))
@@ -531,8 +521,8 @@ mod tests {
     let query_dsl_query = r#"{
       "query": {
         "match": {
-          "log 1": {
-            "query": "log"
+          "key": {
+            "query": "1"
           }
         }
       }
@@ -541,7 +531,94 @@ mod tests {
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
         Ok(results) => {
+          assert_eq!(
+            results.len(),
+            1,
+            "There should be exactly 1 logs matching the query."
+          );
+
           assert!(results.iter().all(|log| log.get_text().contains("log")));
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[test]
+  fn test_search_with_match_all_query_with_multiple_terms_anded() {
+    let segment = create_mock_segment();
+
+    let query_dsl_query = r#"{
+        "query": {
+            "match": {
+                "_all": {
+                    "query": "log test",
+                    "operator": "AND"
+                }
+            }
+        }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+        Ok(results) => {
+          assert_eq!(
+            results.len(),
+            2,
+            "There should be exactly 2 logs matching the query."
+          );
+
+          for log in results.iter() {
+            assert!(
+              log.get_text().contains("test") && log.get_text().contains("log"),
+              "Each log should contain both 'test' and 'log'."
+            );
+          }
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[test]
+  fn test_search_with_match_all_query_with_multiple_terms() {
+    let segment = create_mock_segment();
+
+    let query_dsl_query = r#"{
+      "query": {
+        "match": {
+          "_all": {
+            "query": "another different"
+          }
+        }
+      }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+        Ok(results) => {
+          assert_eq!(
+            results.len(),
+            2,
+            "Default OR on terms should have 2 logs matching the query."
+          );
+
+          for log in results.iter() {
+            assert!(
+              log.get_text().contains("another") || log.get_text().contains("different"),
+              "Each log should contain 'another' or 'different'."
+            );
+          }
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);
@@ -560,7 +637,7 @@ mod tests {
     let query_dsl_query = r#"{
       "query": {
         "match": {
-          "key": {
+          "_all": {
             "query": "log"
           }
         }
@@ -572,6 +649,55 @@ mod tests {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
         Ok(results) => {
           assert!(results.iter().all(|log| log.get_text().contains("log")));
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[test]
+  fn test_search_with_nested_boolean_query() {
+    let segment = create_mock_segment();
+
+    let query_dsl_query = r#"{
+        "query": {
+            "bool": {
+                "must": [
+                    { "match": { "_all": { "query": "another" } } }
+                ],
+                "should": [
+                    {
+                        "bool": {
+                            "must": [
+                                { "match": { "_all": { "query": "different" } } }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+        Ok(results) => {
+          assert_eq!(
+            results.len(),
+            2,
+            "There should be exactly 2 logs matching the query."
+          );
+
+          for log in results.iter() {
+            assert!(
+              log.get_text().contains("another") || log.get_text().contains("different"),
+              "Each log should contain 'another' or 'different'."
+            );
+          }
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);

@@ -333,7 +333,7 @@ impl Index {
       } else {
         // Update json_query with the constructed query from url_query
         json_query = format!(
-          r#"{{ "query": {{ "match": {{ "_all": "{}" }} }} }}"#,
+          r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
           url_query
         );
       }
