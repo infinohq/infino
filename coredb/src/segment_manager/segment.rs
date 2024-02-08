@@ -174,8 +174,6 @@ impl Segment {
     let terms = log_message.get_terms();
 
     let log_message_id = self.metadata.fetch_increment_log_message_count();
-    // Update the forward map.
-    self.forward_map.insert(log_message_id, log_message); // insert in forward map
 
     // Update the inverted map.
     for term in terms {
@@ -201,6 +199,9 @@ impl Segment {
         pl.append(log_message_id);
       }
     }
+
+    // Update the forward map.
+    self.forward_map.insert(log_message_id, log_message); // insert in forward map
 
     self.update_start_end_time(time);
     Ok(())
