@@ -108,7 +108,7 @@ impl Segment {
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
     last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
-    initial_values_list: &Vec<Vec<u32>>,
+    initial_values_list: &[Vec<u32>],
     shortest_list_index: usize,
     result_set: &mut HashSet<u32>,
   ) -> Result<(), AstError> {
