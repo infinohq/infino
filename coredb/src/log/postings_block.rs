@@ -56,7 +56,7 @@ impl PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
   pub fn new_with_log_message_ids_vec(log_message_ids: Vec<u32>) -> Result<Self, CoreDBError> {
     let num_log_messages = log_message_ids.len();
     if num_log_messages > BLOCK_SIZE_FOR_LOG_MESSAGES {
-      return Err(CoreDBError::InvalicPostingsBlock(format!(
+      return Err(CoreDBError::InvalidPostingsBlock(format!(
         "Number of log messages ({}) is greater than the maximum allowed ({})",
         num_log_messages, BLOCK_SIZE_FOR_LOG_MESSAGES,
       )));
