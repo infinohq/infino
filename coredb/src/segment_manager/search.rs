@@ -1,8 +1,10 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-use crate::log::constants::BLOCK_SIZE_FOR_LOG_MESSAGES;
 /// Search a segment for matching document IDs
+use std::collections::HashSet;
+
+use crate::log::constants::BLOCK_SIZE_FOR_LOG_MESSAGES;
 use crate::log::postings_block::PostingsBlock;
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
 use crate::segment_manager::segment::Segment;
@@ -11,7 +13,7 @@ use crate::utils::error::AstError;
 use log::debug;
 
 impl Segment {
-  // Get the posting lists belonging to a set of matching terms in the query
+  /// Get the posting lists belonging to a set of matching terms in the query
   #[allow(clippy::type_complexity)]
   pub fn get_postings_lists(
     &self,
@@ -100,15 +102,18 @@ impl Segment {
     ))
   }
 
-  // Get the matching doc IDs corresponding to a set of posting lists
-  pub fn get_matching_doc_ids(
+  /// Get the matching doc IDs corresponding to a set of posting lists
+  /// that are combined with a logical AND
+  pub fn get_matching_doc_ids_with_logical_and(
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
     last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
     initial_values_list: &Vec<Vec<u32>>,
     shortest_list_index: usize,
-    accumulator: &mut Vec<u32>,
+    result_set: &mut HashSet<u32>,
   ) -> Result<(), AstError> {
+    let accumulator = &mut Vec::new();
+
     if postings_lists.is_empty() {
       debug!("No postings lists. Returning");
       return Ok(());
@@ -259,6 +264,43 @@ impl Segment {
 
       *accumulator = temp_result_set;
     }
+
+    result_set.extend(accumulator.iter().cloned());
+
+    Ok(())
+  }
+
+  /// Get the matching doc IDs corresponding to a set of posting lists
+  /// that are combined with a logical OR
+  pub fn get_matching_doc_ids_with_logical_or(
+    &self,
+    postings_lists: &[Vec<PostingsBlockCompressed>],
+    last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
+    result_set: &mut HashSet<u32>,
+  ) -> Result<(), AstError> {
+    let mut accumulator = Vec::new();
+
+    if postings_lists.is_empty() {
+      debug!("No postings lists. Returning");
+      return Ok(());
+    }
+
+    for i in 0..postings_lists.len() {
+      let postings_list = &postings_lists[i];
+
+      for posting_block in postings_list {
+        let posting_block = PostingsBlock::try_from(posting_block).map_err(|_| {
+          AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
+        })?;
+        let log_message_ids = posting_block.get_log_message_ids();
+        accumulator.append(&mut log_message_ids.clone());
+      }
+
+      let last_block_log_message_ids = last_block_list[i].get_log_message_ids();
+      accumulator.append(&mut last_block_log_message_ids.clone());
+    }
+
+    result_set.extend(accumulator.iter().cloned());
 
     Ok(())
   }
@@ -470,9 +512,9 @@ mod tests {
     let postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
     let last_block_list: Vec<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> = Vec::new();
     let initial_values_list: Vec<Vec<u32>> = Vec::new();
-    let mut accumulator: Vec<u32> = Vec::new();
+    let mut accumulator: HashSet<u32> = HashSet::new();
 
-    let result = segment.get_matching_doc_ids(
+    let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
       &last_block_list,
       &initial_values_list,
@@ -488,7 +530,7 @@ mod tests {
   }
 
   #[test]
-  fn test_get_matching_doc_ids_no_matching_documents() {
+  fn test_get_matching_doc_ids_with_no_matching_documents() {
     let segment = create_mock_segment();
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = segment.get_postings_lists(&terms);
@@ -497,8 +539,8 @@ mod tests {
     let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
       result.unwrap();
 
-    let mut accumulator: Vec<u32> = Vec::new();
-    let result = segment.get_matching_doc_ids(
+    let mut accumulator: HashSet<u32> = HashSet::new();
+    let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
       &last_block_list,
       &initial_values_list,
@@ -521,8 +563,8 @@ mod tests {
       result.unwrap();
 
     assert_eq!(postings_lists.len(), 2);
-    let mut accumulator: Vec<u32> = Vec::new();
-    let result = segment.get_matching_doc_ids(
+    let mut accumulator: HashSet<u32> = HashSet::new();
+    let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
       &last_block_list,
       &initial_values_list,
@@ -543,9 +585,9 @@ mod tests {
     let postings_lists = vec![];
     let last_block_list = vec![];
     let initial_values_list = vec![];
-    let mut accumulator: Vec<u32> = Vec::new();
+    let mut accumulator: HashSet<u32> = HashSet::new();
 
-    let result = segment.get_matching_doc_ids(
+    let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
       &last_block_list,
       &initial_values_list,
@@ -557,6 +599,98 @@ mod tests {
     assert!(
       accumulator.is_empty(),
       "Accumulator should be empty for empty postings lists"
+    );
+  }
+
+  #[test]
+  fn test_get_matching_doc_ids_with_logical_or_basic() {
+    let segment = create_mock_segment();
+    let (postings_lists, last_block_list, _, _) = segment
+      .get_postings_lists(&["term1".to_string(), "term2".to_string()])
+      .unwrap();
+
+    let mut accumulator: HashSet<u32> = HashSet::new();
+    let result = segment.get_matching_doc_ids_with_logical_or(
+      &postings_lists,
+      &last_block_list,
+      &mut accumulator,
+    );
+
+    assert!(result.is_ok());
+    assert!(
+      !accumulator.is_empty(),
+      "Accumulator should not be empty for non-empty postings lists"
+    );
+    // Check for uniqueness of document IDs
+    let unique_ids: std::collections::HashSet<_> = accumulator.iter().collect();
+    assert_eq!(
+      unique_ids.len(),
+      accumulator.len(),
+      "Document IDs should be unique"
+    );
+  }
+
+  #[test]
+  fn test_get_matching_doc_ids_with_logical_or_empty_lists() {
+    let segment = create_mock_segment();
+
+    let mut accumulator: HashSet<u32> = HashSet::new();
+    let result = segment.get_matching_doc_ids_with_logical_or(&[], &[], &mut accumulator);
+
+    assert!(result.is_ok());
+    assert!(
+      accumulator.is_empty(),
+      "Accumulator should be empty when postings lists are empty"
+    );
+  }
+
+  #[test]
+  fn test_get_matching_doc_ids_with_logical_or_single_list() {
+    let segment = create_mock_segment();
+    let (postings_lists, last_block_list, _, _) =
+      segment.get_postings_lists(&["term1".to_string()]).unwrap();
+
+    let mut accumulator: HashSet<u32> = HashSet::new();
+    let result = segment.get_matching_doc_ids_with_logical_or(
+      &postings_lists,
+      &last_block_list,
+      &mut accumulator,
+    );
+
+    assert!(result.is_ok());
+
+    assert!(
+      !accumulator.is_empty(),
+      "Accumulator should not be empty for a single non-empty postings list"
+    );
+    let unique_ids: std::collections::HashSet<_> = accumulator.iter().collect();
+    assert_eq!(
+      unique_ids.len(),
+      accumulator.len(),
+      "Document IDs should be unique"
+    );
+  }
+
+  #[test]
+  fn test_get_matching_doc_ids_with_logical_or_overlapping_ids() {
+    let segment = create_mock_segment();
+    let (postings_lists, last_block_list, _, _) = segment
+      .get_postings_lists(&["term1".to_string(), "term2".to_string()])
+      .unwrap();
+
+    let mut accumulator: HashSet<u32> = HashSet::new();
+    let result = segment.get_matching_doc_ids_with_logical_or(
+      &postings_lists,
+      &last_block_list,
+      &mut accumulator,
+    );
+
+    assert!(result.is_ok());
+    let unique_ids: std::collections::HashSet<_> = accumulator.iter().collect();
+    assert_eq!(
+      unique_ids.len(),
+      accumulator.len(),
+      "Document IDs should be unique after deduplication"
     );
   }
 }

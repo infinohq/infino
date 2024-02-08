@@ -280,7 +280,8 @@ span_clauses               = { start_bracket ~ (span_query ~ (comma ~ span_query
 
 // Boolean Queries: https://opensearch.org/docs/latest/query-dsl/compound/bool/
 bool_query  = { start_brace ~ quote ~ "bool" ~ quote ~ colon ~ bool_search ~ end_brace }
-bool_search = { start_brace ~ (must_clauses? ~ must_not_clauses? ~ should_clauses? ~ filter_clauses? ~ minimum_should_match? ~ boost?) ~ end_brace }
+bool_search = { start_brace ~ (bool_clause ~ (comma ~ bool_clause)*)? ~ end_brace }
+bool_clause = { must_clauses | must_not_clauses | should_clauses | filter_clauses }
 
 // Boosting Queries: https://opensearch.org/docs/latest/query-dsl/compound/boosting/
 boosting_query  = { start_brace ~ quote ~ "boosting" ~ quote ~ colon ~ boosting_search ~ end_brace }
@@ -377,7 +378,7 @@ envelope                            = { geo_type ~ "envelope" ~ quote ~ "" ~ com
 envelope_coordinates                = { start_brace ~ top_left ~ comma ~ bottom_right ~ end_brace }
 exclude                             = { quote ~ "exclude" ~ quote ~ colon ~ string }
 field_element                       = { string }
-fieldname                           = { quote ~ word ~ quote }
+fieldname                           = { quote ~ word_with_spaces ~ quote }
 fields                              = { start_bracket ~ quote ~ "fields" ~ quote ~ colon ~ field_element ~ (comma ~ field_element)* ~ end_bracket }
 filter                              = { bool_filter | term_filter | range_filter }
 filter_clauses                      = { quote ~ "filter" ~ quote ~ query_array }
@@ -439,7 +440,7 @@ not_after                           = { quote ~ "not_after" ~ quote ~ colon ~ in
 not_before                          = { quote ~ "not_before" ~ quote ~ colon ~ integer }
 not_within                          = { quote ~ "not_within" ~ quote ~ colon ~ integer }
 number_of_fragments                 = { quote ~ "number_of_fragments" ~ quote ~ colon ~ number }
-operator                            = { quote ~ "operator" ~ quote ~ colon ~ (quote ~ "OR" ~ quote | quote ~ "AND" ~ quote) }
+operator                            = { quote ~ "operator" ~ quote ~ colon ~ quote ~ term_boolean ~ quote }
 order                               = { quote ~ "order" ~ quote ~ colon ~ start_brace ~ (order_key | order_subagg) ~ end_brace }
 order_direction                     = { quote ~ "asc" ~ quote | quote ~ "desc" ~ quote }
 order_key                           = { quote ~ "_key" ~ quote ~ colon ~ order_direction }
@@ -523,8 +524,9 @@ positive_integer = @{ ASCII_DIGIT+ }
 quote            = _{ "\"" }
 start_brace      = _{ ws ~ "{" ~ ws }
 start_bracket    = _{ ws ~ "[" ~ ws }
+term_boolean     =  { ("OR" | "AND") }
 unicode_escape   = @{ "\"u\"" ~ hex_digit ~ hex_digit ~ hex_digit ~ hex_digit }
-word             = @{ alpha_num_char+ }
+word_with_spaces = @{ (alpha_num_char | " ")+ }
 ws               = _{ (" " | "\t" | NEWLINE)* }
 
 // simple_boolean = @{ colon ~ ws ~ ("and" | "or") ~ ws } - this is needed somewhere but I can't remember

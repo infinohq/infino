@@ -7,7 +7,6 @@ pub mod index_manager;
 pub mod log;
 pub mod metric;
 pub(crate) mod policy_manager;
-pub(crate) mod request_manager;
 pub(crate) mod segment_manager;
 pub mod storage_manager;
 pub mod utils;
