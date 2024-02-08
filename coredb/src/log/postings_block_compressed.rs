@@ -172,6 +172,7 @@ mod tests {
     // We need to create a vector of length BLOCK_SIZE_FOR_LOG_MESSAGES, but with only values till short_len
     // filled up.
     let mut log_message_ids = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..short_len {
       log_message_ids[i] = i as u32;
     }
@@ -243,6 +244,7 @@ mod tests {
   fn test_incresing_by_one_values() {
     // When values are monotonically increasing by 1, only 1 bit is required to store each integer.
     let mut increasing_by_one = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..128 {
       increasing_by_one[i] = i as u32;
     }
@@ -273,6 +275,7 @@ mod tests {
   #[test]
   fn test_posting_block_compressed_clone() {
     let mut increasing_by_one = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..128 {
       increasing_by_one[i] = i as u32;
     }

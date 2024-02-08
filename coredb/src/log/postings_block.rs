@@ -259,6 +259,7 @@ mod tests {
   fn test_incresing_by_one_values() {
     // When values are monotonically increasing by 1, only 1 bit is required to store each integer.
     let mut increasing_by_one = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..BLOCK_SIZE_FOR_LOG_MESSAGES {
       increasing_by_one[i] = i as u32;
     }
@@ -280,10 +281,12 @@ mod tests {
     assert_eq!(pb, pb.clone());
 
     // Assert log message ids are same but not the same pointer
-    assert_eq!(pb.get_log_message_ids(), pb.clone().get_log_message_ids());
+    #[allow(clippy::redundant_clone)]
+    let pbc = pb.clone();
+    assert_eq!(pb.get_log_message_ids(), pbc.get_log_message_ids());
     assert_ne!(
       pb.get_log_message_ids().as_ptr(),
-      pb.clone().get_log_message_ids().as_ptr()
+      pbc.get_log_message_ids().as_ptr()
     );
   }
 }
