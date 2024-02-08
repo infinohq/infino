@@ -5,21 +5,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 pub const FIELD_DELIMITER: char = '~';
 
-/// Tokenize input string, and add the tokens to the output vector.
-/// The input string is assumed to not contain FIELD_DELIMITER, or the tokenization
-/// is expected to not do any special processing on FIELD_DELIMITER.
-///
-/// This is an optimization typically useful during insertions (see LogMessage::get_terms),
-/// where we do not want to tokenize on FIELD_DELIMITER.
-pub fn tokenize_without_field_delimiter<'a>(input: &'a str, output: &mut Vec<&'a str>) {
-  let tokens = input.unicode_words();
-  output.extend(tokens);
-}
-
 /// Tokenize a given string. Note that FIELD_DELIMITER is a special character that we
 /// use a field separator in queries, and so we do not tokenize on "~".
-///
-/// Note that for input such as "a~b c"
 pub fn tokenize<'a>(input: &'a str, output: &mut Vec<&'a str>) {
   if !input.contains(FIELD_DELIMITER) {
     // Input does not have FIELD_DELIMITER, so just do unicode_words().
