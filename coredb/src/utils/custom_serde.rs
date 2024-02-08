@@ -86,3 +86,48 @@ pub mod atomic_cell_serde {
     Ok(AtomicCell::new(T::deserialize(d).unwrap()))
   }
 }
+
+/*
+/// Custom serde serialize and deserialize implementation for Arc<RwLock<[T]>>.
+pub mod arc_rwlock_array_serde {
+  use std::fmt::Formatter;
+
+  use serde::de::{Deserializer, SeqAccess};
+  use serde::ser::SerializeTuple;
+  use serde::ser::Serializer;
+  use serde::{Deserialize, Serialize};
+  use serde_with::de::DeserializeAsWrap;
+  use serde_with::DeserializeAs;
+
+  use crate::utils::sync::{Arc, RwLock};
+
+  /// Serialize the array type wrapped in Arc<RwLock>.
+  fn serialize<const N: usize, S, T>(
+    t: Arc<RwLock<&[T; N]>>,
+    serializer: S,
+  ) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+    T: Serialize,
+  {
+    let cloned = t.clone();
+    let value = *cloned.read().unwrap();
+    let mut ser_tuple = serializer.serialize_tuple(N)?;
+    for elem in value {
+      ser_tuple.serialize_element(elem)?;
+    }
+    ser_tuple.end()
+  }
+
+  pub fn deserialize<'de, D, T, N>(d: D) -> Result<Arc<RwLock<[T; N]>>, D::Error>
+  where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + std::marker::Copy,
+    N: usize;
+  {
+    let val = T::deserialize(d)?;
+    let rwlock_val = Arc::new(RwLock::new([val; 128]));
+    Ok(rwlock_val)
+  }
+}
+*/

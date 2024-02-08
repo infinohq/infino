@@ -70,12 +70,14 @@ impl PartialEq for PostingsBlockCompressed {
 
 impl Eq for PostingsBlockCompressed {}
 
-impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
+impl TryFrom<&PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> for PostingsBlockCompressed {
   type Error = CoreDBError;
 
   /// Convert PostingsBlock to PostingsBlockCompressed, i.e. compress a postings block.
-  fn try_from(postings_block: &PostingsBlock) -> Result<Self, Self::Error> {
-    let log_message_ids_len = postings_block.get_log_message_ids().read().unwrap().len();
+  fn try_from(
+    postings_block: &PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>,
+  ) -> Result<Self, Self::Error> {
+    let log_message_ids_len = postings_block.len();
     if log_message_ids_len != BLOCK_SIZE_FOR_LOG_MESSAGES {
       // We only encode integers in blocks of BLOCK_SIZE_FOR_LOG_MESSAGES.
       error!(
@@ -89,7 +91,7 @@ impl TryFrom<&PostingsBlock> for PostingsBlockCompressed {
       ));
     }
 
-    let entire = postings_block.get_log_message_ids().read().unwrap();
+    let entire = postings_block.get_log_message_ids();
     let initial: u32 = entire[0];
     let num_bits: u8 = BITPACKER.num_bits_sorted(initial, entire.as_slice());
 
@@ -165,8 +167,19 @@ mod tests {
   fn test_too_short_vector() {
     // We only compress integers with length BLOCK_SIZE_FOR_LOG_MESSAGES, so shorter than this
     // length should give an error.
-    let short: Vec<u32> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let pb = PostingsBlock::new_with_log_message_ids(short);
+    let short_len = 10;
+
+    // We need to create a vector of length BLOCK_SIZE_FOR_LOG_MESSAGES, but with only values till short_len
+    // filled up.
+    let mut log_message_ids = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    #[allow(clippy::needless_range_loop)]
+    for i in 0..short_len {
+      log_message_ids[i] = i as u32;
+    }
+
+    let pb = PostingsBlock::new_with_log_message_ids(short_len, log_message_ids);
+
+    // We shouldn't be able to compress a postings block with length short_len.
     let retval = PostingsBlockCompressed::try_from(&pb);
     assert!(retval.is_err());
   }
@@ -175,8 +188,13 @@ mod tests {
   fn test_too_long_vector() {
     // We only compress integers with length BLOCK_SIZE_FOR_LOG_MESSAGES, so longer than this
     // length should give an error.
-    let long: Vec<u32> = vec![1000; 1000];
-    let pb = PostingsBlock::new_with_log_message_ids(long);
+
+    // Create an array of length 1028, which is longer than BLOCK_SIZE_FOR_LOG_MESSAGES.
+    let long = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    let long_len = 1028;
+    let pb = PostingsBlock::new_with_log_message_ids(long_len, long);
+
+    // We shouldn't be able to compress a postings block with length long_len.
     let retval = PostingsBlockCompressed::try_from(&pb);
     assert!(retval.is_err());
   }
@@ -185,8 +203,8 @@ mod tests {
   fn test_all_same_values() {
     // The compression only works when the values are in monotonically increasing order.
     // When passed vector with same elements, the returned vector is empty.
-    let same: Vec<u32> = vec![1000; 128];
-    let pb = PostingsBlock::new_with_log_message_ids(same);
+    let same = [1000; 128];
+    let pb = PostingsBlock::new_with_log_message_ids(same.len(), same);
     let retval = PostingsBlockCompressed::try_from(&pb).unwrap();
 
     assert_eq!(retval.get_initial(), 1000);
@@ -206,10 +224,10 @@ mod tests {
     // of length expected_length. The first expetced_length-1 bytes are integers from 0 to expected_length-1,
     // while the last byte is expected_last_uncompressed.
 
-    let mut uncompressed: Vec<u32> = vec![0; 127];
-    uncompressed.push(last_uncompressed_input);
+    let mut uncompressed = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    uncompressed[uncompressed.len() - 1] = last_uncompressed_input;
 
-    let pb = PostingsBlock::new_with_log_message_ids(uncompressed);
+    let pb = PostingsBlock::new_with_log_message_ids(BLOCK_SIZE_FOR_LOG_MESSAGES, uncompressed);
     let pbc = PostingsBlockCompressed::try_from(&pb).unwrap();
     assert_eq!(pbc.log_message_ids_compressed.len() as u32, expected_length);
 
@@ -225,11 +243,12 @@ mod tests {
   #[test]
   fn test_incresing_by_one_values() {
     // When values are monotonically increasing by 1, only 1 bit is required to store each integer.
-    let mut increasing_by_one: Vec<u32> = Vec::new();
+    let mut increasing_by_one = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..128 {
-      increasing_by_one.push(i);
+      increasing_by_one[i] = i as u32;
     }
-    let pb = PostingsBlock::new_with_log_message_ids(increasing_by_one);
+    let pb = PostingsBlock::new_with_log_message_ids(128, increasing_by_one);
     let pbc = PostingsBlockCompressed::try_from(&pb).unwrap();
 
     // Each encoded bit is expected to be 1, except for the initial value (where it would be 0).
@@ -241,12 +260,12 @@ mod tests {
     assert_eq!(pbc.log_message_ids_compressed.len(), 16);
     assert_eq!(*pbc.log_message_ids_compressed, expected);
 
-    let mem_pb_log_message_ids = size_of_val(pb.get_log_message_ids().read().unwrap().as_slice());
+    let mem_pb_log_message_ids = size_of_val(&pb.get_log_message_ids()[..]);
     let mem_pbc_log_message_ids_compressed = size_of_val(pbc.log_message_ids_compressed.as_slice());
 
     // The memory consumed by log_message_ids for uncompressed block should be equal to sizeof(u32)*128,
     // as there are 128 integers, each occupying 4 bytes.
-    assert_eq!(mem_pb_log_message_ids, 4 * 128);
+    assert_eq!(mem_pb_log_message_ids, 4 * BLOCK_SIZE_FOR_LOG_MESSAGES);
 
     // The memory consumed by log_message_ids for compressed block should be equal to sizeof(u8)*16,
     // as there are 16 integers, each occupying 1 byte.
@@ -255,11 +274,12 @@ mod tests {
 
   #[test]
   fn test_posting_block_compressed_clone() {
-    let mut increasing_by_one: Vec<u32> = Vec::new();
+    let mut increasing_by_one = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..128 {
-      increasing_by_one.push(i);
+      increasing_by_one[i] = i as u32;
     }
-    let pb = PostingsBlock::new_with_log_message_ids(increasing_by_one);
+    let pb = PostingsBlock::new_with_log_message_ids(128, increasing_by_one);
     let pbc = PostingsBlockCompressed::try_from(&pb).unwrap();
 
     assert_eq!(pbc, pbc.clone());
