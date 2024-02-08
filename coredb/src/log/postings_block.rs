@@ -82,7 +82,8 @@ impl PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
     trace!("Appending log message id {}", log_message_id);
 
     // First, acquire a write lock so that another thread cannot change the number of log messages in the block.
-    let mut log_message_ids = self.log_message_ids.write().unwrap();
+    let cloned = self.log_message_ids.clone();
+    let mut log_message_ids = cloned.write().unwrap();
     let num_log_messages = self.num_log_messages.load();
 
     if num_log_messages >= BLOCK_SIZE_FOR_LOG_MESSAGES {
