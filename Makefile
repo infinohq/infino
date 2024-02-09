@@ -21,11 +21,6 @@ run-debug:
 	echo "Running $(prog) server in debug mode..."
 	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
-run-profile:
-	echo "Building $(prog) server using profile dhat..."
-	cargo build --profile dhat
-	cargo run --features dhat-heap --bin $(prog)
-
 rust-check:
 	cargo fmt --all -- --check
 	cargo check
@@ -83,3 +78,18 @@ docker-push: docker-check
 example-apache-logs:
 	cd examples/rust-apache-logs && \
 	cargo run $(release) --bin rust-apache-logs -- --file $(file) --count $(count)
+
+# Start Infino server for memory profiling using dhat.
+run-profile-server:
+	echo "Building $(prog) server using profile dhat..."
+	cargo build --profile dhat
+	cargo run --features dhat-heap --bin $(prog)
+
+# Run memory profiling using dhat for CoreDB.
+# # You can run this as below:
+# `make run-profile-coredb-only file=../datasets/apache-tiny.log count=100000`
+run-profile-coredb-only:
+	echo "Building $(prog) server using profile dhat..."
+	cargo build --profile dhat
+	cd examples/rust-apache-logs && \
+        cargo run --features dhat-heap --bin rust-apache-logs -- --coredb_only --file $(file) --count $(count)

@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "server", "coredb"
+    "server", "coredb", "examples/rust-apache-logs"
 ]
 exclude = [
-    "benches", "examples/rust-apache-logs"
+    "benches"
 ]
 resolver = "2"
 

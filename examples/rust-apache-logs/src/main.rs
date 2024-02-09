@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
 use chrono::DateTime;
@@ -7,7 +8,12 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncBufReadExt;
 use tokio::{fs::File, io::BufReader};
 
-#[allow(dead_code)]
+use coredb::CoreDB;
+
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[derive(Debug, Serialize, Deserialize)]
 /// An Apache log entry - for Apache access logs.
 struct ApacheLogEntry {
@@ -18,6 +24,20 @@ struct ApacheLogEntry {
   response_size: usize,
   referrer: String,
   user_agent: String,
+}
+
+impl ApacheLogEntry {
+  fn get_fields_map(&self) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    map.insert("ip".to_string(), self.ip.clone());
+    map.insert("request".to_string(), self.request.clone());
+    map.insert("status_code".to_string(), self.status_code.to_string());
+    map.insert("response_size".to_string(), self.response_size.to_string());
+    map.insert("referrer".to_string(), self.referrer.clone());
+    map.insert("user_agent".to_string(), self.user_agent.clone());
+
+    map
+  }
 }
 
 /// Parse a datetime string to a timestamp in microseconds.
@@ -61,7 +81,7 @@ fn parse_log_line(line: &str) -> Option<ApacheLogEntry> {
 }
 
 /// Parse arguments from the command line and return logs file name, count of lines to index, and Infino URL.
-fn get_args() -> (String, i64, String) {
+fn get_args() -> (String, i64, String, bool) {
   // Parse command line arguments.
   let matches = Command::new("Index Apache Logs")
     .version("1.0")
@@ -82,6 +102,12 @@ fn get_args() -> (String, i64, String) {
         .required(false)
         .default_value("http://localhost:3000"),
     )
+    .arg(
+      arg!(--coredb_only)
+        .required(false)
+        .default_value("false")
+        .value_parser(clap::value_parser!(bool)),
+    )
     .get_matches();
 
   let file = matches
@@ -93,8 +119,11 @@ fn get_args() -> (String, i64, String) {
   let infino_url = matches
     .get_one::<String>("infino_url")
     .expect("Could not get infino url");
+  let coredb_only = matches
+    .get_one::<bool>("coredb_only")
+    .expect("Could not get coredb_only flag");
 
-  (file.clone(), *count, infino_url.clone())
+  (file.clone(), *count, infino_url.clone(), *coredb_only)
 }
 
 async fn index_logs_batch(client: &Client, append_url: &str, logs_batch: &Vec<ApacheLogEntry>) {
@@ -108,10 +137,11 @@ async fn index_logs_batch(client: &Client, append_url: &str, logs_batch: &Vec<Ap
 }
 
 /// Helper function to index max_docs from file using Infino API.
-async fn index_using_infino(
+async fn index(
   file_path: &str,
   max_docs: i64,
   infino_url: &str,
+  coredb_only: bool,
 ) -> Result<(), std::io::Error> {
   let mut num_docs = 0;
   let num_docs_per_batch = 1000;
@@ -121,6 +151,10 @@ async fn index_using_infino(
   let now = Instant::now();
   let append_url = &format!("{}/append_log", infino_url);
   let client = reqwest::Client::new();
+
+  // User only when coredb_only is set to true.
+  let config_dir_path = "../../config";
+  let coredb = CoreDB::new(config_dir_path).await.unwrap();
 
   let file = File::open(file_path).await.unwrap();
   let reader = BufReader::new(file);
@@ -136,25 +170,28 @@ async fn index_using_infino(
         );
       break;
     }
-
+    let log = parse_log_line(&line).unwrap();
     num_docs += 1;
+
+    if coredb_only {
+      // Index the log entry using CoreDB.
+      let timestamp = log.date;
+      let fields = log.get_fields_map();
+      let text = fields.values().cloned().collect::<Vec<String>>().join(" ");
+      coredb.append_log_message(timestamp, &fields, &text);
+      continue;
+    }
+
+    // Index the log entries in batches using Infino REST API.
     num_docs_in_this_batch += 1;
 
-    let log = parse_log_line(&line);
-    match log {
-      Some(log) => {
-        logs_batch.push(log);
-        if num_docs_in_this_batch == num_docs_per_batch {
-          index_logs_batch(&client, append_url, &logs_batch).await;
-          logs_batch.clear();
-          num_docs_in_this_batch = 0;
-          println!("Indexed batch {}", batch_count);
-          batch_count += 1;
-        }
-      }
-      None => {
-        println!("Could not parse log line: {}", line);
-      }
+    logs_batch.push(log);
+    if num_docs_in_this_batch == num_docs_per_batch {
+      index_logs_batch(&client, append_url, &logs_batch).await;
+      logs_batch.clear();
+      num_docs_in_this_batch = 0;
+      println!("Indexed batch {}", batch_count);
+      batch_count += 1;
     }
   }
 
@@ -175,16 +212,19 @@ async fn index_using_infino(
 
 #[tokio::main]
 async fn main() {
+  #[cfg(feature = "dhat-heap")]
+  let _profiler = dhat::Profiler::new_heap();
+
   // Get the command line arguments.
-  let (file, count, infino_url) = get_args();
+  let (file, count, infino_url, coredb_only) = get_args();
 
   println!(
-    "Indexing first {} log lines from file {} using infino url {}",
-    count, file, infino_url
+    "Indexing first {} log lines from file {} coredb_only flag {}",
+    count, file, coredb_only
   );
 
-  // Index 'count' number of lines from 'file' using 'infino_url'.
-  index_using_infino(&file, count, &infino_url)
+  // Index 'count' number of lines from 'file' using 'infino_url' or coredb directly.
+  index(&file, count, &infino_url, coredb_only)
     .await
     .expect("Could not index logs");
 }
