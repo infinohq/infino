@@ -36,7 +36,7 @@ where
     }
   }
 
-  #[allow(clippy::blocks_in_conditions)]
+  #[allow(clippy::blocks_in_if_conditions)]
   match panic::catch_unwind(|| {
     closure();
   }) {
