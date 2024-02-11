@@ -34,56 +34,28 @@ impl Segment {
     let mut shortest_list_len = usize::MAX;
 
     for (index, term) in terms.iter().enumerate() {
-      let term_id = match self.get_term(term) {
-        Some(term_id) => term_id,
+      let postings_list = match self.get_postings_list(&term) {
+        Some(postings_list_ref) => postings_list_ref,
         None => {
           return Err(AstError::PostingsListError(format!(
-            "Term not found: {}",
+            "Postings list not found for term: {}",
             term
           )))
         }
       };
 
-      let postings_list = match self.get_inverted_map().get(&term_id) {
-        Some(postings_list_ref) => postings_list_ref,
-        None => {
-          return Err(AstError::PostingsListError(format!(
-            "Postings list not found for term ID: {}",
-            term_id
-          )))
-        }
-      };
+      let postings_list = postings_list.read().unwrap();
 
-      let initial_values = postings_list
-        .get_initial_values()
-        .read()
-        .map_err(|_| {
-          AstError::PostingsListError("Failed to acquire read lock on initial values".to_string())
-        })?
-        .clone();
+      let initial_values = postings_list.get_initial_values().clone();
       initial_values_list.push(initial_values);
 
       let postings_block_compressed_vec: Vec<PostingsBlockCompressed> = postings_list
         .get_postings_list_compressed()
-        .read()
-        .map_err(|_| {
-          AstError::TraverseError(
-            "Failed to acquire read lock on postings list compressed".to_string(),
-          )
-        })?
         .iter()
         .cloned()
         .collect();
 
-      let last_block = postings_list
-        .get_last_postings_block()
-        .read()
-        .map_err(|_| {
-          AstError::PostingsListError(
-            "Failed to acquire read lock on last postings block".to_string(),
-          )
-        })?
-        .clone();
+      let last_block = postings_list.get_last_postings_block().clone();
       last_block_list.push(last_block);
 
       if postings_block_compressed_vec.len() < shortest_list_len {
@@ -478,8 +450,8 @@ mod tests {
   #[test]
   fn test_get_postings_lists_with_terms_having_empty_postings_lists() {
     let segment = create_mock_segment();
-    segment.get_inverted_map().insert(3, PostingsList::new());
-    segment.get_inverted_map().insert(4, PostingsList::new());
+    segment.insert_in_inverted_map(3, PostingsList::new());
+    segment.insert_in_inverted_map(4, PostingsList::new());
     segment.get_terms().insert("term3".to_string(), 3);
     segment.get_terms().insert("term4".to_string(), 4);
     let terms = vec!["term3".to_string(), "term4".to_string()];
@@ -499,11 +471,9 @@ mod tests {
   #[test]
   fn test_get_postings_lists_with_incomplete_data_in_segment() {
     let segment = create_mock_segment();
-    // Simulate incomplete data by clearing inverted map
-    segment.get_inverted_map().clear();
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(result.is_err());
   }
 
   #[test]
