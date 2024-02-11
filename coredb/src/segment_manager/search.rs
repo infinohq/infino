@@ -34,7 +34,7 @@ impl Segment {
     let mut shortest_list_len = usize::MAX;
 
     for (index, term) in terms.iter().enumerate() {
-      let postings_list = match self.get_postings_list(&term) {
+      let postings_list = match self.get_postings_list(term) {
         Some(postings_list_ref) => postings_list_ref,
         None => {
           return Err(AstError::PostingsListError(format!(
@@ -49,11 +49,8 @@ impl Segment {
       let initial_values = postings_list.get_initial_values().clone();
       initial_values_list.push(initial_values);
 
-      let postings_block_compressed_vec: Vec<PostingsBlockCompressed> = postings_list
-        .get_postings_list_compressed()
-        .iter()
-        .cloned()
-        .collect();
+      let postings_block_compressed_vec: Vec<PostingsBlockCompressed> =
+        postings_list.get_postings_list_compressed().to_vec();
 
       let last_block = postings_list.get_last_postings_block().clone();
       last_block_list.push(last_block);

@@ -12,6 +12,7 @@ use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
+use crate::segment_manager::inverted_map::InvertedMap;
 use crate::segment_manager::query_dsl::Rule;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
@@ -46,7 +47,7 @@ pub struct Segment {
 
   /// Inverted map - term-id to a postings list.
   /// Applicable only for log messages.
-  inverted_map: DashMap<u32, Arc<RwLock<PostingsList>>>,
+  inverted_map: InvertedMap,
 
   /// Forward map - log_message-id to the corresponding log message.
   /// Applicable only for log messages.
@@ -71,7 +72,7 @@ impl Segment {
       metadata: Metadata::new(),
       terms: DashMap::new(),
       forward_map: DashMap::new(),
-      inverted_map: DashMap::new(),
+      inverted_map: InvertedMap::new(),
       labels: DashMap::new(),
       time_series: DashMap::new(),
       commit_lock: TokioMutex::new(thread::current().id()),
@@ -94,10 +95,7 @@ impl Segment {
     // Attempt to find the term in the terms DashMap
     self.terms.get(term).and_then(|term_id| {
       // If found, use the term_id to look up the corresponding PostingsList in the inverted_map
-      self
-        .inverted_map
-        .get(&term_id)
-        .map(|postings_list| postings_list.clone())
+      self.inverted_map.get_postings_list(*term_id)
     })
   }
 
@@ -163,9 +161,7 @@ impl Segment {
   // map for a term, but not in terms or corresponding document in the forward map).
   #[cfg(test)]
   pub fn insert_in_inverted_map(&self, term_id: u32, postings_list: PostingsList) {
-    self
-      .inverted_map
-      .insert(term_id, Arc::new(RwLock::new(postings_list)));
+    self.inverted_map.insert_unchecked(term_id, postings_list);
   }
   #[cfg(test)]
   pub fn insert_in_terms(&self, term: &str, term_id: u32) {
@@ -203,9 +199,7 @@ impl Segment {
       // Need to lock the shard that contains the term, so that some other thread doesn't insert the same term.
       // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
       {
-        let arc_rwlock_pl = self.inverted_map.entry(term_id).or_default().clone();
-        let pl = &mut *arc_rwlock_pl.write().unwrap();
-        pl.append(log_message_id);
+        self.inverted_map.append(term_id, log_message_id);
       }
     }
 
@@ -357,7 +351,7 @@ impl Segment {
 
     let (metadata, metadata_size): (Metadata, _) = storage.read(&metadata_path).await?;
     let (terms, terms_size): (DashMap<String, u32>, _) = storage.read(&terms_path).await?;
-    let (inverted_map, inverted_map_size): (DashMap<u32, Arc<RwLock<PostingsList>>>, _) =
+    let (inverted_map, inverted_map_size): (InvertedMap, _) =
       storage.read(&inverted_map_path).await?;
     let (forward_map, forward_map_size): (DashMap<u32, LogMessage>, _) =
       storage.read(&forward_map_path).await?;
