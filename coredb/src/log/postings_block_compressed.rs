@@ -102,13 +102,13 @@ impl TryFrom<&PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> for PostingsBlockCompr
     let compressed_len =
       BITPACKER.compress_sorted(initial, entire.as_slice(), &mut compressed[..], num_bits);
 
-    // The compressed vector is only the first compressed_len entries.
-    let log_message_ids_compressed = compressed[0..compressed_len].to_vec();
+    // Resize the compressed vector in-place to match the actual compressed data length.
+    compressed.resize(compressed_len, 0);
 
     let postings_block_compressed: Self = Self {
       initial,
       num_bits,
-      log_message_ids_compressed,
+      log_message_ids_compressed: compressed,
     };
 
     debug!(
