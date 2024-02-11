@@ -47,6 +47,11 @@ impl InvertedMap {
       .inverted_map
       .insert(term_id, Arc::new(RwLock::new(postings_list)));
   }
+
+  #[cfg(test)]
+  pub fn clear_inverted_map(&self) {
+    self.inverted_map.clear();
+  }
 }
 
 /// Custom Serialize for InvertedMap

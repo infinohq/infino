@@ -468,6 +468,9 @@ mod tests {
   #[test]
   fn test_get_postings_lists_with_incomplete_data_in_segment() {
     let segment = create_mock_segment();
+    // Simulate incomplete data by clearing inverted map
+    segment.clear_inverted_map();
+
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = segment.get_postings_lists(&terms);
     assert!(result.is_err());

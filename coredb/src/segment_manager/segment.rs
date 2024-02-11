@@ -167,6 +167,10 @@ impl Segment {
   pub fn insert_in_terms(&self, term: &str, term_id: u32) {
     self.terms.insert(term.to_owned(), term_id);
   }
+  #[cfg(test)]
+  pub fn clear_inverted_map(&self) {
+    self.inverted_map.clear_inverted_map();
+  }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
   pub fn append_log_message(
