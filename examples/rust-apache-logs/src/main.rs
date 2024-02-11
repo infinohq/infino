@@ -213,7 +213,7 @@ async fn index(
 #[tokio::main]
 async fn main() {
   #[cfg(feature = "dhat-heap")]
-  let _profiler = dhat::Profiler::new_heap();
+  let _profiler = dhat::Profiler::builder().trim_backtraces(None).build();
 
   // Get the command line arguments.
   let (file, count, infino_url, coredb_only) = get_args();
