@@ -5,6 +5,7 @@
 //!
 //! Segments are time-sharded sections of telemetry data that are indexed for fast retrieval.
 
+pub(super) mod inverted_map;
 mod metadata;
 pub(crate) mod query_dsl;
 pub(crate) mod search;

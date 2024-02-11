@@ -2,35 +2,31 @@
 // https://www.elastic.co/licensing/elastic-license
 
 use bitpacking::BitPacker;
-use crossbeam::atomic::AtomicCell;
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::log::constants::{BITPACKER, BLOCK_SIZE_FOR_LOG_MESSAGES};
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
-use crate::utils::custom_serde::atomic_cell_serde;
 use crate::utils::error::CoreDBError;
-use crate::utils::sync::{Arc, RwLock};
 
 /// Represents (an uncompressed) postings block.
 #[serde_as]
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PostingsBlock<const N: usize> {
   /// Number of log messages currently in the array.
-  #[serde(with = "atomic_cell_serde")]
-  num_log_messages: AtomicCell<usize>,
+  num_log_messages: usize,
 
   /// Array of log messages.
-  #[serde_as(as = "Arc<RwLock<[_; N]>>")]
-  log_message_ids: Arc<RwLock<[u32; N]>>,
+  #[serde_as(as = "[_; N]")]
+  log_message_ids: [u32; N],
 }
 
 impl PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
   /// Create a new postings block.
   pub fn new() -> Self {
-    let log_message_ids = Arc::new(RwLock::new([0; BLOCK_SIZE_FOR_LOG_MESSAGES]));
-    let num_log_messages = AtomicCell::new(0);
+    let log_message_ids = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
+    let num_log_messages = 0;
 
     PostingsBlock {
       log_message_ids,
@@ -43,9 +39,6 @@ impl PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
     num_log_messages: usize,
     log_message_ids: [u32; BLOCK_SIZE_FOR_LOG_MESSAGES],
   ) -> Self {
-    let num_log_messages = AtomicCell::new(num_log_messages);
-    let log_message_ids = Arc::new(RwLock::new(log_message_ids));
-
     PostingsBlock {
       num_log_messages,
       log_message_ids,
@@ -61,13 +54,12 @@ impl PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
         num_log_messages, BLOCK_SIZE_FOR_LOG_MESSAGES,
       )));
     }
-    let num_log_messages = AtomicCell::new(log_message_ids.len());
+    let num_log_messages = log_message_ids.len();
 
     let mut log_message_ids_array = [0; BLOCK_SIZE_FOR_LOG_MESSAGES];
     for (index, log_message_id) in log_message_ids.iter().enumerate() {
       log_message_ids_array[index] = *log_message_id;
     }
-    let log_message_ids_array = Arc::new(RwLock::new(log_message_ids_array));
 
     let pb = PostingsBlock {
       num_log_messages,
@@ -78,15 +70,10 @@ impl PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
   }
 
   /// Append a log message id to this postings block.
-  pub fn append(&self, log_message_id: u32) -> Result<(), CoreDBError> {
+  pub fn append(&mut self, log_message_id: u32) -> Result<(), CoreDBError> {
     trace!("Appending log message id {}", log_message_id);
 
-    // First, acquire a write lock so that another thread cannot change the number of log messages in the block.
-    let cloned = self.log_message_ids.clone();
-    let mut log_message_ids = cloned.write().unwrap();
-    let num_log_messages = self.num_log_messages.load();
-
-    if num_log_messages >= BLOCK_SIZE_FOR_LOG_MESSAGES {
+    if self.num_log_messages >= BLOCK_SIZE_FOR_LOG_MESSAGES {
       debug!(
         "The postings block capacity is full as it already has {} messages",
         BLOCK_SIZE_FOR_LOG_MESSAGES
@@ -97,41 +84,40 @@ impl PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
     // Note that we don't synchronize across log_message_id generation and its subsequent append to the postings block.
     // So, there is a chance that the call to append arrives out of order. Check for that scenario to make sure that
     // the log_message_ids vector is always sorted.
-    if num_log_messages == 0 || log_message_ids[num_log_messages - 1] < log_message_id {
+    if self.num_log_messages == 0
+      || self.log_message_ids[self.num_log_messages - 1] < log_message_id
+    {
       // The log_message_id is already greater than the last one - so only append it at the end.
-      log_message_ids[num_log_messages] = log_message_id;
+      self.log_message_ids[self.num_log_messages] = log_message_id;
     } else {
       // We are inserting in a sorted list - so find the position to insert using binary search.
-      let pos = log_message_ids[0..num_log_messages]
+      let pos = self.log_message_ids[0..self.num_log_messages]
         .binary_search(&log_message_id)
         .unwrap_or_else(|e| e);
 
       // Insert log_message_id at the position 'pos', shifting the elements after 'pos' to the right.
-      log_message_ids[pos..].rotate_right(1);
-      log_message_ids[pos] = log_message_id;
+      self.log_message_ids[pos..].rotate_right(1);
+      self.log_message_ids[pos] = log_message_id;
     }
     // Insertion is complete - so increase the count of number of log messages.
-    self.num_log_messages.store(num_log_messages + 1);
+    self.num_log_messages += 1;
 
     Ok(())
   }
 
   /// Get the log message ids.
   pub fn get_log_message_ids(&self) -> Vec<u32> {
-    let cloned = self.log_message_ids.clone();
-    let log_message_ids = *cloned.read().unwrap();
-    let num_log_messages = self.num_log_messages.load();
-    log_message_ids[0..num_log_messages].to_vec()
+    self.log_message_ids[0..self.num_log_messages].to_vec()
   }
 
   /// Get the number of log message ids in this block. Note that this is used only in tests.
   pub fn len(&self) -> usize {
-    self.num_log_messages.load()
+    self.num_log_messages
   }
 
   /// Check if this postings block is empty.
   pub fn is_empty(&self) -> bool {
-    self.num_log_messages.load() == 0
+    self.num_log_messages == 0
   }
 }
 
@@ -208,14 +194,14 @@ mod tests {
 
   #[test]
   fn test_single_append() {
-    let pb = PostingsBlock::new();
+    let mut pb = PostingsBlock::new();
     pb.append(1000).unwrap();
     assert_eq!(pb.get_log_message_ids()[..], [1000]);
   }
 
   #[test]
   fn test_block_size_appends() {
-    let pb = PostingsBlock::new();
+    let mut pb = PostingsBlock::new();
     let mut expected: Vec<u32> = Vec::new();
 
     // Append BLOCK_SIZE_FOR_LOG_MESSAGES integers,
@@ -229,7 +215,7 @@ mod tests {
 
   #[test]
   fn test_too_many_appends() {
-    let pb = PostingsBlock::new();
+    let mut pb = PostingsBlock::new();
 
     // Append BLOCK_SIZE_FOR_LOG_MESSAGES integers,
     for i in 0..BLOCK_SIZE_FOR_LOG_MESSAGES {
@@ -275,7 +261,7 @@ mod tests {
   // Write test for Clone of PostingBlock
   #[test]
   fn test_clone() {
-    let pb = PostingsBlock::new();
+    let mut pb = PostingsBlock::new();
     pb.append(1000).unwrap();
     pb.append(2000).unwrap();
     pb.append(3000).unwrap();
