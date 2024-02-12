@@ -7,6 +7,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::log::postings_list::PostingsList;
+use crate::utils::error::CoreDBError;
 
 #[derive(Debug)]
 /// Represents an inverted index - a map of term-id to PostingsList.
@@ -33,12 +34,23 @@ impl InvertedMap {
       .map(|postings_list| postings_list.clone())
   }
 
-  pub fn append(&self, term_id: u32, log_message_id: u32) {
-    // Need to lock the shard that contains the term, so that some other thread doesn't insert the same term.
-    // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
-    let arc_rwlock_pl = self.inverted_map.entry(term_id).or_default().clone();
-    let pl = &mut *arc_rwlock_pl.write().unwrap();
-    pl.append(log_message_id);
+  pub fn append(&self, term_id: u32, log_message_id: u32) -> Result<(), CoreDBError> {
+    // Access or insert the postings list for the given term_id, ensuring thread-safe operation.
+    let arc_rwlock_pl = self
+      .inverted_map
+      .entry(term_id)
+      .or_default()
+      .value()
+      .clone();
+
+    // Acquire a write lock on the postings list and append the log message id.
+    // The scope of the write lock is minimized to the append operation only.
+    {
+      let mut pl = arc_rwlock_pl.write().unwrap(); // Lock is acquired here.
+      pl.append(log_message_id)?;
+    } // Lock is automatically released here as pl goes out of scope.
+
+    Ok(())
   }
 
   #[cfg(test)]
@@ -125,7 +137,9 @@ mod tests {
     for log_message_id in 1..=100 {
       let inverted_map = inverted_map.clone();
       let handle = thread::spawn(move || {
-        inverted_map.append(term_id, log_message_id);
+        inverted_map
+          .append(term_id, log_message_id)
+          .expect("Could not append to postings list");
       });
       handles.push(handle);
     }
@@ -163,9 +177,15 @@ mod tests {
 
     // Setup - Insert some data into the InvertedMap
     let mut postings_list = PostingsList::new();
-    postings_list.append(1);
-    postings_list.append(2);
-    postings_list.append(3);
+    postings_list
+      .append(1)
+      .expect("Could not append to postings list");
+    postings_list
+      .append(2)
+      .expect("Could not append to postings list");
+    postings_list
+      .append(3)
+      .expect("Could not append to postings list");
 
     inverted_map
       .inverted_map
