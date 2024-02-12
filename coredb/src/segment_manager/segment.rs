@@ -182,35 +182,28 @@ impl Segment {
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
+    // Increment the number of log messages appended so far, and get the id for this log message.
     let log_message_id = self.metadata.fetch_increment_log_message_count();
 
     // Update the inverted map.
-    for term in terms {
-      // We actually mutate this variable in the match block below, so suppress the warning.
-      #[allow(unused_mut)]
-      let mut term_id: u32;
+    terms.into_iter().for_each(|term| {
+      let term_id = *self
+        .terms
+        .entry(term)
+        .or_insert_with(|| self.metadata.fetch_increment_term_count());
 
-      // Need to lock the shard that contains the term, so that some other thread doesn't insert the same term.
-      // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
-      {
-        let entry = self
-          .terms
-          .entry(term)
-          .or_insert(self.metadata.fetch_increment_term_count());
-        term_id = *entry;
-      }
+      self
+        .inverted_map
+        .append(term_id, log_message_id)
+        .expect("Could not append to postings list");
+    });
 
-      // Need to lock the shard that contains the term, so that some other thread doesn't insert the same term.
-      // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
-      {
-        self.inverted_map.append(term_id, log_message_id);
-      }
-    }
+    // Insert in the forward map.
+    self.forward_map.insert(log_message_id, log_message);
 
-    // Update the forward map.
-    self.forward_map.insert(log_message_id, log_message); // insert in forward map
-
+    // Update the start and end time for this segment.
     self.update_start_end_time(time);
+
     Ok(())
   }
 

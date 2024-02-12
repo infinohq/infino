@@ -50,41 +50,41 @@ impl PostingsList {
   }
 
   /// Append a log message id to the postings list.
-  pub fn append(&mut self, log_message_id: u32) {
+  pub fn append(&mut self, log_message_id: u32) -> Result<(), CoreDBError> {
     trace!("Appending log message id {}", log_message_id);
 
     // Flag to check if the log message if being appended should be added to initial values.
-    let mut is_initial_value = false;
+    let is_initial_value = self.postings_list_compressed.is_empty() && self.last_block.is_empty();
 
-    if self.postings_list_compressed.is_empty() && self.last_block.is_empty() {
-      // First insertion in this postings list - so this needs to be set as initial value as well.
-      is_initial_value = true;
+    // Attempt to append the log_message_id to the last block.
+    match self.last_block.append(log_message_id) {
+      Ok(_) => {
+        if is_initial_value {
+          self.initial_values.push(log_message_id);
+        }
+      }
+      Err(e) if e == CoreDBError::CapacityFull(BLOCK_SIZE_FOR_LOG_MESSAGES) => {
+        // Compress the full last block and push it to postings_list_compressed
+        let postings_block_compressed = PostingsBlockCompressed::try_from(&self.last_block)
+          .expect("Failed to compress postings block");
+        self
+          .postings_list_compressed
+          .push(postings_block_compressed);
+
+        // Reset the last_block with a new PostingsBlock and retry appending
+        self.last_block = PostingsBlock::new();
+        self.last_block.append(log_message_id)?;
+
+        // Since we are creating a new last_block, add the log_message_id to initial values
+        self.initial_values.push(log_message_id);
+      }
+      Err(e) => {
+        // Return the error if any other error than CapacityFull is encountered.
+        return Err(e);
+      }
     }
 
-    // Try to append the log_message_id to the last block.
-    let retval = self.last_block.append(log_message_id);
-
-    if retval.is_err()
-      && retval.err().unwrap() == CoreDBError::CapacityFull(BLOCK_SIZE_FOR_LOG_MESSAGES)
-    {
-      // The last block is full. So,
-      // (1) compress last and append it to postings_list_compressed,
-      // (2) set last to an empty postings block, and append log_message_id to it.
-      let postings_block_compressed = PostingsBlockCompressed::try_from(&self.last_block).unwrap();
-      self
-        .postings_list_compressed
-        .push(postings_block_compressed);
-
-      self.last_block = PostingsBlock::new();
-      self.last_block.append(log_message_id).unwrap();
-
-      // We created a new last_block - so we should add the log_message_id to initial values.
-      is_initial_value = true;
-    }
-
-    if is_initial_value {
-      self.initial_values.push(log_message_id);
-    }
+    Ok(())
   }
 
   /// Get the vector of compressed postings blocks, wrapped in RwLock.
@@ -163,7 +163,7 @@ mod tests {
   #[test]
   fn test_postings_one_entry() {
     let mut pl = PostingsList::new();
-    pl.append(100);
+    pl.append(100).expect("Could not append to postings list");
 
     // After adding only one entry, the last block as well as initial values should have it, while the
     // compressed list of postings blocks should be empty.
@@ -185,7 +185,8 @@ mod tests {
 
     // Append BLOCK_SIZE_FOR_LOG_MESSAGES log message ids.
     for i in 0..BLOCK_SIZE_FOR_LOG_MESSAGES {
-      pl.append(i as u32);
+      pl.append(i as u32)
+        .expect("Could not append to postings list");
     }
 
     // We should have all the log messages only populated in the last block - so the postings_list_compressed should be empty.
@@ -208,12 +209,14 @@ mod tests {
 
     // Add BLOCK_SIZE_FOR_LOG_MESSAGES entries.
     for i in 0..BLOCK_SIZE_FOR_LOG_MESSAGES {
-      pl.append(i as u32);
+      pl.append(i as u32)
+        .expect("Could not append to postings list");
     }
 
     // Add an additional entry so that one more block is created.
     let second_block_initial_value = 10_001;
-    pl.append(second_block_initial_value);
+    pl.append(second_block_initial_value)
+      .expect("Could not append to postings list");
 
     // There should be two blocks. The initial value of the first block should be the very first value appended,
     // while the initial value of the second block should be second_block_initial_value
@@ -245,7 +248,8 @@ mod tests {
 
     // Insert num_blocks*BLOCK_SIZE_FOR_LOG_MESSAGES entries.
     for i in 0..num_blocks * BLOCK_SIZE_FOR_LOG_MESSAGES {
-      pl.append(i as u32);
+      pl.append(i as u32)
+        .expect("Could not append to postings list");
       expected.push(i as u32);
     }
 
