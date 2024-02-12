@@ -66,17 +66,21 @@ impl LogMessage {
     let mut terms: Vec<String> = Vec::new();
 
     // Each word in text goes as it is in terms.
-    let mut tokens = Vec::new();
+    let mut tokens: Vec<&str> = Vec::new();
     tokenize(&text, &mut tokens);
     terms.extend(tokens.into_iter().map(|s| s.to_string()));
 
     // Each word in a field value goes with a perfix a of its field name, followed by ":".
     for field in &self.fields {
       let name = field.0;
-      let mut values = Vec::new();
+      let mut values: Vec<&str> = Vec::new();
       tokenize(field.1, &mut values);
       for value in values {
-        let term = format!("{}{}{}", name, FIELD_DELIMITER, value);
+        let term_capacity = name.len() + 1 + value.len();
+        let mut term = String::with_capacity(term_capacity);
+        term.push_str(name);
+        term.push(FIELD_DELIMITER);
+        term.push_str(value);
         terms.push(term);
       }
     }
