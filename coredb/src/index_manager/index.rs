@@ -339,6 +339,10 @@ impl Index {
       }
     }
 
+    // Build the query AST
+    let ast = QueryDslParser::parse(Rule::start, &json_query)
+      .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))?;
+
     // Now start the search
     let mut retval = Vec::new();
 
@@ -349,30 +353,19 @@ impl Index {
 
     // Search in each of the segments. Note these these are in reverse chronological order - so when we add a
     // limit to the number of results, one can break out of the loop when desired number of results are retrieved.
-
-    // TODO: The pest parser we use does not implement `Send`, so its instances can't be passed across threads.
-    // See more details: https://github.com/pest-parser/pest/issues/472
-    // Hence, its instances can't be passed across await points. To workaround this, we create an new AST for each
-    // iteration below. This needs to be optimized.
+    // If a segment isn't in memory, refresh it to memory from storage then execute the search.
     for segment_number in segment_numbers {
       let segment = self.memory_segments_map.get(&segment_number);
       let mut results = match segment {
-        Some(segment) => {
-          let ast = QueryDslParser::parse(Rule::start, &json_query)
-            .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))?;
-
-          segment
-            .search_logs(&ast.clone(), range_start_time, range_end_time)
-            .unwrap_or_else(|_| Vec::new())
-        }
+        Some(segment) => segment
+          .search_logs(&ast.clone(), range_start_time, range_end_time)
+          .await
+          .unwrap_or_else(|_| Vec::new()),
         None => {
           let segment = self.refresh_segment(segment_number).await?;
-
-          let ast = QueryDslParser::parse(Rule::start, &json_query)
-            .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))?;
-
           segment
             .search_logs(&ast, range_start_time, range_end_time)
+            .await
             .unwrap_or_else(|_| Vec::new())
         }
       };

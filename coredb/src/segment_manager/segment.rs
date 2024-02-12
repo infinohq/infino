@@ -385,14 +385,15 @@ impl Segment {
   }
 
   /// Search the segment for the given query.
-  pub fn search_logs(
+  pub async fn search_logs(
     &self,
-    ast: &Pairs<Rule>,
+    ast: &Pairs<'_, Rule>,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SegmentSearchError> {
     let matching_document_ids = self
       .traverse_ast(&ast.clone())
+      .await
       .map_err(SegmentSearchError::AstError)?;
 
     // Since matching_document_ids is a HashSet, no need to dedup
@@ -517,8 +518,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_new_segment() {
+  #[tokio::test]
+  async fn test_new_segment() {
     is_sync_send::<Segment>();
 
     let segment = Segment::new();
@@ -527,10 +528,10 @@ mod tests {
     let query_node_result = create_term_test_node("doesnotexist");
 
     if let Ok(query_node) = query_node_result {
-      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
+      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
         eprintln!("Error in search_logs: {:?}", err);
       } else {
-        let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
+        let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         assert!(results.is_empty());
       }
     } else {
@@ -538,18 +539,18 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_default_segment() {
+  #[tokio::test]
+  async fn test_default_segment() {
     let segment = Segment::default();
     assert!(segment.is_empty());
 
     let query_node_result = create_term_test_node("doesnotexist");
 
     if let Ok(query_node) = query_node_result {
-      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
+      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
         eprintln!("Error in search_logs: {:?}", err);
       } else {
-        let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
+        let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         assert!(results.is_empty());
       }
     } else {
@@ -656,7 +657,9 @@ mod tests {
     let query_node_result_for_this = create_term_test_node("this");
 
     if let Ok(query_node_for_this) = query_node_result_for_this {
-      let results = from_disk_segment.search_logs(&query_node_for_this, 0, u64::MAX);
+      let results = from_disk_segment
+        .search_logs(&query_node_for_this, 0, u64::MAX)
+        .await;
       match &results {
         Ok(logs) => {
           assert_eq!(logs.len(), 1);
@@ -677,7 +680,9 @@ mod tests {
     let query_node_result_for_blah = create_term_test_node("blah");
 
     if let Ok(query_node_for_blah) = query_node_result_for_blah {
-      let results = from_disk_segment.search_logs(&query_node_for_blah, 0, u64::MAX);
+      let results = from_disk_segment
+        .search_logs(&query_node_for_blah, 0, u64::MAX)
+        .await;
       match results {
         Ok(logs) => {
           assert!(logs.is_empty());
@@ -824,8 +829,8 @@ mod tests {
     assert!(!segment.is_overlap(end + 1, end + 100));
   }
 
-  #[test]
-  fn test_duplicates() {
+  #[tokio::test]
+  async fn test_duplicates() {
     let segment = Segment::new();
 
     segment
@@ -849,7 +854,7 @@ mod tests {
     let query_node_result = create_term_test_node("hello");
 
     if let Ok(query_node) = query_node_result {
-      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX) {
+      if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
         eprintln!("Error in search_logs: {:?}", err);
       } else {
         // Sort the expected results to match the sorted results from the function.
@@ -857,7 +862,7 @@ mod tests {
         expected_results.sort();
 
         // Sort the actual results.
-        let results = segment.search_logs(&query_node, 0, u64::MAX).unwrap();
+        let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         let mut actual_results: Vec<String> = results
           .iter()
           .map(|log| log.get_text().to_owned())

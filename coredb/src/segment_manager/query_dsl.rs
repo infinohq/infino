@@ -30,7 +30,7 @@ pub struct QueryDslParser;
 
 impl Segment {
   /// Walk the AST using an iterator and process each node
-  pub fn traverse_ast(&self, nodes: &Pairs<Rule>) -> Result<HashSet<u32>, AstError> {
+  pub async fn traverse_ast(&self, nodes: &Pairs<'_, Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack = VecDeque::new();
 
     // Push all nodes to the stack to start processing
@@ -42,9 +42,9 @@ impl Segment {
 
     // Pop the nodes off the stack and process
     while let Some(node) = stack.pop_front() {
-      let processing_result = self.process_query(&node);
+      let processing_result = self.query_dispatcher(&node);
 
-      match processing_result {
+      match processing_result.await {
         Ok(node_results) => {
           results.extend(node_results);
         }
@@ -63,11 +63,11 @@ impl Segment {
   }
 
   /// General dispatcher for query processing
-  fn process_query(&self, node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  async fn query_dispatcher(&self, node: &Pair<'_, Rule>) -> Result<HashSet<u32>, AstError> {
     match node.as_rule() {
-      Rule::term_query => self.process_term_query(node),
-      Rule::match_query => self.process_match_query(node),
-      Rule::bool_query => self.process_bool_query(node),
+      Rule::term_query => self.process_term_query(node).await,
+      Rule::match_query => self.process_match_query(node).await,
+      Rule::bool_query => self.process_bool_query(node).await,
       _ => Err(AstError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
@@ -76,7 +76,7 @@ impl Segment {
   }
 
   // Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
-  fn process_bool_query(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  async fn process_bool_query(&self, root_node: &Pair<'_, Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
@@ -88,13 +88,13 @@ impl Segment {
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
         Rule::must_clauses => {
-          must_results = self.process_bool_subtree(&node, true)?;
+          must_results = self.process_bool_subtree(&node, true).await?;
         }
         Rule::should_clauses => {
-          should_results = self.process_bool_subtree(&node, false)?;
+          should_results = self.process_bool_subtree(&node, false).await?;
         }
         Rule::must_not_clauses => {
-          must_not_results = self.process_bool_subtree(&node, false)?;
+          must_not_results = self.process_bool_subtree(&node, false).await?;
         }
         _ => {
           for inner_node in node.into_inner() {
@@ -125,9 +125,9 @@ impl Segment {
     Ok(final_results)
   }
 
-  fn process_bool_subtree(
+  async fn process_bool_subtree(
     &self,
-    root_node: &Pair<Rule>,
+    root_node: &Pair<'_, Rule>,
     must: bool,
   ) -> Result<HashSet<u32>, AstError> {
     let mut queue = VecDeque::new();
@@ -135,8 +135,25 @@ impl Segment {
 
     let mut results = HashSet::new();
 
+    // To avoid recursion, we replicate query dispatching here.
     while let Some(node) = queue.pop_front() {
-      match self.process_query(&node) {
+      let processing_result = match node.as_rule() {
+        Rule::term_query => self.process_term_query(&node).await,
+        Rule::match_query => self.process_match_query(&node).await,
+        Rule::bool_query => {
+          // For bool_query, instead of processing, we queue its children for processing
+          for inner_node in node.into_inner() {
+            queue.push_back(inner_node);
+          }
+          continue; // Skip the rest of the loop since we're not processing a bool_query directly
+        }
+        _ => Err(AstError::UnsupportedQuery(format!(
+          "Unsupported rule: {:?}",
+          node.as_rule()
+        ))),
+      };
+
+      match processing_result {
         Ok(node_results) => {
           if must {
             if results.is_empty() {
@@ -161,7 +178,7 @@ impl Segment {
   }
 
   /// Term Query Processor: https://opensearch.org/docs/latest/query-dsl/term/term/
-  fn process_term_query(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  async fn process_term_query(&self, root_node: &Pair<'_, Rule>) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
@@ -200,10 +217,14 @@ impl Segment {
     //
     // TODO: This is technically incorrect as the term should be an exact string match.
     if let Some(query_str) = query_text {
-      self.process_search(
-        self.analyze_query_text(query_str, fieldname, case_insensitive),
-        "AND",
-      )
+      self
+        .process_search(
+          self
+            .analyze_query_text(query_str, fieldname, case_insensitive)
+            .await,
+          "AND",
+        )
+        .await
     } else {
       Err(AstError::UnsupportedQuery(
         "Query string is missing".to_string(),
@@ -212,7 +233,10 @@ impl Segment {
   }
 
   /// Match Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match/
-  fn process_match_query(&self, root_node: &Pair<Rule>) -> Result<HashSet<u32>, AstError> {
+  async fn process_match_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+  ) -> Result<HashSet<u32>, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
@@ -250,10 +274,14 @@ impl Segment {
     }
 
     if let Some(query_str) = query_text {
-      self.process_search(
-        self.analyze_query_text(query_str, fieldname, case_insensitive),
-        term_operator,
-      )
+      self
+        .process_search(
+          self
+            .analyze_query_text(query_str, fieldname, case_insensitive)
+            .await,
+          term_operator,
+        )
+        .await
     } else {
       Err(AstError::UnsupportedQuery(
         "Query string is missing".to_string(),
@@ -262,7 +290,7 @@ impl Segment {
   }
 
   /// Prep the query terms for the search
-  fn analyze_query_text(
+  async fn analyze_query_text(
     &self,
     query_text: &str,
     fieldname: Option<&str>,
@@ -294,7 +322,7 @@ impl Segment {
   }
 
   /// Search the index for the terms extracted from the AST
-  fn process_search(
+  async fn process_search(
     &self,
     terms: Vec<String>,
     term_operator: &str,
@@ -362,8 +390,8 @@ mod tests {
     segment
   }
 
-  #[test]
-  fn test_search_with_must_query() {
+  #[tokio::test]
+  async fn test_search_with_must_query() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -378,7 +406,7 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
@@ -400,8 +428,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_should_query() {
+  #[tokio::test]
+  async fn test_search_with_should_query() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -417,7 +445,7 @@ mod tests {
 
     // Parse the query DSL
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
@@ -439,8 +467,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_must_not_query() {
+  #[tokio::test]
+  async fn test_search_with_must_not_query() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -455,7 +483,7 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert!(!results
             .iter()
@@ -471,8 +499,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_boolean_query() {
+  #[tokio::test]
+  async fn test_search_with_boolean_query() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -492,7 +520,7 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
@@ -515,8 +543,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_match_query() {
+  #[tokio::test]
+  async fn test_search_with_match_query() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -530,7 +558,7 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
@@ -550,8 +578,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_match_all_query_with_multiple_terms_anded() {
+  #[tokio::test]
+  async fn test_search_with_match_all_query_with_multiple_terms_anded() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -566,7 +594,7 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
@@ -591,8 +619,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_match_all_query_with_multiple_terms() {
+  #[tokio::test]
+  async fn test_search_with_match_all_query_with_multiple_terms() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -606,7 +634,7 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
@@ -631,8 +659,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_match_all_query() {
+  #[tokio::test]
+  async fn test_search_with_match_all_query() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -647,7 +675,7 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert!(results.iter().all(|log| log.get_text().contains("log")));
         }
@@ -661,8 +689,8 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_search_with_nested_boolean_query() {
+  #[tokio::test]
+  async fn test_search_with_nested_boolean_query() {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
@@ -685,7 +713,7 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
