@@ -3,6 +3,31 @@
 /* https://www.elastic.co/licensing/elastic-license
 **/
 
+/**
+ * Below permissions need to be added to java.policy for the plugin to work.
+ *  
+ * 1. permission org.opensearch.secure_sm.ThreadPermission "modifyArbitraryThread";
+ * 
+ *      The HttpClient::send() method seems to be using threads internally
+ *      and opensearch's security policy blocks them. We need to add the
+ *      below permissions to the java.policy to allowe HttpClient::send()
+ *      to work.
+ * 
+ *      It seems odd that opensearch's policy is blocking HttpClient::send().
+ *      We need to investigate this further to see if there are better
+ *      Http libraries we can use in opensearch.
+ * 
+ *      Reference: below issue in github seems to reference the
+ *                 modifyArbitraryThread permission.
+ *                 https://github.com/opensearch-project/OpenSearch/issues/5359
+ * 
+ */
+// 2. permission java.net.URLPermission "http://*:*/-", "*";
+/*
+ *      This permission is needed to allow outbound connections to Infino
+ *      server.
+ */
+
 package org.opensearch.infino;
 
 import java.net.http.HttpClient;
@@ -52,10 +77,8 @@ import static org.opensearch.rest.RestRequest.Method.*;
  * This effectively serves as the public API for Infino.
  *
  * Notes:
- * 1. Search window defaults to the past 30 days if not specified by the
- * request.
- * 2. To access Infino indexes, the REST caller must prefix the index name with
- * '/infino/'.
+ * 1. Search window defaults to the past 30 days if not specified by the request.
+ * 2. To access Infino indexes, the REST caller must prefix the index name with '/infino/'.
  * 3. Index creation or deletion is mirrored on Infino and in OpenSarch.
  * 4. We use our own thread pool to manage Infino requests.
  *
@@ -77,9 +100,32 @@ import static org.opensearch.rest.RestRequest.Method.*;
 public class InfinoRestHandler extends BaseRestHandler {
 
     private static final int MAX_RETRIES = 5; // Maximum number of retries for exponential backoff
-    private static final int THREADPOOLSIZE = 10; // Size of threadpool we will use for Infino
+    private static final int THREADPOOL_SIZE = 25; // Size of threadpool we will use for Infino
     private static final HttpClient httpClient = HttpClient.newHttpClient();
     private static final Logger logger = LogManager.getLogger(InfinoRestHandler.class);
+
+    /**
+     * Using a custom thread factory that can be used by the ScheduledExecutorService.
+     * We do this to add custom prefixes to the thread name. This will make debugging
+     * easier, if we ever have to debug.
+     */
+    protected static final class CustomThreadFactory implements ThreadFactory {
+        private final String poolName;
+
+        CustomThreadFactory(String poolName) {
+            this.poolName = poolName;
+        }
+
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r);
+            t.setName(poolName + "-Thread-" + t.getId());
+            if (t.isDaemon())
+                t.setDaemon(false);
+            if (t.getPriority() != Thread.NORM_PRIORITY)
+                t.setPriority(Thread.NORM_PRIORITY);
+            return t;
+        }
+    }
 
     /**
      * Get get a new instance of the class
@@ -91,9 +137,6 @@ public class InfinoRestHandler extends BaseRestHandler {
     protected InfinoSerializeRequestURI getInfinoSerializeRequestURI(RestRequest request) {
         return new InfinoSerializeRequestURI(request);
     }
-
-    // List of futures we need to clear on close
-    private static List<CompletableFuture<?>> futures = new ArrayList<>();
 
     /**
      * Get the HTTP Client
@@ -114,8 +157,8 @@ public class InfinoRestHandler extends BaseRestHandler {
         return "rest_handler_infino";
     }
 
-    private static final ScheduledExecutorService infinoThreadPool = Executors.newScheduledThreadPool(THREADPOOLSIZE,
-            new CustomThreadFactory("InfinoPluginThread"));
+    private static final ScheduledExecutorService infinoThreadPool = Executors.newScheduledThreadPool(THREADPOOL_SIZE,
+            new CustomThreadFactory("InfinoPluginThreadPool"));
 
     /**
      * Get thread pool
@@ -127,55 +170,10 @@ public class InfinoRestHandler extends BaseRestHandler {
     }
 
     /**
-     * Shutdown the thread pool and futures when the plugin is stopped
+     * Shutdown the thread pool when the plugin is stopped
      */
     public static void close() {
-        // Wait for all futures to complete
-        CompletableFuture<Void> allDone = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-        try {
-            allDone.get(30, TimeUnit.SECONDS); // Adjust the timeout as needed
-        } catch (Exception e) {
-            logger.error("Error shutting down futures w/ HTTP client", e);
-        }
-        // Clear the list of futures
-        futures.clear();
         infinoThreadPool.shutdown();
-    }
-
-    /**
-     * Use a privileged custom thread factory since Security Manager blocks
-     * access to thread groups.
-     *
-     * https://github.com/opensearch-project/OpenSearch/issues/5359
-     * 
-     * TODO: this is still not working without setting the following:
-     * 
-     * permission org.opensearch.secure_sm.ThreadPermission "modifyArbitraryThread";
-     * permission java.net.URLPermission "http://localhost:3000/-", "*";
-     * 
-     * in the local java policy file. By setting these, we can actually
-     * just use a regular thread pool. However, leaving this code
-     * in use to save effort in the future as Security Manager
-     * is deprecated after Java 17 and we may need this.
-     */
-    protected static final class CustomThreadFactory implements ThreadFactory {
-        private final AtomicInteger threadNumber = new AtomicInteger(1);
-        private final String namePrefix;
-
-        CustomThreadFactory(String baseName) {
-            namePrefix = baseName + "-";
-        }
-
-        public Thread newThread(Runnable r) {
-            return AccessController.doPrivileged((PrivilegedAction<Thread>) () -> {
-                Thread t = new Thread(r, namePrefix + threadNumber.getAndIncrement());
-                if (t.isDaemon())
-                    t.setDaemon(false);
-                if (t.getPriority() != Thread.NORM_PRIORITY)
-                    t.setPriority(Thread.NORM_PRIORITY);
-                return t;
-            });
-        }
     }
 
     /**
@@ -239,9 +237,8 @@ public class InfinoRestHandler extends BaseRestHandler {
 
         if (!response.isExists()) {
             CreateIndexRequest createIndexRequest = new CreateIndexRequest(indexName);
-            createIndexRequest.settings(Settings.builder()
-                    .put("index.number_of_shards", 1)
-                    .put("index.number_of_replicas", 1));
+            createIndexRequest
+                    .settings(Settings.builder().put("index.number_of_shards", 1).put("index.number_of_replicas", 1));
             try {
                 AcknowledgedResponse createResponse = client.admin().indices().create(createIndexRequest).actionGet();
                 if (createResponse.isAcknowledged()) {
@@ -272,8 +269,7 @@ public class InfinoRestHandler extends BaseRestHandler {
      */
     @Override
     public List<Route> routes() {
-        return unmodifiableList(asList(
-                new Route(GET, "/infino/{infinoIndex}/{infinoPath}"), // Search a collection
+        return unmodifiableList(asList(new Route(GET, "/infino/{infinoIndex}/{infinoPath}"), // Search a collection
                 new Route(GET, "/infino/{infinoIndex}/logs/{infinoPath}"), // Search logs on a collection
                 new Route(GET, "/infino/{infinoIndex}/metrics/{infinoPath}"), // Search metrics on a collection
                 new Route(GET, "/_cat/infino/{infinoIndex}"), // Get stats about a collection
@@ -331,8 +327,7 @@ public class InfinoRestHandler extends BaseRestHandler {
             createLuceneIndexIfNeeded(client, infinoSerializeRequestURI.getIndexName());
 
         // Create the HTTP request to forward to Infino Server
-        HttpRequest forwardRequest = HttpRequest.newBuilder()
-                .uri(URI.create(infinoSerializeRequestURI.getFinalUrl()))
+        HttpRequest forwardRequest = HttpRequest.newBuilder().uri(URI.create(infinoSerializeRequestURI.getFinalUrl()))
                 .method(infinoSerializeRequestURI.getMethod().toString(),
                         HttpRequest.BodyPublishers.ofString(request.content().utf8ToString()))
                 .build();
@@ -356,14 +351,11 @@ public class InfinoRestHandler extends BaseRestHandler {
             return;
         }
 
-        CompletableFuture<Void> future = backoffHttpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenAccept(response -> processResponse(backoffHttpClient, response, channel, client, indexName, method,
-                        attempt, request))
-                .exceptionally(e -> handleException(e, channel, client, indexName, method));
-
-        // Add the future to the list of futures to clear, protected by a thread lock
-        synchronized (futures) {
-            futures.add(future);
+        try {
+            HttpResponse<String> response = backoffHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            processResponse(backoffHttpClient, response, channel, client, indexName, method, attempt, request);
+        } catch (Exception e) {
+            handleException(e, channel, client, indexName, method);
         }
     }
 
@@ -398,8 +390,11 @@ public class InfinoRestHandler extends BaseRestHandler {
         }
 
         try {
+            // e.getMessage() sometimes returns null for ConnectException.
+            // Using e.toString() when getMessage() returns null.
+            String errMsg = e.getMessage() != null ? e.getMessage() : e.toString();
             Object restStatusInternalServerError = getRestStatusFromCode(500); // HTTP 500 Internal Server Error
-            BytesRestResponse errorResponse = createBytesRestResponse(restStatusInternalServerError, e.getMessage());
+            BytesRestResponse errorResponse = createBytesRestResponse(restStatusInternalServerError, errMsg);
             channel.sendResponse(errorResponse);
         } catch (Exception ex) {
             logger.error("Failed to send response using reflection", ex);
@@ -441,8 +436,8 @@ public class InfinoRestHandler extends BaseRestHandler {
             // Fall back to sending internal server error
             try {
                 BytesRestResponse errorResponse = createBytesRestResponse(getRestStatusFromCode(500), // 500 Internal
-                                                                                                      // Server
-                                                                                                      // Error
+                        // Server
+                        // Error
                         "Internal server error: " + e.getMessage());
                 channel.sendResponse(errorResponse);
             } catch (Exception ex) {
