@@ -357,18 +357,6 @@ public class InfinoRestHandler extends BaseRestHandler {
         } catch (Exception e) {
             handleException(e, channel, client, indexName, method);
         }
-
-        // CompletableFuture<Void> future = backoffHttpClient.sendAsync(request,
-        // HttpResponse.BodyHandlers.ofString())
-        // .thenAccept(response -> processResponse(backoffHttpClient, response, channel,
-        // client, indexName, method,
-        // attempt, request))
-        // .exceptionally(e -> handleException(e, channel, client, indexName, method));
-
-        // Add the future to the list of futures to clear, protected by a thread lock
-        // synchronized (futures) {
-        // futures.add(future);
-        // }
     }
 
     private void processResponse(HttpClient processHttpClient, HttpResponse<String> response, RestChannel channel,
