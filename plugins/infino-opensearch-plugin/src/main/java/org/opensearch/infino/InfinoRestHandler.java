@@ -21,8 +21,9 @@
  *                 modifyArbitraryThread permission.
  *                 https://github.com/opensearch-project/OpenSearch/issues/5359
  * 
- * 2. permission java.net.URLPermission "http://*:3000/-", "*";
- *
+ */
+// 2. permission java.net.URLPermission "http://*:*/-", "*";
+/*
  *      This permission is needed to allow outbound connections to Infino
  *      server.
  */
