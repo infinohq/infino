@@ -38,7 +38,8 @@
 				// start automatically and consume CPU + Memory.
 				"rust-analyzer.checkOnSave": false,
 				"gradle.autoDetect": "off",
-				"java.gradle.buildServer.enabled": "off"
+				"java.gradle.buildServer.enabled": "off",
+				"java.autobuild.enabled": false
 			},
 			"extensions": [
 				// List of vscode extensions to be installed in the devcontainer
