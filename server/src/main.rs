@@ -222,26 +222,7 @@ async fn app(
   )
 }
 
-#[tokio::main]
-/// Program entry point.
-async fn main() {
-  // If the `dhat-heap` feature is enabled, we use dhat to track heap usage.
-  #[cfg(feature = "dhat-heap")]
-  let _profiler = dhat::Profiler::new_heap();
-
-  // Load environment variables from ".env" and ".env-creds" file.
-  load_env();
-
-  // If log level isn't set, set it to info.
-  if env::var("RUST_LOG").is_err() {
-    env::set_var("RUST_LOG", "info")
-  }
-
-  // Set up logging.
-  tracing_subscriber::fmt()
-    .with_env_filter(EnvFilter::from_default_env())
-    .init();
-
+async fn run_server() {
   // Config directory path is relative to the current directory, and set in environment variable "INFINO_CONFIG_DIR_PATH".
   // Defaults to "config" if not set.
   let config_dir_path = &env::var("INFINO_CONFIG_DIR_PATH").unwrap_or_else(|_| "config".to_owned());
@@ -289,6 +270,40 @@ async fn main() {
     .expect("Error while completing the commit thread");
 
   info!("Completed Infino server shutdown");
+}
+
+/// Program entry point.
+fn main() {
+  // If the `dhat-heap` feature is enabled, we use dhat to track heap usage.
+  #[cfg(feature = "dhat-heap")]
+  let _profiler = dhat::Profiler::new_heap();
+
+  // Load environment variables from ".env" and ".env-creds" file.
+  load_env();
+
+  // If log level isn't set, set it to info.
+  if env::var("RUST_LOG").is_err() {
+    env::set_var("RUST_LOG", "info")
+  }
+
+  // Set up logging.
+  tracing_subscriber::fmt()
+    .with_env_filter(EnvFilter::from_default_env())
+    .init();
+
+  // TODO: this value could be read from config file, with the default calculated as below if not set.
+  // Set the number of threads to be 1 less than the number of CPUs (or 1 if there are fewer than 2 CPUs).
+  let num_threads = std::cmp::max(1, num_cpus::get() - 1);
+
+  let runtime = tokio::runtime::Builder::new_multi_thread()
+    .worker_threads(num_threads) // Limit the number of worker threads
+    .enable_all() // Enables both I/O and time drivers
+    .build()
+    .unwrap();
+
+  runtime.block_on(async {
+    run_server().await;
+  });
 }
 
 /// Helper function to parse json input.
