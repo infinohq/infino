@@ -14,6 +14,7 @@ use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
 use crate::segment_manager::inverted_map::InvertedMap;
 use crate::segment_manager::query_dsl::Rule;
+use crate::segment_manager::time_series_map::TimeSeriesMap;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
@@ -58,8 +59,8 @@ pub struct Segment {
   labels: DashMap<String, u32>,
 
   // Time series map - label-id to corresponding time series.
-  // Applicable only for log messages.
-  time_series: DashMap<u32, TimeSeries>,
+  // Applicable only for time series.
+  time_series_map: TimeSeriesMap,
 
   // Mutex for only one thread to commit this segment at a time.
   commit_lock: TokioMutex<thread::ThreadId>,
@@ -74,7 +75,7 @@ impl Segment {
       forward_map: DashMap::new(),
       inverted_map: InvertedMap::new(),
       labels: DashMap::new(),
-      time_series: DashMap::new(),
+      time_series_map: TimeSeriesMap::new(),
       commit_lock: TokioMutex::new(thread::current().id()),
     }
   }
@@ -152,7 +153,7 @@ impl Segment {
       && self.forward_map.is_empty()
       && self.inverted_map.is_empty()
       && self.labels.is_empty()
-      && self.time_series.is_empty()
+      && self.time_series_map.is_empty()
   }
 
   // This functions with #[cfg(test)] annotation below should only be used in testing -
@@ -247,11 +248,9 @@ impl Segment {
       }
 
       // Need to lock the shard that contains the label_id, so that some other thread doesn't insert the same label_id.
-      // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
+      // Add this in a separate block to minimize the locking time.
       {
-        let entry = self.time_series.entry(label_id).or_default();
-        let ts = &*entry;
-        ts.append(time, value);
+        self.time_series_map.append(label_id, time, value)?;
       }
     } // end for label in my_labels
 
@@ -300,8 +299,9 @@ impl Segment {
       uncompressed_labels_size, compressed_labels_size
     );
 
-    let (uncompressed_time_series_size, compressed_time_series_size) =
-      storage.write(&self.time_series, &time_series_path).await?;
+    let (uncompressed_time_series_size, compressed_time_series_size) = storage
+      .write(&self.time_series_map, &time_series_path)
+      .await?;
     debug!(
       "Serialized time series to {} bytes uncompressed, {} bytes compressed",
       uncompressed_time_series_size, compressed_time_series_size
@@ -344,7 +344,7 @@ impl Segment {
     let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
     let forward_map_path = get_joined_path(dir, FORWARD_MAP_FILE_NAME);
     let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
-    let time_series_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
+    let time_series_map_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
 
     let (metadata, metadata_size): (Metadata, _) = storage.read(&metadata_path).await?;
     let (terms, terms_size): (DashMap<String, u32>, _) = storage.read(&terms_path).await?;
@@ -353,8 +353,8 @@ impl Segment {
     let (forward_map, forward_map_size): (DashMap<u32, LogMessage>, _) =
       storage.read(&forward_map_path).await?;
     let (labels, labels_size): (DashMap<String, u32>, _) = storage.read(&labels_path).await?;
-    let (time_series, time_series_size): (DashMap<u32, TimeSeries>, _) =
-      storage.read(&time_series_path).await?;
+    let (time_series_map, time_series_map_size): (TimeSeriesMap, _) =
+      storage.read(&time_series_map_path).await?;
     let commit_lock = TokioMutex::new(thread::current().id());
 
     let total_size = metadata_size
@@ -362,7 +362,7 @@ impl Segment {
       + inverted_map_size
       + forward_map_size
       + labels_size
-      + time_series_size;
+      + time_series_map_size;
 
     let segment = Segment {
       metadata,
@@ -370,7 +370,7 @@ impl Segment {
       inverted_map,
       forward_map,
       labels,
-      time_series,
+      time_series_map,
       commit_lock,
     };
 
@@ -450,7 +450,12 @@ impl Segment {
     let label_id = self.labels.get(&label);
     let retval = match label_id {
       Some(label_id) => {
-        let ts = self.time_series.get(&label_id).unwrap();
+        let arc_ts = self
+          .time_series_map
+          .get_time_series(*label_id)
+          .unwrap()
+          .clone();
+        let ts = &*arc_ts.read().unwrap();
         ts.get_metrics(range_start_time, range_end_time)
       }
       None => Vec::new(),
@@ -625,27 +630,34 @@ mod tests {
     // Test time series.
     assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 1);
     let result = from_disk_segment.labels.get(&metric_name_key).unwrap();
-    let metric_name_id = result.value();
+    let metric_name_id = *result.value();
     let other_result = from_disk_segment.labels.get(&other_label_key).unwrap();
-    let other_label_id = &other_result.value();
-    let ts = from_disk_segment.time_series.get(metric_name_id).unwrap();
-    let other_label_ts = from_disk_segment.time_series.get(other_label_id).unwrap();
-    assert!(ts.eq(&other_label_ts));
-    assert_eq!(ts.get_compressed_blocks().read().unwrap().len(), 0);
-    assert_eq!(ts.get_initial_times().read().unwrap().len(), 1);
-    assert_eq!(ts.get_last_block().read().unwrap().len(), 1);
-    assert_eq!(
-      ts.get_last_block()
-        .read()
-        .unwrap()
-        .get_metrics_metric_points()
-        .read()
-        .unwrap()
-        .first()
-        .unwrap()
-        .get_value(),
-      100.0
-    );
+    let other_label_id = *other_result.value();
+    let ts = from_disk_segment
+      .time_series_map
+      .get_time_series(metric_name_id)
+      .unwrap();
+    {
+      let ts = ts.clone();
+      let ts = &*ts.read().unwrap();
+      let other_label_ts = from_disk_segment
+        .time_series_map
+        .get_time_series(other_label_id)
+        .unwrap();
+      let other_label_ts = other_label_ts.read().unwrap();
+      assert!(ts.eq(&other_label_ts));
+      assert_eq!(ts.get_compressed_blocks().len(), 0);
+      assert_eq!(ts.get_initial_times().len(), 1);
+      assert_eq!(ts.get_last_block().len(), 1);
+      assert_eq!(
+        ts.get_last_block()
+          .get_metric_points()
+          .first()
+          .unwrap()
+          .get_value(),
+        100.0
+      );
+    }
 
     let query_node_result_for_this = create_term_test_node("this");
 
