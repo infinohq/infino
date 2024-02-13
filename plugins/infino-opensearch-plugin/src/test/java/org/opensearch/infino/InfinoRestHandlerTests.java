@@ -74,7 +74,6 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
     private ExecutorService executorService;
     private InfinoSerializeRequestURI mockInfinoSerializeRequestURI;
     private InfinoRestHandler handler;
-    private List<CompletableFuture<?>> futures;
     private ThreadPool threadPool;
     private int mockStatusCode = 200;
     private String mockPath = "/default/path";
@@ -83,32 +82,26 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
     private MyHttpClient mockMyHttpClient = new MyHttpClient() {
         @Override
-        public CompletableFuture<HttpResponse<String>> sendAsyncRequest(
-                HttpRequest request,
+        public HttpResponse<String> sendRequest(HttpRequest request,
                 HttpResponse.BodyHandler<String> responseBodyHandler) {
-            // Return a CompletableFuture with the mocked response
-            CompletableFuture<HttpResponse<String>> future = new CompletableFuture<>();
-            future.complete(createFakeResponse(mockStatusCode, mockPath, mockBody));
-            futures.add(future);
-            return future;
+            // Return a mocked response
+            HttpResponse<String> response = createFakeResponse(mockStatusCode, mockPath, mockBody);
+            return response;
         }
     };
 
     public interface MyHttpClient {
-        CompletableFuture<HttpResponse<String>> sendAsyncRequest(
-                HttpRequest request,
+        HttpResponse<String> sendRequest(HttpRequest request,
                 HttpResponse.BodyHandler<String> responseBodyHandler);
     }
 
     // Use a single thread for testing
     // Mock the client and URI serializer
-    // Track futures so we can track thread leaks (might not be necessary)
     @Before
     public void setUp() throws Exception {
         super.setUp();
         executorService = Executors.newSingleThreadExecutor();
         mockInfinoSerializeRequestURI = mock(InfinoSerializeRequestURI.class);
-        futures = new ArrayList<>(); // Initialize the list to track futures
         threadPool = new TestThreadPool(this.getClass().getSimpleName() + "ThreadPool");
         mockNodeClient = new NodeClient(Settings.EMPTY, threadPool);
 
@@ -151,15 +144,6 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
             executorService.shutdownNow();
         }
 
-        // Wait for all futures to complete
-        CompletableFuture<Void> allDone = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-        try {
-            allDone.get(5, TimeUnit.SECONDS); // Adjust the timeout as needed
-        } catch (Exception e) {
-            e.printStackTrace(); // Consider proper logging
-        }
-        // Clear the list of futures
-        futures.clear();
     }
 
     // Create a fake HttpResponse for testing
@@ -212,15 +196,21 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
             @Override
             public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
                     BodyHandler<T> responseBodyHandler, PushPromiseHandler<T> pushPromiseHandler) {
-                throw new UnsupportedOperationException("Not implemented in mock");
+                throw new UnsupportedOperationException("sendAsync Not implemented in mock");
             }
 
             @Override
             public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
                     BodyHandler<T> responseBodyHandler) {
-                CompletableFuture<HttpResponse<String>> future = mockMyHttpClient.sendAsyncRequest(request,
+                throw new UnsupportedOperationException("sendAsync Not implemented in mock");
+            }
+
+            @Override
+            public <T> HttpResponse<T> send(HttpRequest request, BodyHandler<T> responseBodyHandler)
+                    throws IOException, InterruptedException {
+                HttpResponse<String> response = mockMyHttpClient.sendRequest(request,
                         convertToSpecificHandler(responseBodyHandler));
-                return future.thenApply(response -> convertToGenericResponse(response, responseBodyHandler));
+                return convertToGenericResponse(response, responseBodyHandler);
             }
 
             // Helper method to convert BodyHandler<T> to BodyHandler<String>
@@ -271,12 +261,6 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
             @Override
             public Optional<Executor> executor() {
                 return Optional.empty();
-            }
-
-            @Override
-            public <T> HttpResponse<T> send(HttpRequest request, BodyHandler<T> responseBodyHandler)
-                    throws IOException, InterruptedException {
-                throw new UnsupportedOperationException("Unimplemented method 'send'");
             }
         };
     }
