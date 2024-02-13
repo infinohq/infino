@@ -10,7 +10,7 @@ services:
     networks:
       - opensearch-net
   opensearch-node:
-    image: opensearch-infino:2.11.1
+    image: infinohq/infino-opensearch:2.11.1
     container_name: opensearch-node
     environment:
       - discovery.type=single-node
