@@ -6,10 +6,8 @@ use std::collections::BinaryHeap;
 use serde::{Deserialize, Serialize};
 
 use crate::metric::metric_point::MetricPoint;
-use crate::utils::custom_serde::rwlock_serde;
 use crate::utils::error::CoreDBError;
 use crate::utils::range::is_overlap;
-use crate::utils::sync::RwLock;
 
 use super::constants::BLOCK_SIZE_FOR_TIME_SERIES;
 use super::time_series_block::TimeSeriesBlock;
@@ -31,59 +29,50 @@ const METRIC_NAME_PREFIX: &str = "__name__";
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TimeSeries {
   /// A list of compressed time series blocks.
-  #[serde(with = "rwlock_serde")]
-  compressed_blocks: RwLock<Vec<TimeSeriesBlockCompressed>>,
+  compressed_blocks: Vec<TimeSeriesBlockCompressed>,
 
   /// We only compress blocks that have 128 integers. The last block which
   /// may have <=127 integers is stored in uncompressed form.
-  #[serde(with = "rwlock_serde")]
-  last_block: RwLock<TimeSeriesBlock>,
+  last_block: TimeSeriesBlock,
 
   /// The initial timestamps in the time series blocks. The length of the initial
   /// values will 1 plus length of the 'compressed_blocks'.
   /// (The additional 1 is to account for the uncompressed 'last' block)
-  #[serde(with = "rwlock_serde")]
-  initial_times: RwLock<Vec<u64>>,
+  initial_times: Vec<u64>,
 }
 
 impl TimeSeries {
   /// Create a new empty time series.
   pub fn new() -> Self {
     TimeSeries {
-      compressed_blocks: RwLock::new(Vec::new()),
-      last_block: RwLock::new(TimeSeriesBlock::new()),
-      initial_times: RwLock::new(Vec::new()),
+      compressed_blocks: Vec::new(),
+      last_block: TimeSeriesBlock::new(),
+      initial_times: Vec::new(),
     }
   }
 
   /// Append the given time and value to the time series.
-  pub fn append(&self, time: u64, value: f64) {
-    // Grab all the locks - as we may need to update any of these. In any scenario where all the locks need to captured,
-    // the consistent sequence of capturing is important as otherwise it can lead to deadlock.
-    let mut compressed_blocks_lock = self.compressed_blocks.write().unwrap();
-    let mut last_block_lock = self.last_block.write().unwrap();
-    let mut initial_times_lock = self.initial_times.write().unwrap();
-
+  pub fn append(&mut self, time: u64, value: f64) {
     let mut is_initial = false;
-    if last_block_lock.is_empty() {
+    if self.last_block.is_empty() {
       // First insertion in this time series.
       is_initial = true;
     }
 
     // Try to append the time+value to the last block.
-    let retval = last_block_lock.append(time, value);
+    let retval = self.last_block.append(time, value);
 
     if retval.is_err()
       && retval.err().unwrap() == CoreDBError::CapacityFull(BLOCK_SIZE_FOR_TIME_SERIES)
     {
       // The last block is full. So, compress it and append it time_series_block_compressed.
       let tsbc: TimeSeriesBlockCompressed =
-        TimeSeriesBlockCompressed::try_from(&*last_block_lock).unwrap();
-      compressed_blocks_lock.push(tsbc);
+        TimeSeriesBlockCompressed::try_from(&self.last_block).unwrap();
+      self.compressed_blocks.push(tsbc);
 
       // Create a new last block and append the time+value to it.
-      *last_block_lock = TimeSeriesBlock::new();
-      last_block_lock.append(time, value).unwrap();
+      self.last_block = TimeSeriesBlock::new();
+      self.last_block.append(time, value).unwrap();
 
       // We created a new block and pushed initial value - so set is_initial to true.
       is_initial = true;
@@ -91,7 +80,7 @@ impl TimeSeries {
 
     // If the is_initial flag is set, append the time to initial times vector.
     if is_initial {
-      initial_times_lock.push(time);
+      self.initial_times.push(time);
     }
   }
 
@@ -103,17 +92,14 @@ impl TimeSeries {
 
     let mut retval: BinaryHeap<MetricPoint> = BinaryHeap::new();
 
-    let initial_times = self.initial_times.read().unwrap();
-    let compressed_blocks = self.compressed_blocks.read().unwrap();
-    let last_block = self.last_block.read().unwrap();
-
     // Get overlapping metric points from the compressed blocks.
-    if initial_times.len() > 1 {
-      for i in 0..initial_times.len() - 1 {
-        let block_start = *initial_times.get(i).unwrap();
+    let initial_times_len = self.initial_times.len();
+    if initial_times_len > 1 {
+      for i in 0..initial_times_len - 1 {
+        let block_start = *self.initial_times.get(i).unwrap();
 
         // The maximum block end time would be one less than the start time of the next block.
-        let next_block_start = initial_times.get(i + 1).unwrap();
+        let next_block_start = self.initial_times.get(i + 1).unwrap();
         let block_end = if next_block_start > &0 {
           next_block_start - 1
         } else {
@@ -121,7 +107,7 @@ impl TimeSeries {
         };
 
         if is_overlap(block_start, block_end, range_start_time, range_end_time) {
-          let compressed_block = compressed_blocks.get(i).unwrap();
+          let compressed_block = self.compressed_blocks.get(i).unwrap();
           let block = TimeSeriesBlock::try_from(compressed_block).unwrap();
           let metric_points_in_range =
             block.get_metric_points_in_range(range_start_time, range_end_time);
@@ -133,9 +119,10 @@ impl TimeSeries {
     }
 
     // Get overlapping metric points from the last block.
-    if initial_times.last().is_some() {
-      let metric_points_in_range =
-        last_block.get_metric_points_in_range(range_start_time, range_end_time);
+    if self.initial_times.last().is_some() {
+      let metric_points_in_range = self
+        .last_block
+        .get_metric_points_in_range(range_start_time, range_end_time);
       for dp in metric_points_in_range {
         retval.push(dp);
       }
@@ -156,20 +143,38 @@ impl TimeSeries {
 
   #[cfg(test)]
   /// Get the last block, wrapped in RwLock.
-  pub fn get_last_block(&self) -> &RwLock<TimeSeriesBlock> {
+  pub fn get_last_block(&self) -> &TimeSeriesBlock {
     &self.last_block
   }
 
   #[cfg(test)]
-  /// Get the vector of compressed blocks, wrapped in RwLock.
-  pub fn get_compressed_blocks(&self) -> &RwLock<Vec<TimeSeriesBlockCompressed>> {
+  /// Get the vector of compressed blocks.
+  pub fn get_compressed_blocks(&self) -> &Vec<TimeSeriesBlockCompressed> {
     &self.compressed_blocks
   }
 
   #[cfg(test)]
-  /// Get the initial times, wrapped in RwLock.
-  pub fn get_initial_times(&self) -> &RwLock<Vec<u64>> {
+  /// Get the initial times.
+  pub fn get_initial_times(&self) -> &Vec<u64> {
     &self.initial_times
+  }
+
+  #[cfg(test)]
+  pub fn flatten(&self) -> Vec<MetricPoint> {
+    let mut retval = Vec::new();
+
+    // Flatten the compressed postings blocks.
+    for time_series_block_compressed in self.get_compressed_blocks() {
+      let time_series_block = TimeSeriesBlock::try_from(time_series_block_compressed).unwrap();
+      let mut metric_points = time_series_block.get_metric_points().clone();
+      retval.append(&mut metric_points);
+    }
+
+    // Flatten the last block.
+    let mut metric_points = self.last_block.get_metric_points().clone();
+    retval.append(&mut metric_points);
+
+    retval
   }
 }
 
@@ -181,16 +186,9 @@ impl Default for TimeSeries {
 
 impl PartialEq for TimeSeries {
   fn eq(&self, other: &Self) -> bool {
-    let compressed_blocks_lock = self.compressed_blocks.read().unwrap();
-    let other_compressed_blocks_lock = other.compressed_blocks.read().unwrap();
-    let last_block_lock = self.last_block.read().unwrap();
-    let other_last_block_lock = other.last_block.read().unwrap();
-    let initial_times_lock = self.initial_times.read().unwrap();
-    let other_initial_times_lock = other.initial_times.read().unwrap();
-
-    *compressed_blocks_lock == *other_compressed_blocks_lock
-      && *initial_times_lock == *other_initial_times_lock
-      && *last_block_lock == *other_last_block_lock
+    self.compressed_blocks == other.compressed_blocks
+      && self.initial_times == other.initial_times
+      && self.last_block == other.last_block
   }
 }
 
@@ -198,13 +196,12 @@ impl Eq for TimeSeries {}
 
 #[cfg(test)]
 mod tests {
-  use std::sync::Arc;
   use std::thread;
 
   use rand::Rng;
 
   use super::*;
-  use crate::utils::sync::is_sync_send;
+  use crate::utils::sync::{is_sync_send, Arc, RwLock};
 
   #[test]
   fn test_new() {
@@ -213,9 +210,9 @@ mod tests {
 
     // Check that a new time series is empty.
     let ts = TimeSeries::new();
-    assert_eq!(ts.compressed_blocks.read().unwrap().len(), 0);
-    assert_eq!(ts.last_block.read().unwrap().len(), 0);
-    assert_eq!(ts.initial_times.read().unwrap().len(), 0);
+    assert_eq!(ts.compressed_blocks.len(), 0);
+    assert_eq!(ts.last_block.len(), 0);
+    assert_eq!(ts.initial_times.len(), 0);
   }
 
   #[test]
@@ -223,49 +220,46 @@ mod tests {
     let ts = TimeSeries::default();
 
     // Check that a default time series is empty.
-    assert_eq!(ts.compressed_blocks.read().unwrap().len(), 0);
-    assert_eq!(ts.last_block.read().unwrap().len(), 0);
-    assert_eq!(ts.initial_times.read().unwrap().len(), 0);
+    assert_eq!(ts.compressed_blocks.len(), 0);
+    assert_eq!(ts.last_block.len(), 0);
+    assert_eq!(ts.initial_times.len(), 0);
   }
 
   #[test]
   fn test_one_entry() {
-    let ts = TimeSeries::new();
+    let mut ts = TimeSeries::new();
     ts.append(100, 200.0);
 
     // The entry should get apppended only to 'last' block.
-    assert_eq!(ts.compressed_blocks.read().unwrap().len(), 0);
+    assert_eq!(ts.compressed_blocks.len(), 0);
 
-    assert_eq!(ts.last_block.read().unwrap().len(), 1);
-    let last_block_lock = ts.last_block.read().unwrap();
-    let time_series_metric_points = &*last_block_lock.get_metrics_metric_points().read().unwrap();
+    assert_eq!(ts.last_block.len(), 1);
+    let last_block_lock = ts.last_block;
+    let time_series_metric_points = last_block_lock.get_metric_points();
     let metric_point = time_series_metric_points.first().unwrap();
     assert_eq!(metric_point.get_time(), 100);
     assert_eq!(metric_point.get_value(), 200.0);
 
-    assert_eq!(ts.initial_times.read().unwrap().len(), 1);
-    assert_eq!(ts.initial_times.read().unwrap().first().unwrap(), &100);
+    assert_eq!(ts.initial_times.len(), 1);
+    assert_eq!(ts.initial_times.first().unwrap(), &100);
   }
 
   #[test]
   fn test_block_size_entries() {
-    let ts = TimeSeries::new();
+    let mut ts = TimeSeries::new();
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
       ts.append(i as u64, i as f64);
     }
 
     // All the entries will go to 'last', as we have pushed exactly BLOCK_SIZE_FOR_TIME_SERIES entries.
-    assert_eq!(ts.compressed_blocks.read().unwrap().len(), 0);
-    assert_eq!(
-      ts.last_block.read().unwrap().len(),
-      BLOCK_SIZE_FOR_TIME_SERIES
-    );
-    assert_eq!(ts.initial_times.read().unwrap().len(), 1);
-    assert_eq!(ts.initial_times.read().unwrap().first().unwrap(), &0);
+    assert_eq!(ts.compressed_blocks.len(), 0);
+    assert_eq!(ts.last_block.len(), BLOCK_SIZE_FOR_TIME_SERIES);
+    assert_eq!(ts.initial_times.len(), 1);
+    assert_eq!(ts.initial_times.first().unwrap(), &0);
 
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
-      let last_block_lock = ts.last_block.read().unwrap();
-      let time_series_metric_points = &*last_block_lock.get_metrics_metric_points().read().unwrap();
+      let last_block_lock = ts.get_last_block();
+      let time_series_metric_points = last_block_lock.get_metric_points();
       let metric_point = time_series_metric_points.get(i).unwrap();
       assert_eq!(metric_point.get_time(), i as u64);
       assert_eq!(metric_point.get_value(), i as f64);
@@ -274,7 +268,7 @@ mod tests {
 
   #[test]
   fn test_block_size_plus_one_entries() {
-    let ts = TimeSeries::new();
+    let mut ts = TimeSeries::new();
 
     // Append block_size+1 entries, so that two blocks are created.
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES + 1 {
@@ -282,22 +276,21 @@ mod tests {
     }
 
     // We should have 1 compressed block with 128 entries, and a last block with 1 entry.
-    assert_eq!(ts.compressed_blocks.read().unwrap().len(), 1);
-    assert_eq!(ts.last_block.read().unwrap().len(), 1);
+    assert_eq!(ts.compressed_blocks.len(), 1);
+    assert_eq!(ts.last_block.len(), 1);
 
     // There should be 2 initial_times per the two blocks, with start times 0 and
     // BLOCK_SIZE_FOR_TIME_SERIES
-    assert_eq!(ts.initial_times.read().unwrap().len(), 2);
-    assert_eq!(ts.initial_times.read().unwrap().first().unwrap(), &0);
+    assert_eq!(ts.initial_times.len(), 2);
+    assert_eq!(ts.initial_times.first().unwrap(), &0);
     assert_eq!(
-      ts.initial_times.read().unwrap().get(1).unwrap(),
+      ts.initial_times.get(1).unwrap(),
       &(BLOCK_SIZE_FOR_TIME_SERIES as u64)
     );
 
-    let uncompressed =
-      TimeSeriesBlock::try_from(ts.compressed_blocks.read().unwrap().first().unwrap()).unwrap();
+    let uncompressed = TimeSeriesBlock::try_from(ts.compressed_blocks.first().unwrap()).unwrap();
     assert_eq!(uncompressed.len(), BLOCK_SIZE_FOR_TIME_SERIES);
-    let metric_points_lock = uncompressed.get_metrics_metric_points().read().unwrap();
+    let metric_points_lock = uncompressed.get_metric_points();
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
       let metric_point = metric_points_lock.get(i).unwrap();
       assert_eq!(metric_point.get_time(), i as u64);
@@ -308,7 +301,7 @@ mod tests {
   #[test]
   fn test_metric_points_in_range() {
     let num_blocks = 4;
-    let ts = TimeSeries::new();
+    let mut ts = TimeSeries::new();
     let num_metric_points = num_blocks * BLOCK_SIZE_FOR_TIME_SERIES as u64;
     for i in 0..num_metric_points {
       ts.append(i, i as f64);
@@ -343,7 +336,7 @@ mod tests {
     let num_blocks: usize = 10;
     let num_threads = 16;
     let num_metric_points_per_thread = num_blocks * BLOCK_SIZE_FOR_TIME_SERIES / num_threads;
-    let ts = Arc::new(TimeSeries::new());
+    let ts = Arc::new(RwLock::new(TimeSeries::new()));
 
     let mut handles = Vec::new();
     let expected = Arc::new(RwLock::new(Vec::new()));
@@ -355,7 +348,7 @@ mod tests {
         for _ in 0..num_metric_points_per_thread {
           let time = rng.gen_range(0..10000);
           let dp = MetricPoint::new(time, 1.0);
-          ts_arc.append(time, 1.0);
+          ts_arc.write().unwrap().append(time, 1.0);
           expected_arc.write().unwrap().push(dp);
         }
       });
@@ -366,9 +359,10 @@ mod tests {
       handle.join().unwrap();
     }
 
-    let compressed_blocks = ts.compressed_blocks.read().unwrap();
-    let last_block = ts.last_block.read().unwrap();
-    let initial_times = ts.initial_times.read().unwrap();
+    let ts = &*ts.read().unwrap();
+    let compressed_blocks = ts.get_compressed_blocks();
+    let last_block = ts.get_last_block();
+    let initial_times = ts.get_initial_times();
 
     assert_eq!(compressed_blocks.len(), num_blocks - 1);
     assert_eq!(last_block.len(), BLOCK_SIZE_FOR_TIME_SERIES);

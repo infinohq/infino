@@ -52,10 +52,7 @@ impl TryFrom<&TimeSeriesBlock> for TimeSeriesBlockCompressed {
 
   /// Compress the given time series block.
   fn try_from(time_series_block: &TimeSeriesBlock) -> Result<Self, Self::Error> {
-    let time_series_metric_points = &*time_series_block
-      .get_metrics_metric_points()
-      .read()
-      .unwrap();
+    let time_series_metric_points = time_series_block.get_metric_points();
 
     if time_series_metric_points.is_empty() {
       error!("Cannot compress an empty time series block");
@@ -115,7 +112,7 @@ mod tests {
     // The compression only works when the values are in monotonically increasing order.
     // When passed vector with the same elements, the returned vector is empty.
     let num_metric_points = 128;
-    let expected = TimeSeriesBlock::new();
+    let mut expected = TimeSeriesBlock::new();
     for _ in 0..num_metric_points {
       expected.append(10, 10.0).unwrap();
     }
@@ -128,7 +125,7 @@ mod tests {
   #[test]
   fn test_some_same_values() {
     let num_metric_points = 128;
-    let expected = TimeSeriesBlock::new();
+    let mut expected = TimeSeriesBlock::new();
     let mut start = 10;
     for _ in 0..num_metric_points / 4 {
       for _ in 0..4 {
@@ -148,7 +145,7 @@ mod tests {
   fn test_incresing_values() {
     // When time is monotonically increasing by the same difference, and value is constant,
     // we should see significant compression.
-    let expected = TimeSeriesBlock::new();
+    let mut expected = TimeSeriesBlock::new();
     let start = 10_000_000;
     let value = 0.0;
     for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
@@ -161,7 +158,7 @@ mod tests {
     assert_eq!(expected, received);
 
     // Each metric points takes 16 bytes, so the memory requirement would be BLOCK_SIZE_FOR_TIME_SERIES*16.
-    let received_metric_points = received.get_metrics_metric_points().read().unwrap();
+    let received_metric_points = received.get_metric_points();
     let mem_decompressed = size_of_val(received_metric_points.as_slice());
     assert_eq!(mem_decompressed, BLOCK_SIZE_FOR_TIME_SERIES * 16);
 

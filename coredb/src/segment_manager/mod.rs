@@ -10,3 +10,4 @@ mod metadata;
 pub(crate) mod query_dsl;
 pub(crate) mod search;
 pub(super) mod segment;
+pub(super) mod time_series_map;

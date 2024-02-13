@@ -1,33 +1,6 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-/// Custom serde serialize and deserialize implementation for RwLock.
-pub mod rwlock_serde {
-  use crate::utils::sync::RwLock;
-  use serde::de::Deserializer;
-  use serde::ser::Serializer;
-  use serde::{Deserialize, Serialize};
-
-  /// Serialize the type wrapped in RwLock.
-  pub fn serialize<S, T>(val: &RwLock<T>, s: S) -> Result<S::Ok, S::Error>
-  where
-    S: Serializer,
-    T: Serialize,
-  {
-    let inner = &*val.read().unwrap();
-    T::serialize(inner, s)
-  }
-
-  /// Deserialize the type and wrap it in RwLock.
-  pub fn deserialize<'de, D, T>(d: D) -> Result<RwLock<T>, D::Error>
-  where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-  {
-    Ok(RwLock::new(T::deserialize(d)?))
-  }
-}
-
 /// Custom serde serialize and deserialize implementation for Arc<RwLock>.
 pub mod arc_rwlock_serde {
   use crate::utils::sync::{Arc, RwLock};
