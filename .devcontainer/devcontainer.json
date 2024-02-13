@@ -40,7 +40,8 @@
 				"gradle.autoDetect": "off",
 				"java.gradle.buildServer.enabled": "off",
 				"java.import.gradle.enabled": false,
-				"java.configuration.detectJdksAtStart": false
+				"java.configuration.detectJdksAtStart": false,
+				"java.autobuild.enabled": false
 			},
 			"extensions": [
 				// List of vscode extensions to be installed in the devcontainer
