@@ -8,13 +8,13 @@ use log::debug;
 
 use dashmap::DashMap;
 
+use crate::log::inverted_map::InvertedMap;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
-use crate::segment_manager::inverted_map::InvertedMap;
+use crate::metric::time_series_map::TimeSeriesMap;
 use crate::segment_manager::query_dsl::Rule;
-use crate::segment_manager::time_series_map::TimeSeriesMap;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
