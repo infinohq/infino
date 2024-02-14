@@ -54,6 +54,12 @@ impl TimeSeriesMap {
   }
 }
 
+impl Default for TimeSeriesMap {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 /// Custom Serialize for TimeSeriesMap
 impl Serialize for TimeSeriesMap {
   fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

@@ -9,6 +9,7 @@
 //! IDs and is wrapped in a read-write lock for thread safety.
 
 pub(super) mod constants;
+pub(super) mod inverted_map;
 pub mod log_message;
 pub(super) mod postings_block;
 pub(super) mod postings_block_compressed;
