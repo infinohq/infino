@@ -504,7 +504,7 @@ zero_terms_query                    = { quote ~ "lt" ~ quote ~ colon ~ (quote ~ 
 
 // **** Low-level semantic definitions ****
 // _ prefix means silent; lets Pest know that these rules shouldn't create an AST node
-// @ prefix means atomix; lets Pest know to create a single token (i.e. a string or a number) instead
+// @ prefix means atomic; lets Pest know to create a single token (i.e. a string or a number) instead
 // of multiple characters in the AST
 alpha_num_char   = _{ ASCII_ALPHANUMERIC | "_" }
 boolean          =  { ("true" | "false") }
@@ -516,7 +516,6 @@ end_bracket      = _{ ws ~ "]" ~ ws }
 string           = @{ quote ~ (escaped_char | normal_char)+ ~ quote }
 escaped_char     = _{ "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
 float            = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
-hex_digit        = @{ ASCII_HEX_DIGIT }
 integer          = @{ ASCII_DIGIT+ }
 normal_char      = _{ !("\"" | "\\") ~ ANY }
 number           =  { (integer | float) }
@@ -525,7 +524,7 @@ quote            = _{ "\"" }
 start_brace      = _{ ws ~ "{" ~ ws }
 start_bracket    = _{ ws ~ "[" ~ ws }
 term_boolean     =  { ("OR" | "AND") }
-unicode_escape   = @{ "\"u\"" ~ hex_digit ~ hex_digit ~ hex_digit ~ hex_digit }
+unicode_escape   = @{ "\"u\"" ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT }
 word_with_spaces = @{ (alpha_num_char | " ")+ }
 ws               = _{ (" " | "\t" | NEWLINE)* }
 

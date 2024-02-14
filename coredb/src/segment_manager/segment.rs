@@ -385,7 +385,7 @@ impl Segment {
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, SegmentSearchError> {
     let matching_document_ids = self
-      .traverse_ast(&ast.clone())
+      .traverse_query_dsl_ast(&ast.clone())
       .await
       .map_err(SegmentSearchError::AstError)?;
 

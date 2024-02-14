@@ -1,0 +1,157 @@
+//! PEG grammar for Query DSL
+//! This grammar is whitespace-permissive.
+
+// NOTES
+// 1. There are implicit dependencies on grammar verification, for example the order
+// of query rules or whether rules are AND'd or OR'd. The query code assumes this grammar
+// is correct and the Pest parser validates the input before query code is executed. This is thus
+// a brittle area of code since there we do not have unit tests for grammar verification.
+// 
+// 2. Parser error messages are not intuitive. If you have any problems parsing your input, copy
+// this grammar into the live parser at https://pest.rs/ and debug with your json input.
+// 
+// 3. This grammar focuses on query syntax verification and is rewritten to avoid recursion.
+// 
+// 4. This grammar is intended to be compatible with Prometheus v2.45.0
+// https://github.com/prometheus/prometheus/tree/v2.45.0
+// 
+// 5. We define expressions as a series of operations or terms that can be combined with binary operators
+// - Compound expressions handle binary operations to avoid direct left recursion
+// - Unary expressions apply a unary operator to any non-operation expression
+// - Non-operation expressions are expressions that do not immediately involve binary or unary operations
+// - Expressions can also have an offset modifier
+
+start = _{ expression }
+
+expression               = _{ compound_expression | unary_expression | non_operation_expression }
+compound_expression      =  { non_operation_expression ~ (binary_operator ~ non_operation_expression)+ }
+unary_expression         =  { unary_operator ~ non_operation_expression }
+non_operation_expression =  { scalar | vector | subquery | aggregation_operation | function_call | expression_with_offset }
+expression_with_offset   =  { (scalar | vector | subquery | aggregation_operation | function_call) ~ offset_clause }
+
+// Unary and binary operators
+unary_operator  = { "-" }
+binary_operator = { "+" | "-" | "*" | "/" | "^" | "%" | "==" | "!=" | ">" | "<" | ">=" | "<=" | "and" | "or" | "unless" }
+
+// Offset clause to append to expressions
+offset_clause = { "offset" ~ duration }
+
+// Label matchers
+label_matchers = { start_brace ~ label_matcher ~ (comma ~ label_matcher)* ~ end_brace }
+label_matcher  = { label_name ~ match_operator ~ match_value }
+match_operator = { "=" | "!=" | "=~" | "!~" }
+match_value    = { string }
+
+// Range selector and subquery expression definitions
+range_selector = { start_bracket ~ duration ~ end_bracket }
+subquery       = { vector ~ start_bracket ~ duration ~ colon ~ duration? ~ end_bracket }
+
+// Aggregation operations, including grouping
+aggregation_operation = { aggregation_keyword ~ start_paren ~ ((group_modifier ~ vector ~ end_paren) | (vector ~ end_paren)) }
+group_modifier        = { ("by" | "without") ~ start_brace ~ label_list ~ end_brace }
+
+// Label list for aggregation operations
+label_list = { label_name ~ (comma ~ label_name)* }
+
+aggregation_keyword = { "sum" | "avg" | "max" | "min" | "count" | "quantile" | "stddev" | "stdvar" | "topk" | "bottomk" | "group" }
+scalar              = { number }
+vector              = { metric_identifier ~ label_matchers? ~ range_selector? }
+metric_identifier   = { identifier | string }
+
+// **** Low-level semantic definitions ****
+// _ prefix means silent; lets Pest know that these rules shouldn't create an AST node
+// @ prefix means atomic; lets Pest know to create a single token (i.e. a string or a number) instead
+identifier     = @{ ASCII_ALPHA ~ alphanum* }
+alphanum       = _{ ASCII_ALPHANUMERIC | "_" }
+colon          = _{ ws ~ ":" ~ ws }
+comma          = _{ ws ~ "," ~ ws }
+digits         = @{ ASCII_DIGIT+ }
+duration       =  { digits ~ ("s" | "m" | "h" | "d" | "w" | "y") }
+end_brace      = _{ ws ~ "}" ~ ws }
+end_bracket    = _{ ws ~ "]" ~ ws }
+end_paren      = _{ ws ~ ")" ~ ws }
+escaped_char   = _{ "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
+float          = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
+integer        = @{ ASCII_DIGIT+ }
+normal_char    = _{ !("\"" | "\\") ~ ANY }
+number         =  { (integer | float) }
+label_name     =  { identifier }
+quote          = _{ "\"" }
+start_brace    = _{ ws ~ "{" ~ ws }
+start_bracket  = _{ ws ~ "[" ~ ws }
+start_paren    = _{ ws ~ "(" ~ ws }
+string         = @{ quote ~ (escaped_char | normal_char)+ ~ quote }
+unicode_escape = @{ "\"u\"" ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT }
+ws             = _{ (" " | "\t" | NEWLINE)* }
+
+// Function calls
+function_call = { function_name ~ start_paren ~ (expression ~ (comma ~ expression)*)? ~ end_paren }
+function_name = {
+    "abs"
+  | "absent"
+  | "absent_over_time"
+  | "acos"
+  | "acosh"
+  | "asin"
+  | "asinh"
+  | "atan"
+  | "atanh"
+  | "avg_over_time"
+  | "ceil"
+  | "changes"
+  | "clamp"
+  | "clamp_max"
+  | "clamp_min"
+  | "cos"
+  | "cosh"
+  | "count_over_time"
+  | "days_in_month"
+  | "day_of_month"
+  | "day_of_week"
+  | "day_of_year"
+  | "deg"
+  | "delta"
+  | "deriv"
+  | "exp"
+  | "floor"
+  | "histogram_quantile"
+  | "holt_winters"
+  | "hour"
+  | "idelta"
+  | "increase"
+  | "irate"
+  | "label_replace"
+  | "label_join"
+  | "last_over_time"
+  | "ln"
+  | "log10"
+  | "log2"
+  | "max_over_time"
+  | "min_over_time"
+  | "minute"
+  | "month"
+  | "pi"
+  | "predict_linear"
+  | "present_over_time"
+  | "quantile_over_time"
+  | "rad"
+  | "rate"
+  | "resets"
+  | "round"
+  | "scalar"
+  | "sgn"
+  | "sin"
+  | "sinh"
+  | "sort"
+  | "sort_desc"
+  | "sqrt"
+  | "stddev_over_time"
+  | "stdvar_over_time"
+  | "sum_over_time"
+  | "tan"
+  | "tanh"
+  | "time"
+  | "timestamp"
+  | "vector"
+  | "year"
+}

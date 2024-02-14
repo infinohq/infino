@@ -1,7 +1,7 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-//! Execute an Infino logs query. Both Query DSL and Lucene Query Syntax are supported.
+//! Execute an Infino metrics query. PromQL is supported.
 //!
 //! Uses the Pest parser with Pest-formatted PEG grammars: https://pest.rs/
 //! which validates syntax.
@@ -10,7 +10,6 @@
 //! Infino-supported nodes as they are popped off the stack and pushing children of
 //! transitory nodes onto the stack for further processing.
 
-use crate::segment_manager::segment::Segment;
 use crate::utils::error::AstError;
 use crate::utils::tokenize::tokenize;
 
