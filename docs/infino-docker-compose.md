@@ -4,11 +4,16 @@ The [docker-compose.yml](../docker/docker-compose.yml) in the repo deploys Infin
 ## Pre-requisites
 - Install [docker](https://docs.docker.com/get-docker/) and [docker compose](https://docs.docker.com/compose/). A typical installation of [docker desktop](https://docs.docker.com/desktop/) includes docker compose. 
 
-## Deploy the setup
+## Deploy the setup (in detached mode)
+```bash
+docker-compose -f docker/docker-compose.yml up -d
+```
+It may take a minute or two for all the containers to come up.
+
+## Tear Down
 ```bash
 docker-compose -f docker/docker-compose.yml down
 ```
-It may take a minute or two for all the containers to come up.
 
 ## Accessing OpenSearch Dashboard
 - Point your browser to `http://localhost:5601`
