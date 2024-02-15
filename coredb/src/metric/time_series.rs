@@ -16,12 +16,12 @@ use super::time_series_block_compressed::TimeSeriesBlockCompressed;
 /// Separator between the label name and label value to create a label term. For example,
 /// if the label name is 'method' and the value is 'GET',and the LABEL_SEPARATOR is '~',
 /// in the labels map this will be stored as 'method~GET'.
-const LABEL_SEPARATOR: &str = "~";
+pub const LABEL_SEPARATOR: &str = "~";
 
 /// The label for the metric name when stored in the time series. For exmaple, if the METRIC_NAME_PREFIX
 /// is '__name__', the LABEL_SEPARATOR is '~', and the matric name is 'request_count', in the labels map,
 /// this will be stored as '__name__~request_count'.
-const METRIC_NAME_PREFIX: &str = "__name__";
+pub const METRIC_NAME_PREFIX: &str = "__name__";
 
 /// Represents a time series. The time series consists of time series blocks, each containing BLOCK_SIZE_FOR_TIME_SERIES
 /// metric points. All but the last block are compressed. In order to quickly get to the right block, a vector of

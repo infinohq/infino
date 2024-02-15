@@ -4,14 +4,14 @@
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use log::debug;
-
 use dashmap::DashMap;
+use log::debug;
+use pest::iterators::Pairs;
 
+use super::metadata::Metadata;
 use crate::log::inverted_map::InvertedMap;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
-use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
 use crate::segment_manager::query_dsl::Rule;
@@ -23,10 +23,6 @@ use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, RwLock, TokioMutex};
-
-use pest::iterators::Pairs;
-
-use super::metadata::Metadata;
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
 const TERMS_FILE_NAME: &str = "terms.bin";
@@ -103,6 +99,14 @@ impl Segment {
   /// Get the forward map for this segment.
   pub fn get_forward_map(&self) -> &DashMap<u32, LogMessage> {
     &self.forward_map
+  }
+
+  pub fn get_labels(&self) -> &DashMap<String, u32> {
+    &self.labels
+  }
+
+  pub fn get_time_series_map(&self) -> &TimeSeriesMap {
+    &self.time_series_map
   }
 
   /// Get id of this segment.
@@ -437,33 +441,6 @@ impl Segment {
     )
   }
 
-  // TODO: This api needs to be made richer (filter on multiple tags, metric name, prefix/regex, etc)
-  /// Get the time series for the given label name/value, within the given (inclusive) time range.
-  pub fn search_metrics(
-    &self,
-    label_name: &str,
-    label_value: &str,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Vec<MetricPoint> {
-    let label = TimeSeries::get_label(label_name, label_value);
-    let label_id = self.labels.get(&label);
-    let retval = match label_id {
-      Some(label_id) => {
-        let arc_ts = self
-          .time_series_map
-          .get_time_series(*label_id)
-          .unwrap()
-          .clone();
-        let ts = &*arc_ts.read().unwrap();
-        ts.get_metrics(range_start_time, range_end_time)
-      }
-      None => Vec::new(),
-    };
-
-    retval
-  }
-
   /// Update the start and end time of this segment.
   fn update_start_end_time(&self, time: u64) {
     // Update start and end timestamps.
@@ -493,15 +470,13 @@ mod tests {
   use std::sync::{Arc, RwLock};
 
   use chrono::Utc;
+  use pest::Parser;
   use tempdir::TempDir;
 
   use super::*;
-  use crate::{
-    segment_manager::query_dsl::{QueryDslParser, Rule},
-    storage_manager::storage::StorageType,
-  };
-  use pest::Parser;
-
+  use crate::metric::metric_point::MetricPoint;
+  use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
+  use crate::storage_manager::storage::StorageType;
   use crate::utils::sync::{is_sync_send, thread};
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, Box<pest::error::Error<Rule>>> {
