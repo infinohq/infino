@@ -12,6 +12,7 @@ use pest::error::Error as PestError;
 use crate::index_manager::metadata::Metadata;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
+use crate::metric::constants::MetricsQueryCondition;
 use crate::metric::metric_point::MetricPoint;
 use crate::segment_manager::query_dsl::QueryDslParser;
 use crate::segment_manager::query_dsl::Rule;
@@ -662,16 +663,19 @@ impl Index {
       .get_overlapping_segments(range_start_time, range_end_time)
       .await;
 
+    let conditions = [MetricsQueryCondition::Equals(
+      label_name.to_owned(),
+      label_value.to_owned(),
+    )];
+
     // Get the metrics from each of the segments. If a segment isn't present is memory, it is loaded in memory temporarily.
     for segment_number in segment_numbers {
       let segment = self.memory_segments_map.get(&segment_number);
       let mut metric_points = match segment {
-        Some(segment) => {
-          segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
-        }
+        Some(segment) => segment.search_metrics(&conditions, range_start_time, range_end_time),
         None => {
           let segment = self.refresh_segment(segment_number).await?;
-          segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
+          segment.search_metrics(&conditions, range_start_time, range_end_time)
         }
       };
 

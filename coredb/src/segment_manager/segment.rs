@@ -474,6 +474,7 @@ mod tests {
   use tempdir::TempDir;
 
   use super::*;
+  use crate::metric::constants::MetricsQueryCondition;
   use crate::metric::metric_point::MetricPoint;
   use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
   use crate::storage_manager::storage::StorageType;
@@ -705,9 +706,13 @@ mod tests {
     assert_eq!(segment.metadata.get_start_time(), time);
     assert_eq!(segment.metadata.get_end_time(), time);
 
+    let conditions = [MetricsQueryCondition::Equals(
+      "label_name_1".to_owned(),
+      "label_value_1".to_owned(),
+    )];
     assert_eq!(
       segment
-        .search_metrics("label_name_1", "label_value_1", time - 100, time + 100)
+        .search_metrics(&conditions, time - 100, time + 100)
         .len(),
       1
     )
@@ -770,7 +775,11 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
 
     let mut expected = (*expected.read().unwrap()).clone();
-    let received = segment.search_metrics("label1", "value1", start_time - 100, end_time + 100);
+    let conditions = [MetricsQueryCondition::Equals(
+      "label1".to_owned(),
+      "value1".to_owned(),
+    )];
+    let received = segment.search_metrics(&conditions, start_time - 100, end_time + 100);
 
     expected.sort();
     assert_eq!(expected, received);

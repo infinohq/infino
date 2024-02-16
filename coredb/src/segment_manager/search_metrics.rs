@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
+use crate::metric::constants::{MetricsQueryCondition, LABEL_SEPARATOR};
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
-use crate::metric::time_series::LABEL_SEPARATOR;
 use crate::segment_manager::segment::Segment;
 
 impl Segment {
@@ -49,15 +49,7 @@ impl Segment {
     label_values.into_iter().collect()
   }
 
-  // ---
-  // TODO: This api currently only supports only label_name=label_value queries.
-  // Additionally, the following need to be supported:
-  //   - label_name!=label_value,
-  //   - label_name=~label_value_regex,
-  //   - label_name!=~label_value_regex.
-  // ---
-  /// Get the time series for the given label name/value, within the given (inclusive) time range.
-  pub fn search_metrics(
+  fn get_metric_points_for_label(
     &self,
     label_name: &str,
     label_value: &str,
@@ -66,7 +58,7 @@ impl Segment {
   ) -> Vec<MetricPoint> {
     let label = TimeSeries::get_label(label_name, label_value);
     let label_id = self.get_labels().get(&label);
-    let mut retval = match label_id {
+    let retval = match label_id {
       Some(label_id) => {
         let arc_ts = self
           .get_time_series_map()
@@ -78,6 +70,66 @@ impl Segment {
       }
       None => Vec::new(),
     };
+
+    retval
+  }
+
+  /// Get label name and label value from the given condition.
+  fn get_label_name_value(condition: &MetricsQueryCondition) -> (&str, &str) {
+    match condition {
+      MetricsQueryCondition::Equals(label, value)
+      | MetricsQueryCondition::NotEquals(label, value)
+      | MetricsQueryCondition::EqualsRegex(label, value)
+      | MetricsQueryCondition::NotEqualsRegex(label, value) => (label, value),
+    }
+  }
+
+  // ---
+  // TODO: This api currently only supports only label_name=label_value queries.
+  // Additionally, the following need to be supported:
+  //   - label_name!=label_value,
+  //   - label_name=~label_value_regex,
+  //   - label_name!=~label_value_regex.
+  // ---
+  /// Get the time series for the given label name/value, within the given (inclusive) time range.
+  pub fn search_metrics(
+    &self,
+    label_conditions: &[MetricsQueryCondition],
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Vec<MetricPoint> {
+    // No conditions specified - means empty results.
+    if label_conditions.is_empty() {
+      return Vec::new();
+    }
+
+    // We don't support conditions other than label_name=label_value. So, the code below assumes that these are the
+    // only conditions in the label_conditions array.
+
+    // Get the first condition and its results.
+    let initial_condition = label_conditions.first().unwrap();
+    let (initial_label_name, initial_label_value) = Self::get_label_name_value(initial_condition);
+    let mut retval = self.get_metric_points_for_label(
+      initial_label_name,
+      initial_label_value,
+      range_start_time,
+      range_end_time,
+    );
+
+    // Iterate through the remaining conditions and interest to find the matching metric points.
+    for current_condition in &label_conditions[1..] {
+      let (current_label_name, current_label_value) = Self::get_label_name_value(current_condition);
+      let current_metric_points: Vec<MetricPoint> = self.get_metric_points_for_label(
+        current_label_name,
+        current_label_value,
+        range_start_time,
+        range_end_time,
+      );
+
+      // Change retval so that it contains only the metric points that match the current condition.
+      retval.retain(|metric_point| current_metric_points.contains(metric_point));
+    }
+
     // Sort the retrieved time series in chronological order.
     retval.sort();
 
@@ -90,10 +142,9 @@ mod tests {
   use std::collections::HashMap;
 
   use super::*;
-  use crate::metric::time_series::METRIC_NAME_PREFIX;
+  use crate::metric::constants::METRIC_NAME_PREFIX;
 
-  #[test]
-  pub fn test_basic_metrics_search() {
+  fn create_segment() -> Segment {
     let segment = Segment::new();
 
     // Create a couple of metric points.
@@ -116,6 +167,13 @@ mod tests {
       .append_metric_point("metric_name_1", &label_set_2, 3, 3.0)
       .expect("Could not append metric point");
 
+    segment
+  }
+
+  #[test]
+  pub fn test_label_names() {
+    let segment = create_segment();
+
     // Check label_name retrieval.
     let label_names = segment.get_label_names();
     assert_eq!(label_names.len(), 5);
@@ -124,6 +182,11 @@ mod tests {
     assert!(label_names.contains(&"label_name_2".to_owned()));
     assert!(label_names.contains(&"label_name_3".to_owned()));
     assert!(label_names.contains(&"label_name_4".to_owned()));
+  }
+
+  #[test]
+  pub fn test_label_values() {
+    let segment = create_segment();
 
     // Check label_value retrieval for a given label_name.
     let label_values = segment.get_label_values(METRIC_NAME_PREFIX);
@@ -143,19 +206,62 @@ mod tests {
     let label_values = segment.get_label_values("label_name_4");
     assert_eq!(label_values.len(), 1);
     assert!(label_values.contains(&"label_value_4".to_owned()));
+  }
+
+  #[test]
+  fn test_basic_search() {
+    let segment = create_segment();
 
     // Check basic search operation.
-    let results = segment.search_metrics("label_name_1", "label_value_1", 0, u64::MAX);
+    let conditions = [MetricsQueryCondition::Equals(
+      "label_name_1".to_owned(),
+      "label_value_1".to_owned(),
+    )];
+    let results = segment.search_metrics(&conditions, 0, u64::MAX);
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].get_time(), 1);
     assert_eq!(results[1].get_time(), 2);
-    let results = segment.search_metrics("label_name_1", "label_value_1", 0, 1);
+    let results = segment.search_metrics(&conditions, 0, 1);
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].get_time(), 1);
-    let results = segment.search_metrics("label_name_3", "label_value_3", 0, u64::MAX);
+
+    let conditions = [MetricsQueryCondition::Equals(
+      "label_name_3".to_owned(),
+      "label_value_3".to_owned(),
+    )];
+    let results = segment.search_metrics(&conditions, 0, u64::MAX);
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].get_time(), 1);
     assert_eq!(results[1].get_time(), 2);
     assert_eq!(results[2].get_time(), 3);
+  }
+
+  #[test]
+  fn test_search_equal_conditions() {
+    let segment = create_segment();
+
+    let conditions = [
+      MetricsQueryCondition::Equals("label_name_1".to_owned(), "label_value_1".to_owned()),
+      MetricsQueryCondition::Equals("label_name_3".to_owned(), "label_value_3".to_owned()),
+    ];
+    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].get_time(), 1);
+    assert_eq!(results[1].get_time(), 2);
+
+    let conditions = [
+      MetricsQueryCondition::Equals("label_name_3".to_owned(), "label_value_3".to_owned()),
+      MetricsQueryCondition::Equals("label_name_4".to_owned(), "label_value_4".to_owned()),
+    ];
+    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_time(), 3);
+
+    let conditions = [
+      MetricsQueryCondition::Equals("label_name_1".to_owned(), "label_value_1".to_owned()),
+      MetricsQueryCondition::Equals("label_name_4".to_owned(), "label_value_4".to_owned()),
+    ];
+    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    assert!(results.is_empty());
   }
 }
