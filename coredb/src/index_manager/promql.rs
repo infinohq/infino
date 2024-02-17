@@ -10,6 +10,9 @@
 //! Infino-supported nodes as they are popped off the stack and pushing children of
 //! transitory nodes onto the stack for further processing.
 
+use crate::index_manager::index::Index;
+use crate::index_manager::promql_vector::PromQLVector;
+
 use crate::utils::error::AstError;
 use crate::utils::tokenize::tokenize;
 
@@ -23,16 +26,14 @@ use pest::Parser;
 use pest_derive::Parser;
 
 #[derive(Parser)]
-#[grammar = "src/segment_manager/query_dsl_grammar.pest"]
+#[grammar = "src/index_manager/promql_grammar.pest"]
 
-pub struct QueryDslParser;
+pub struct PromQLParser;
 
-impl Segment {
+impl Index {
   /// Walk the AST using an iterator and process each node
-  pub async fn traverse_query_dsl_ast(
-    &self,
-    nodes: &Pairs<'_, Rule>,
-  ) -> Result<HashSet<u32>, AstError> {
+  pub async fn traverse_promql_ast(&self, nodes: &Pairs<'_, Rule>) ->  Result<PromQLVector, CoreDBError> {
+
     let mut stack = VecDeque::new();
 
     // Push all nodes to the stack to start processing
@@ -40,7 +41,7 @@ impl Segment {
       stack.push_back(node);
     }
 
-    let mut results = HashSet::new();
+    let mut results: HashSet<PromQLVector> = HashSet::new();
 
     // Pop the nodes off the stack and process
     while let Some(node) = stack.pop_front() {
@@ -67,9 +68,9 @@ impl Segment {
   /// General dispatcher for query processing
   async fn query_dispatcher(&self, node: &Pair<'_, Rule>) -> Result<HashSet<u32>, AstError> {
     match node.as_rule() {
-      Rule::term_query => self.process_term_query(node).await,
-      Rule::match_query => self.process_match_query(node).await,
-      Rule::bool_query => self.process_bool_query(node).await,
+      Rule::leaf => self.process_leaf(node).await,
+      Rule::unary_expression => self.process_unary_expression(node).await,
+      Rule::compound_expression => self.process_compound_expression(node).await,
       _ => Err(AstError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
@@ -77,195 +78,201 @@ impl Segment {
     }
   }
 
-  // Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
-  async fn process_bool_query(&self, root_node: &Pair<'_, Rule>) -> Result<HashSet<u32>, AstError> {
+  async fn process_expression(
+    &self,
+    root_node: &Pair<'_, Rule>,
+  ) -> Result<PromQLVector, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
-    let mut must_results = HashSet::new();
-    let mut should_results = HashSet::new();
-    let mut must_not_results = HashSet::new();
+    let mut results = HashSet::new();
 
-    // Process each subtree separately, then combine the logical results afterwards.
+    // Process each subtree separately, then logically OR the results
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::must_clauses => {
-          must_results = self.process_bool_subtree(&node, true).await?;
-        }
-        Rule::should_clauses => {
-          should_results = self.process_bool_subtree(&node, false).await?;
-        }
-        Rule::must_not_clauses => {
-          must_not_results = self.process_bool_subtree(&node, false).await?;
+        Rule::logical_and => {
+          if results.is_empty() {
+            results = logical_and_results;
+          } else { 
+            results.extend(logical_and_results);
+          }
         }
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
           }
         }
-      }
-    }
-
-    // Start with combining must and should results. If there are must results,
-    // should results only add to it, not replace it.
-    let combined_results = if !must_results.is_empty() || !should_results.is_empty() {
-      let mut combined = must_results;
-      if !should_results.is_empty() {
-        combined.extend(should_results.iter());
-      }
-      combined
-    } else {
-      HashSet::new()
-    };
-
-    // Now get final results after excluding must_not results
-    let final_results = combined_results
-      .difference(&must_not_results)
-      .cloned()
-      .collect::<HashSet<u32>>();
-
-    Ok(final_results)
-  }
-
-  async fn process_bool_subtree(
-    &self,
-    root_node: &Pair<'_, Rule>,
-    must: bool,
-  ) -> Result<HashSet<u32>, AstError> {
-    let mut queue = VecDeque::new();
-    queue.push_back(root_node.clone());
-
-    let mut results = HashSet::new();
-
-    // To avoid recursion, we replicate query dispatching here.
-    while let Some(node) = queue.pop_front() {
-      let processing_result = match node.as_rule() {
-        Rule::term_query => self.process_term_query(&node).await,
-        Rule::match_query => self.process_match_query(&node).await,
-        Rule::bool_query => {
-          // For bool_query, instead of processing, we queue its children for processing
-          for inner_node in node.into_inner() {
-            queue.push_back(inner_node);
-          }
-          continue; // Skip the rest of the loop since we're not processing a bool_query directly
-        }
-        _ => Err(AstError::UnsupportedQuery(format!(
-          "Unsupported rule: {:?}",
-          node.as_rule()
-        ))),
-      };
-
-      match processing_result {
-        Ok(node_results) => {
-          if must {
-            if results.is_empty() {
-              results = node_results;
-            } else {
-              results = results.intersection(&node_results).cloned().collect();
-            }
-          } else {
-            results.extend(node_results);
-          }
-        }
-        Err(AstError::UnsupportedQuery(_)) => {
-          for child_node in node.into_inner() {
-            queue.push_back(child_node);
-          }
-        }
-        Err(e) => return Err(e),
       }
     }
 
     Ok(results)
   }
 
-  /// Term Query Processor: https://opensearch.org/docs/latest/query-dsl/term/term/
-  async fn process_term_query(&self, root_node: &Pair<'_, Rule>) -> Result<HashSet<u32>, AstError> {
-    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
-    stack.push_back(root_node.clone());
-
-    let mut fieldname: Option<&str> = None;
-    let mut query_text: Option<&str> = None;
-    let mut case_insensitive = true;
-
-    while let Some(node) = stack.pop_front() {
-      match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
-        Rule::value => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::case_insensitive => {
-          case_insensitive = node
-            .into_inner()
-            .next()
-            .map(|v| v.as_str().parse::<bool>().unwrap_or(false))
-            .unwrap_or(false);
-        }
-        _ => {
-          for inner_node in node.into_inner() {
-            stack.push_back(inner_node);
-          }
-        }
-      }
-    }
-
-    // "AND" is needed even though term queries only have a single term.
-    // Our tokenizer breaks up query text on spaces, etc. so we need to match
-    // everything in the query text if they end up as different terms.
-    //
-    // TODO: This is technically incorrect as the term should be an exact string match.
-    if let Some(query_str) = query_text {
-      self
-        .process_search(
-          self
-            .analyze_query_text(query_str, fieldname, case_insensitive)
-            .await,
-          "AND",
-        )
-        .await
-    } else {
-      Err(AstError::UnsupportedQuery(
-        "Query string is missing".to_string(),
-      ))
-    }
-  }
-
-  /// Match Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match/
-  async fn process_match_query(
+  async fn process_logical_and(
     &self,
     root_node: &Pair<'_, Rule>,
-  ) -> Result<HashSet<u32>, AstError> {
+  ) -> Result<PromQLVector, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
-    let mut fieldname: Option<&str> = None;
-    let mut query_text: Option<&str> = None;
-    let mut term_operator: &str = "OR"; // Match queries default to OR
-    let mut case_insensitive = true;
+    let mut results = Vec::new();
+
+    // Process each subtree separately, then logically AND the results
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::equality => {
+          let equality_results = self.equality(&node).await?;
+          if results.is_empty() {
+            results = equality_results;
+          } else { 
+            for (a, b) in results.iter_mut().zip(logical_and_results.iter()) {
+              // Assuming non-zero as true and zero as false
+              if *a.get_value() == 0 || *b.get_value() == 0 {
+                  *a.set_value() = 0; 
+              } else {
+                  *a.set_value() = 1;
+              }
+            }
+          }
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+
+  async fn process_equality(
+    &self,
+    root_node: &Pair<'_, Rule>,
+  ) -> Result<PromQLVector, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut results = Vec::new();
+
+    // Process each subtree separately, then logically compare the results
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::comparison => {
+          let comparison_results = self.process_comparison(&node).await?;
+          if results.is_empty() {
+            results = comparison_results;
+          } else { 
+            for (a, b) in results.iter_mut().zip(comparison_results.iter()) {
+              // Assuming non-zero as true and zero as false
+              if *a.get_value() == *b.get_value() {
+                  *a.set_value() = 0; 
+              } else {
+                  *a.set_value() = 1;
+              }
+            } 
+          }
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+  async fn process_comparison(
+    &self,
+    root_node: &Pair<'_, Rule>,
+  ) -> Result<PromQLVector, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut results = HashSet::new();
+
+    // Process each subtree separately, then logically compare the results
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::term => {
+          let term_results = self.process_term(&node).await?;
+          if results.is_empty() {
+            results = term_results;
+          } else { 
+            for (a, b) in results.iter_mut().zip(term_results.iter()) {
+              // Assuming non-zero as true and zero as false
+              if *a.get_value() == *b.get_value() {
+                  *a.set_value() = 0; 
+              } else {
+                  *a.set_value() = 1;
+              }
+            } 
+          }
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+  async fn process_leaf(
+    &self,
+    root_node: &Pair<'_, Rule>,
+  ) -> Result<PromQLVector, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut metric_name: Option<&str> = None;
+    let mut duration_text: Option<&str> = None;
+    let mut matchers: Vec<(String, String, String)> = Vec::new();
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
+        Rule::metric_name => {
+          if let Some(metric) = node.into_inner().next() {
+            metric = Some(metric.as_str());
           }
         }
-        Rule::operator => {
-          term_operator = node.into_inner().next().map_or("OR", |v| v.as_str());
+        Rule::duration => {
+          duration_text = node.into_inner().next().map(|v| v.as_str());
         }
-        Rule::match_string | Rule::query => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::case_insensitive => {
-          case_insensitive = node
-            .into_inner()
-            .next()
-            .map(|v| v.as_str().parse::<bool>().unwrap_or(true))
-            .unwrap_or(true);
+        Rule::matcher => {
+          while let Some(matcher_node) = stack.pop_front() {
+            let mut match_operator: Option<&str> = None;
+            let mut match_value: Option<&str> = None;
+            match matcher_node.as_rule() {
+              // Assumes these are always in sequence in the expression
+              Rule::label_name => {
+                if let Some(label) = matcher_node.into_inner().next() {
+                  label_name = Some(label.as_str());
+                }
+              }
+              Rule::match_operator => {
+                if let Some(operator) = matcher_node.into_inner().next() {
+                  match_operator = Some(operator.as_str());
+                }
+              }
+              Rule::match_value => {
+                if let Some(value) = matcher_node.into_inner().next() {
+                  match_value = Some(value.as_str());
+                }
+              }
+              _ => {
+                for matcher_inner_node in matcher_node.into_inner() {
+                  stack.push_back(matcher_inner_node);
+                }
+              }
+            }
+            matchers.push(Some(label_name), Some(match_operator), Some(match_value)),
+          }
         }
         _ => {
           for inner_node in node.into_inner() {
@@ -277,11 +284,10 @@ impl Segment {
 
     if let Some(query_str) = query_text {
       self
-        .process_search(
+        .process_metric_search(
           self
-            .analyze_query_text(query_str, fieldname, case_insensitive)
+            .analyze_query_text(matchers)
             .await,
-          term_operator,
         )
         .await
     } else {
@@ -291,54 +297,46 @@ impl Segment {
     }
   }
 
-  /// Prep the query terms for the search
-  async fn analyze_query_text(
-    &self,
-    query_text: &str,
-    fieldname: Option<&str>,
-    case_insensitive: bool,
-  ) -> Vec<String> {
-    // Prepare the query string, applying lowercase if case_insensitive is set
-    let query = if case_insensitive {
-      query_text.to_lowercase()
-    } else {
-      query_text.to_owned()
-    };
-
-    let mut terms = Vec::new();
-    tokenize(&query, &mut terms);
-
-    // If fieldname is provided, concatenate it with each term; otherwise, use the term as is
-    let transformed_terms: Vec<String> = terms
-      .into_iter()
-      .map(|term| {
-        if let Some(field) = fieldname {
-          format!("{}~{}", field, term)
-        } else {
-          term.to_owned()
-        }
-      })
-      .collect();
-
-    transformed_terms
-  }
+  
 
   /// Search the index for the terms extracted from the AST
-  async fn process_search(
+  async fn process_metric_search(
     &self,
-    terms: Vec<String>,
-    term_operator: &str,
+    matchers: Vec<String, String, String>,
+    range_start_time: u64,
+    range_end_time: u64,
   ) -> Result<HashSet<u32>, AstError> {
     // Extract the terms and perform the search
     let mut results = HashSet::new();
 
-    // Get postings lists for the query terms
-    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) = self
-      .get_postings_lists(&terms)
-      .map_err(|e| AstError::TraverseError(format!("Error getting postings lists: {:?}", e)))?;
+      // Get the segments overlapping with the given time range. This is in the reverse chronological order.
+       let segment_numbers = self
+       .get_overlapping_segments(range_start_time, range_end_time)
+       .await;
+ 
+     // Get the metrics from each of the segments. If a segment isn't present is memory, it is loaded in memory temporarily.
+     for segment_number in segment_numbers {
+       let segment = self.memory_segments_map.get(&segment_number);
+       let mut results = match segment {
+         Some(segment) => {
+           for (label_name, operator, label_value) in matchers {
+              index.search_metrics(label_name, label_value, range_start_time, range_end_time)
+            }
+         }
+         None => {
+           let segment = self.refresh_segment(segment_number).await?;
+           for (label_name, operator, label_value) in matchers {
+            index.search_metrics(label_name, label_value, range_start_time, range_end_time)
+          }
+         }
+       };
+ 
+       results.append(&mut metric_points);
+     }
 
-    if postings_lists.is_empty() {
-      debug!("No posting list found. Returning empty handed.");
+
+    if results.is_empty() {
+      debug!("No results found. Returning empty handed.");
       return Ok(HashSet::new());
     }
 
@@ -371,364 +369,53 @@ mod tests {
 
   use super::*;
   use pest::Parser;
+    
+  use super::*;
+  use crate::metric::time_series::METRIC_NAME_PREFIX;
 
-  fn create_mock_segment() -> Segment {
-    let segment = Segment::new();
-
-    let log_messages = [
-      ("log 1", "this is a test log message"),
-      ("log 2", "this is another log message"),
-      ("log 3", "test log for different term"),
-    ];
-
-    for (key, message) in log_messages.iter() {
-      let mut fields = HashMap::new();
-      fields.insert("key".to_string(), key.to_string());
-      segment
-        .append_log_message(Utc::now().timestamp_millis() as u64, &fields, message)
-        .unwrap();
-    }
-
-    segment
+  fn create_mock_index() -> Index {
+        let index = Index::new();
+    
+        // Create a couple of metric points.
+        let mut label_set_1 = HashMap::new();
+        label_set_1.insert("label_name_1".to_string(), "label_value_1".to_string());
+        label_set_1.insert("label_name_2".to_string(), "label_value_1".to_string());
+        label_set_1.insert("label_name_3".to_string(), "label_value_3".to_string());
+        index
+          .append_metric_point("metric_name_1", &label_set_1, 1, 1.0)
+          .expect("Could not append metric point");
+        index
+          .append_metric_point("metric_name_2", &label_set_1, 2, 2.0)
+          .expect("Could not append metric point");
+    
+        let mut label_set_2 = HashMap::new();
+        label_set_2.insert("label_name_1".to_string(), "label_value_2".to_string());
+        label_set_2.insert("label_name_3".to_string(), "label_value_3".to_string());
+        label_set_2.insert("label_name_4".to_string(), "label_value_4".to_string());
+        index
+          .append_metric_point("metric_name_1", &label_set_2, 3, 3.0)
+          .expect("Could not append metric point");
+    
+    index
   }
 
   #[tokio::test]
-  async fn test_search_with_must_query() {
-    let segment = create_mock_segment();
+  async fn test_basic_query() {
+    let index = create_mock_index();
 
-    let query_dsl_query = r#"{
-      "query": {
-        "bool": {
-          "must": [
-            { "match": { "_all" : { "query": "test" } } }
-          ]
-        }
-      }
-    }
-    "#;
+    let promql_query = r#"metric_name_1{label_name_1=label_value_1"#;
 
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert_eq!(
-            results.len(),
-            2,
-            "There should be exactly 2 logs matching the query."
-          );
-
-          assert!(results
-            .iter()
-            .all(|log| log.get_text().contains("test") && log.get_text().contains("log")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_should_query() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-      "query": {
-        "bool": {
-          "should": [
-            { "match": { "_all" : { "query": "test" } } }
-          ]
-        }
-      }
-    }
-    "#;
-
-    // Parse the query DSL
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert_eq!(
-            results.len(),
-            2,
-            "There should be exactly 2 logs matching the query."
-          );
-
-          assert!(results
-            .iter()
-            .any(|log| log.get_text().contains("another") || log.get_text().contains("different")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_must_not_query() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-      "query": {
-        "bool": {
-          "must_not": [
-            { "match": { "_all" : { "query": "test" } } }
-          ]
-        }
-      }
-    }
-    "#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert!(!results
-            .iter()
-            .any(|log| log.get_text().contains("excluded")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_boolean_query() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-        "query": {
-            "bool": {
-                "must": [
-                    { "match": { "_all": { "query": "this" } } }
-                ],
-                "should": [
-                    { "match": { "_all": { "query": "test" } } }
-                ],
-                "must_not": [
-                    { "match": { "_all": { "query": "different" } } }
-                ]
-            }
-        }
-    }"#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert_eq!(
-            results.len(),
-            2,
-            "There should be exactly 2 logs matching the query."
-          );
-
-          assert!(results.iter().all(|log| {
-            log.get_text().contains("log")
-              && (log.get_text().contains("test") || !log.get_text().contains("different"))
-          }));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_match_query() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-      "query": {
-        "match": {
-          "key": {
-            "query": "1"
-          }
-        }
-      }
-    }"#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+      Ok(ast) => match index.get_metrics("label_name_1", 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
             results.len(),
             1,
-            "There should be exactly 1 logs matching the query."
+            "There should be exactly 1 log matching the query."
           );
 
-          assert!(results.iter().all(|log| log.get_text().contains("log")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_match_all_query_with_multiple_terms_anded() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-        "query": {
-            "match": {
-                "_all": {
-                    "query": "log test",
-                    "operator": "AND"
-                }
-            }
-        }
-    }"#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert_eq!(
-            results.len(),
-            2,
-            "There should be exactly 2 logs matching the query."
-          );
-
-          for log in results.iter() {
-            assert!(
-              log.get_text().contains("test") && log.get_text().contains("log"),
-              "Each log should contain both 'test' and 'log'."
-            );
-          }
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_match_all_query_with_multiple_terms() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-      "query": {
-        "match": {
-          "_all": {
-            "query": "another different"
-          }
-        }
-      }
-    }"#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert_eq!(
-            results.len(),
-            2,
-            "Default OR on terms should have 2 logs matching the query."
-          );
-
-          for log in results.iter() {
-            assert!(
-              log.get_text().contains("another") || log.get_text().contains("different"),
-              "Each log should contain 'another' or 'different'."
-            );
-          }
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_match_all_query() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-      "query": {
-        "match": {
-          "_all": {
-            "query": "log"
-          }
-        }
-      }
-    }
-    "#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert!(results.iter().all(|log| log.get_text().contains("log")));
-        }
-        Err(err) => {
-          panic!("Error in search_logs: {:?}", err);
-        }
-      },
-      Err(err) => {
-        panic!("Error parsing query DSL: {:?}", err);
-      }
-    }
-  }
-
-  #[tokio::test]
-  async fn test_search_with_nested_boolean_query() {
-    let segment = create_mock_segment();
-
-    let query_dsl_query = r#"{
-        "query": {
-            "bool": {
-                "must": [
-                    { "match": { "_all": { "query": "another" } } }
-                ],
-                "should": [
-                    {
-                        "bool": {
-                            "must": [
-                                { "match": { "_all": { "query": "different" } } }
-                            ]
-                        }
-                    }
-                ]
-            }
-        }
-    }"#;
-
-    match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
-        Ok(results) => {
-          assert_eq!(
-            results.len(),
-            2,
-            "There should be exactly 2 logs matching the query."
-          );
-
-          for log in results.iter() {
-            assert!(
-              log.get_text().contains("another") || log.get_text().contains("different"),
-              "Each log should contain 'another' or 'different'."
-            );
-          }
+          assert!(results
+            .iter()
+            .all(|metric| metric.get_text().contains(3) && metric.get_text().contains("log")));
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);

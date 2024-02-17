@@ -10,6 +10,7 @@ use log::{debug, info};
 use pest::error::Error as PestError;
 
 use crate::index_manager::metadata::Metadata;
+use crate::index_manager::promql::PromQLParser;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
 use crate::metric::metric_point::MetricPoint;
@@ -30,6 +31,12 @@ use pest::Parser;
 impl From<PestError<Rule>> for SearchLogsError {
   fn from(error: PestError<Rule>) -> Self {
     SearchLogsError::JsonParseError(error.to_string())
+  }
+}
+
+impl From<PestError<Rule>> for SearchMetricsError {
+  fn from(error: PestError<Rule>) -> Self {
+    SearchMetricsError::JsonParseError(error.to_string())
   }
 }
 
@@ -311,7 +318,7 @@ impl Index {
   pub async fn search_logs(
     &self,
     url_query: &str,
-    json_body: &str, // Assuming this should be json_query
+    json_body: &str,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, CoreDBError> {
@@ -646,37 +653,27 @@ impl Index {
     segment_numbers
   }
 
-  /// Get metric points corresponding to given label name and value, within the
-  /// given range (inclusive of both start and end time).
-  pub async fn get_metrics(
+  /// Get metric points corresponding to a promql query.
+  pub async fn search_metrics(
     &self,
-    label_name: &str,
-    label_value: &str,
+    url_query: &str,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<MetricPoint>, CoreDBError> {
-    let mut retval = Vec::new();
+    debug!(
+      "Search logs for Metric query: {:?}, range_start_time: {}, range_end_time: {}",
+      url_query, range_start_time, range_end_time
+    );
 
-    // Get the segments overlapping with the given time range. This is in the reverse chronological order.
-    let segment_numbers = self
-      .get_overlapping_segments(range_start_time, range_end_time)
-      .await;
+    // Build the query AST
+    let ast = PromQLParser::parse(Rule::start, &query)
+      .map_err(|e| SearchMetricsError::JsonParseError(e.to_string()))?;
 
-    // Get the metrics from each of the segments. If a segment isn't present is memory, it is loaded in memory temporarily.
-    for segment_number in segment_numbers {
-      let segment = self.memory_segments_map.get(&segment_number);
-      let mut metric_points = match segment {
-        Some(segment) => {
-          segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
-        }
-        None => {
-          let segment = self.refresh_segment(segment_number).await?;
-          segment.search_metrics(label_name, label_value, range_start_time, range_end_time)
-        }
-      };
-
-      retval.append(&mut metric_points);
-    }
+    // Now start the search
+    let mut retval = self
+      .traverse_promql_ast(&ast.clone())
+      .await
+      .map_err(SearchMetricsError::AstError)?;
 
     Ok(retval)
   }

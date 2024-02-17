@@ -11,4 +11,7 @@
 
 pub mod index;
 pub mod metadata;
+pub mod promql;
+pub(crate) mod promql_time_series;
+mod promql_vector;
 pub mod segment_summary;

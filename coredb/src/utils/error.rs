@@ -48,6 +48,9 @@ pub enum CoreDBError {
   #[error("Search Logs Error: {0}")]
   SearchLogsError(SearchLogsError),
 
+  #[error("Search Logs Error: {0}")]
+  SearchMetricsError(SearchMetricsError),
+
   #[error("Segment in memory: {0}")]
   SegmentInMemory(u32),
 
@@ -130,6 +133,21 @@ pub enum SearchLogsError {
   NoQueryProvided,
 }
 
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum SearchMetricsError {
+  #[error("Json parse error: {0}")]
+  JsonParseError(String),
+
+  #[error("Segment search error: {0}")]
+  SegmentSearchError(SegmentSearchError),
+
+  #[error("Segment error: {0}")]
+  SegmentError(SegmentError),
+
+  #[error("No query provided")]
+  NoQueryProvided,
+}
+
 impl From<object_store::Error> for CoreDBError {
   fn from(error: object_store::Error) -> Self {
     CoreDBError::StorageError(error.to_string())
@@ -145,5 +163,11 @@ impl From<std::io::Error> for CoreDBError {
 impl From<SearchLogsError> for CoreDBError {
   fn from(error: SearchLogsError) -> Self {
     CoreDBError::SearchLogsError(error)
+  }
+}
+
+impl From<SearchMetricsError> for CoreDBError {
+  fn from(error: SearchMetricsError) -> Self {
+    CoreDBError::SearchMetricsError(error)
   }
 }
