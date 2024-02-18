@@ -291,7 +291,7 @@ impl Index {
     matchers: Vec<(String, String, String)>,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<HashSet<u32>, AstError> {
+  ) -> Result<PromQLVector, AstError> {
     // Extract the terms and perform the search
     let mut results = HashSet::new();
 
