@@ -33,8 +33,8 @@ equality    = { comparison ~ ((equal | not_equal) ~ comparison)* }
 comparison  = { term ~ ((greater_than | less_than | greater_than_or_equal | less_than_or_equal) ~ term)* }
 term        = { factor ~ ((plus | minus) ~ factor)* }
 factor      = { exponent ~ ((multiply | divide | percent) ~ exponent)* }
-exponent    = { power ~ unary }
-unary       = { (leaf ~ ("offset" ~ duration)?) }
+exponent    = { unary ~ power? ~ integer }
+unary       = { minus? ~ ((leaf ~ ("offset" ~ duration)?)) }
 leaf        = { scalar | vector | subquery | aggregations | function_call }
 
 // *** Operations ***
@@ -60,8 +60,22 @@ subquery = { vector ~ start_bracket ~ duration ~ (colon ~ duration)? ~ end_brack
 
 // Aggregations
 aggregations   = { aggregation ~ start_paren ~ ((group_modifier ~ vector ~ end_paren) | (vector ~ end_paren)) }
-aggregation    = { "sum" | "avg" | "max" | "min" | "count" | "quantile" | "stddev" | "stdvar" | "topk" | "bottomk" | "group" }
+aggregation    = { sum | avg | max | min | count | count_values | quantile | stddev | stdvar | topk | bottomk | group }
 group_modifier = { ("by" | "without") ~ start_brace ~ label_name ~ (comma ~ label_name)* ~ end_brace }
+
+// Define individual rules for each aggregation type
+sum          = { "sum" }
+avg          = { "avg" }
+max          = { "max" }
+min          = { "min" }
+count        = { "count" }
+count_values = { "count_values" ~ label_name }
+quantile     = { "quantile" }
+stddev       = { "stddev" }
+stdvar       = { "stdvar" }
+topk         = { "topk" }
+bottomk      = { "bottomk" }
+group        = { "group" }
 
 // **** Function calls ****
 function_call = { function_name ~ start_paren ~ (expression ~ (comma ~ expression)*)? ~ end_paren }
@@ -86,8 +100,9 @@ end_bracket    = _{ ws ~ "]" ~ ws }
 end_paren      = _{ ws ~ ")" ~ ws }
 escaped_char   = _{ "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
 float          = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
-normal_char    = _{ !("\"" | "\\") ~ ANY }
+integer        = @{ "-"? ~ digits }
 label_name     = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+normal_char    = _{ !("\"" | "\\") ~ ANY }
 quote          = _{ "\"" }
 start_brace    = _{ ws ~ "{" ~ ws }
 start_bracket  = _{ ws ~ "[" ~ ws }
