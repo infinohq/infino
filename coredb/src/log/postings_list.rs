@@ -16,12 +16,12 @@ pub struct PostingsList {
   /// A vector of compressed postings blocks. All but the last one block in a postings list is compressed.
   postings_list_compressed: Vec<PostingsBlockCompressed>,
 
-  // The last block, whish is uncompressed. Note that we only compress blocks that have 128 (i.e., BLOCK_SIZE_FOR_LOG_MESSAGES)
-  // integers - so the last block may have upto BLOCK_SIZE_FOR_LOG_MESSAGES integers is stored in uncompressed form.
+  /// The last block, whish is uncompressed. Note that we only compress blocks that have 128 (i.e., BLOCK_SIZE_FOR_LOG_MESSAGES)
+  /// integers - so the last block may have upto BLOCK_SIZE_FOR_LOG_MESSAGES integers is stored in uncompressed form.
   last_block: PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>,
 
-  // Store the initial value in each block separately. This is valuable for fast lookups during postings list intersections.
-  // Also known as 'skip pointers' in information retrieval literature.
+  /// Store the initial value in each block separately. This is valuable for fast lookups during postings list intersections.
+  /// Also known as 'skip pointers' in information retrieval literature.
   initial_values: Vec<u32>,
 }
 
@@ -35,7 +35,7 @@ impl PostingsList {
     }
   }
 
-  // This constructor is only used in tests.
+  /// This constructor is only used in tests.
   #[cfg(test)]
   pub fn new_with_params(
     compressed_blocks: Vec<PostingsBlockCompressed>,

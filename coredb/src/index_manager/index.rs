@@ -13,6 +13,7 @@ use pest::iterators::Pairs;
 use crate::index_manager::metadata::Metadata;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
+use crate::metric::constants::MetricsQueryCondition;
 use crate::metric::metric_point::MetricPoint;
 use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
 use crate::segment_manager::segment::Segment;

@@ -1,6 +1,7 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
+use approx::abs_diff_eq;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -104,7 +105,7 @@ impl PartialEq for MetricPoint {
       if self.value.is_nan() {
         return other.value.is_nan();
       } else {
-        return self.value == other.value;
+        return abs_diff_eq!(self.value, other.value);
       }
     }
     false
