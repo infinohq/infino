@@ -27,36 +27,33 @@
 start = { expression }
 
 // Define an expression as a series of operations with increasing precedence
-expression  = { logical_and ~ (binary_or ~ logical_and)* }
-logical_and = { equality ~ (binary_and ~ equality)* }
+expression  = { logical_and ~ ((or | unless) ~ logical_and)* ~ subquery? }
+logical_and = { equality ~ (and ~ equality)* }
 equality    = { comparison ~ ((equal | not_equal) ~ comparison)* }
 comparison  = { term ~ ((greater_than | less_than | greater_than_or_equal | less_than_or_equal) ~ term)* }
 term        = { factor ~ ((plus | minus) ~ factor)* }
-factor      = { exponent ~ ((multiply | divide | percent) ~ exponent)* }
-exponent    = { unary ~ power? ~ integer }
-unary       = { minus? ~ ((leaf ~ ("offset" ~ duration)?)) }
-leaf        = { scalar | vector | subquery | aggregations | function_call }
+factor      = { exponent ~ ((multiply | divide | modulo) ~ exponent)* }
+exponent    = { unary ~ (power ~ unary)* }
+unary       = { negative? ~ leaf }
+leaf        = { scalar | vector | aggregations | functions }
 
 // *** Operations ***
-binary_or             = _{ "or" }
-binary_and            = _{ "and" }
-equal                 =  { "==" }
-not_equal             =  { "!=" }
-greater_than          =  { ">" }
-less_than             =  { "<" }
-greater_than_or_equal =  { ">=" }
-less_than_or_equal    =  { ">=" }
-plus                  =  { "+" }
-minus                 =  { "-" }
-multiply              =  { "*" }
-divide                =  { "/" }
-percent               =  { "%" }
-power                 =  { "^" }
-
-// Scalar values and vectors
-scalar   = { float }
-vector   = { metric_name ~ matchers? ~ (start_bracket ~ duration ~ end_bracket)? }
-subquery = { vector ~ start_bracket ~ duration ~ (colon ~ duration)? ~ end_bracket }
+or                    = { "or" }
+and                   = { "and" }
+unless                = { "unless" }
+equal                 = { "==" }
+not_equal             = { "!=" }
+greater_than          = { ">" }
+less_than             = { "<" }
+greater_than_or_equal = { ">=" }
+less_than_or_equal    = { ">=" }
+plus                  = { "+" }
+minus                 = { "-" }
+multiply              = { "*" }
+divide                = { "/" }
+modulo                = { "%" }
+power                 = { "^" }
+negative              = { "-" }
 
 // Aggregations
 aggregations   = { aggregation ~ start_paren ~ ((group_modifier ~ vector ~ end_paren) | (vector ~ end_paren)) }
@@ -78,14 +75,23 @@ bottomk      = { "bottomk" }
 group        = { "group" }
 
 // **** Function calls ****
-function_call = { function_name ~ start_paren ~ (expression ~ (comma ~ expression)*)? ~ end_paren }
-function_name = { "abs" | "absent" | "absent_over_time" | "acos" | "acosh" | "asin" | "asinh" | "atan" | "atanh" | "avg_over_time" | "ceil" | "changes" | "clamp" | "clamp_max" | "clamp_min" | "cos" | "cosh" | "count_over_time" | "days_in_month" | "day_of_month" | "day_of_week" | "day_of_year" | "deg" | "delta" | "deriv" | "exp" | "floor" | "histogram_quantile" | "holt_winters" | "hour" | "idelta" | "increase" | "irate" | "label_replace" | "label_join" | "last_over_time" | "ln" | "log10" | "log2" | "max_over_time" | "min_over_time" | "minute" | "month" | "pi" | "predict_linear" | "present_over_time" | "quantile_over_time" | "rad" | "rate" | "resets" | "round" | "scalar" | "sgn" | "sin" | "sinh" | "sort" | "sort_desc" | "sqrt" | "stddev_over_time" | "stdvar_over_time" | "sum_over_time" | "tan" | "tanh" | "time" | "timestamp" | "vector" | "year" }
+functions = { function ~ start_paren ~ (expression ~ (comma ~ expression)*)? ~ end_paren }
+function  = { "abs" | "absent" | "absent_over_time" | "acos" | "acosh" | "asin" | "asinh" | "atan" | "atanh" | "avg_over_time" | "ceil" | "changes" | "clamp" | "clamp_max" | "clamp_min" | "cos" | "cosh" | "count_over_time" | "days_in_month" | "day_of_month" | "day_of_week" | "day_of_year" | "deg" | "delta" | "deriv" | "exp" | "floor" | "histogram_quantile" | "holt_winters" | "hour" | "idelta" | "increase" | "irate" | "label_replace" | "label_join" | "last_over_time" | "ln" | "log10" | "log2" | "max_over_time" | "min_over_time" | "minute" | "month" | "pi" | "predict_linear" | "present_over_time" | "quantile_over_time" | "rad" | "rate" | "resets" | "round" | "scalar" | "sgn" | "sin" | "sinh" | "sort" | "sort_desc" | "sqrt" | "stddev_over_time" | "stdvar_over_time" | "sum_over_time" | "tan" | "tanh" | "time" | "timestamp" | "vector" | "year" }
 
-// **** Matchers ****
-matchers       = { start_brace ~ matcher ~ (comma ~ matcher)* ~ end_brace }
-matcher        = { label_name ~ match_operator ~ match_value }
-match_operator = { "=" | "!=" | "=~" | "!~" }
-match_value    = { string }
+// **** Vector creation ****
+scalar              = { float }
+vector              = { metric_name ~ (start_brace ~ label ~ (comma ~ label)* ~ end_brace)? ~ range? ~ offset_and_modifier? }
+label               = { label_name ~ match_operator ~ label_value }
+match_operator      = { equal_match | not_equal_match | regex_match | not_regex_match }
+offset              = { "offset" ~ duration }
+modifier            = { "@" ~ float }
+regex_match         = { "=~" }
+not_regex_match     = { "!~" }
+equal_match         = { equal }
+not_equal_match     = { not_equal }
+offset_and_modifier = { (offset ~ modifier?) | (modifier ~ offset?) }
+range               = { (start_bracket ~ duration ~ end_bracket)? }
+subquery            = { (start_bracket ~ duration ~ (colon ~ duration)? ~ end_bracket)? }
 
 // **** Low-level semantic definitions ****
 // _ prefix means silent; lets Pest know that these rules shouldn't create an AST node
@@ -100,8 +106,8 @@ end_bracket    = _{ ws ~ "]" ~ ws }
 end_paren      = _{ ws ~ ")" ~ ws }
 escaped_char   = _{ "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
 float          = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
-integer        = @{ "-"? ~ digits }
 label_name     = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+label_value    =  { string }
 normal_char    = _{ !("\"" | "\\") ~ ANY }
 quote          = _{ "\"" }
 start_brace    = _{ ws ~ "{" ~ ws }

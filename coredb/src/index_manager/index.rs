@@ -8,14 +8,13 @@ use dashmap::DashMap;
 use log::error;
 use log::{debug, info};
 use pest::error::Error as PestError;
+use pest::iterators::Pairs;
 
 use crate::index_manager::metadata::Metadata;
-use crate::index_manager::promql::PromQLParser;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
 use crate::metric::metric_point::MetricPoint;
-use crate::segment_manager::query_dsl::QueryDslParser;
-use crate::segment_manager::query_dsl::Rule;
+use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
@@ -180,6 +179,11 @@ impl Index {
   /// Insert a segment in the memory segments map.
   fn insert_memory_segments_map(&self, segment_number: u32, segment: Segment) {
     self.memory_segments_map.insert(segment_number, segment);
+  }
+
+  /// Get the memory segments map.
+  pub fn get_memory_segments_map(&self) -> DashMap<u32, Segment> {
+    self.memory_segments_map
   }
 
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
@@ -657,7 +661,7 @@ impl Index {
   /// Get metric points corresponding to a promql query.
   pub async fn search_metrics(
     &self,
-    url_query: &str,
+    ast: &Pairs<'_, Rule>,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<MetricPoint>, CoreDBError> {
@@ -665,10 +669,6 @@ impl Index {
       "Search logs for Metric query: {:?}, range_start_time: {}, range_end_time: {}",
       url_query, range_start_time, range_end_time
     );
-
-    // Build the query AST
-    let ast = PromQLParser::parse(Rule::start, &url_query)
-      .map_err(|e| SearchMetricsError::JsonParseError(e.to_string()))?;
 
     // Now start the search
     let mut retval = self

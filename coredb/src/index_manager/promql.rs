@@ -11,7 +11,7 @@
 //! transitory nodes onto the stack for further processing.
 
 use crate::index_manager::index::Index;
-use crate::index_manager::promql_vector::PromQLVector;
+use crate::index_manager::promql_object::PromQLObject;
 
 use crate::utils::error::AstError;
 use chrono::{Duration, Utc};
@@ -29,12 +29,89 @@ use pest_derive::Parser;
 
 pub struct PromQLParser;
 
+pub struct PromQLSelectors {
+  label_name: String,
+  operator: String,
+  label_value: String,
+}
+
+pub struct PromQLDuration {
+  start_time: u64,
+  end_time: u64,
+  offset: u64,
+}
+
+impl PromQLDuration {
+  /// Creates a new `PromQLDuration` with `start_time` at UNIX epoch start and `end_time` as now.
+  pub fn new() -> Self {
+    PromQLDuration {
+      start_time: 0,
+      end_time: Utc::now().timestamp() as u64,
+      offset: 0,
+    }
+  }
+
+  pub fn get_start_time(&self) -> u64 {
+    self.start_time
+  }
+
+  pub fn set_start_time(&mut self, start_time: u64) {
+    self.start_time = start_time;
+  }
+
+  pub fn get_end_time(&self) -> u64 {
+    self.end_time
+  }
+
+  pub fn set_end_time(&mut self, end_time: u64) {
+    self.end_time = end_time;
+  }
+
+  /// Sets the duration based on a Prometheus duration string (e.g., "2h", "15m").
+  pub fn set_duration(&mut self, duration_str: &str) -> Result<(), &'static str> {
+    let duration = Self::parse_duration(duration_str)?;
+    self.end_time = Utc::now().timestamp() as u64;
+    self.start_time = self.end_time.saturating_sub(duration.num_seconds() as u64);
+
+    Ok(())
+  }
+
+  /// Parses a Prometheus duration string into a `chrono::Duration`.
+  fn parse_duration(s: &str) -> Result<Duration, &'static str> {
+    let units = s.chars().last().ok_or("Invalid duration string")?;
+    let value = s[..s.len() - 1]
+      .parse::<i64>()
+      .map_err(|_| "Invalid number in duration")?;
+
+    match units {
+      's' => Ok(Duration::seconds(value)),
+      'm' => Ok(Duration::minutes(value)),
+      'h' => Ok(Duration::hours(value)),
+      'd' => Ok(Duration::days(value)),
+      'w' => Ok(Duration::weeks(value)),
+      _ => Err("Unsupported duration unit"),
+    }
+  }
+
+  pub fn set_offset(&mut self, offset_str: &str) -> Result<(), &'static str> {
+    let duration = Self::parse_duration(offset_str)?;
+    self.offset = duration.num_seconds() as u64;
+    Ok(())
+  }
+
+  /// Offsets the duration based on a Prometheus-style duration string (e.g., "2h", "15m").
+  pub fn adjust_by_offset(&mut self) {
+    self.start_time = self.start_time.saturating_add(self.offset);
+    self.end_time = self.end_time.saturating_add(self.offset);
+  }
+}
+
 impl Index {
   /// Walk the AST using an iterator and process each node
   pub async fn traverse_promql_ast(
     &self,
     nodes: &Pairs<'_, Rule>,
-  ) -> Result<PromQLVector, AstError> {
+  ) -> Result<PromQLObject, AstError> {
     let mut stack = VecDeque::new();
 
     // Push all nodes to the stack to start processing
@@ -42,7 +119,7 @@ impl Index {
       stack.push_back(node);
     }
 
-    let mut results = PromQLVector::new();
+    let mut results = PromQLObject::new();
 
     // Pop the nodes off the stack and process
     while let Some(node) = stack.pop_front() {
@@ -50,7 +127,7 @@ impl Index {
 
       match processing_result.await {
         Ok(node_results) => {
-          results.append(node_results);
+          results.set_vector(node_results.get_vector());
         }
         Err(AstError::UnsupportedQuery(_)) => {
           for inner_node in node.into_inner() {
@@ -67,11 +144,9 @@ impl Index {
   }
 
   /// General dispatcher for query processing
-  async fn query_dispatcher(&self, node: &Pair<'_, Rule>) -> Result<PromQLVector, AstError> {
+  async fn query_dispatcher(&self, node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
     match node.as_rule() {
-      Rule::leaf => self.process_leaf(node).await,
-      Rule::unary_expression => self.process_unary_expression(node).await,
-      Rule::compound_expression => self.process_compound_expression(node).await,
+      Rule::expression => self.process_expression(node).await,
       _ => Err(AstError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
@@ -79,21 +154,28 @@ impl Index {
     }
   }
 
-  async fn process_expression(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLVector, AstError> {
+  async fn process_expression(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
-    let mut results = HashSet::new();
+    let mut results = PromQLObject::new();
 
-    // Process each subtree separately, then logically OR the results
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::logical_and => {
-          let logical_and_results = self.process_logical_and(&node).await?;
-          if results.is_empty() {
-            results = logical_and_results;
+        Rule::or => {
+          let mut and_results = self.process_and(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(and_results.get_vector());
           } else {
-            results.extend(logical_and_results);
+            results.or(&mut and_results);
+          }
+        }
+        Rule::unless => {
+          let mut and_results = self.process_and(&node).await?;
+          if results.get_vector().is_empty() {
+            results = and_results;
+          } else {
+            results.unless(&mut and_results);
           }
         }
         _ => {
@@ -107,31 +189,20 @@ impl Index {
     Ok(results)
   }
 
-  async fn process_logical_and(
-    &self,
-    root_node: &Pair<'_, Rule>,
-  ) -> Result<PromQLVector, AstError> {
+  async fn process_and(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
-    let mut results = Vec::new();
+    let mut results = PromQLObject::new();
 
-    // Process each subtree separately, then logically AND the results
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::equality => {
-          let equality_results = self.equality(&node).await?;
-          if results.is_empty() {
-            results = equality_results;
+        Rule::and => {
+          let mut equality_results = self.process_equality(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(equality_results.get_vector());
           } else {
-            for (a, b) in results.iter_mut().zip(equality_results.iter()) {
-              // Assuming non-zero as true and zero as false
-              if *a.get_value() == 0 || *b.get_value() == 0 {
-                *a.set_value() = 0;
-              } else {
-                *a.set_value() = 1;
-              }
-            }
+            results.and(&mut equality_results);
           }
         }
         _ => {
@@ -145,28 +216,28 @@ impl Index {
     Ok(results)
   }
 
-  async fn process_equality(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLVector, AstError> {
+  async fn process_equality(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
-    let mut results = Vec::new();
+    let mut results = PromQLObject::new();
 
-    // Process each subtree separately, then logically compare the results
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::comparison => {
-          let comparison_results = self.process_comparison(&node).await?;
-          if results.is_empty() {
+        Rule::equal => {
+          let mut comparison_results = self.process_comparison(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(comparison_results.get_vector());
+          } else {
+            results.equal(&mut comparison_results);
+          }
+        }
+        Rule::not_equal => {
+          let mut comparison_results = self.process_comparison(&node).await?;
+          if results.get_vector().is_empty() {
             results = comparison_results;
           } else {
-            for (a, b) in results.iter_mut().zip(comparison_results.iter()) {
-              // Assuming non-zero as true and zero as false
-              if *a.get_value() == *b.get_value() {
-                *a.set_value() = 0;
-              } else {
-                *a.set_value() = 1;
-              }
-            }
+            results.not_equal(&mut comparison_results);
           }
         }
         _ => {
@@ -180,28 +251,44 @@ impl Index {
     Ok(results)
   }
 
-  async fn process_comparison(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLVector, AstError> {
+  async fn process_comparison(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
-    let mut results = HashSet::new();
+    let mut results = PromQLObject::new();
 
-    // Process each subtree separately, then logically compare the results
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::term => {
-          let term_results = self.process_term(&node).await?;
-          if results.is_empty() {
-            results = term_results;
+        Rule::greater_than => {
+          let mut term_results = self.process_term(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(term_results.get_vector());
           } else {
-            for (a, b) in results.iter_mut().zip(term_results.iter()) {
-              // Assuming non-zero as true and zero as false
-              if *a.get_value() == *b.get_value() {
-                *a.set_value() = 0;
-              } else {
-                *a.set_value() = 1;
-              }
-            }
+            results.greater_than(&mut term_results);
+          }
+        }
+        Rule::less_than => {
+          let mut term_results = self.process_term(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(term_results.get_vector());
+          } else {
+            results.less_than(&mut term_results);
+          }
+        }
+        Rule::greater_than_or_equal => {
+          let mut term_results = self.process_term(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(term_results.get_vector());
+          } else {
+            results.greater_than_or_equal(&mut term_results);
+          }
+        }
+        Rule::less_than_or_equal => {
+          let mut term_results = self.process_term(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(term_results.get_vector());
+          } else {
+            results.less_than_or_equal(&mut term_results);
           }
         }
         _ => {
@@ -215,53 +302,232 @@ impl Index {
     Ok(results)
   }
 
-  async fn process_leaf(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLVector, AstError> {
+  async fn process_term(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
-    let mut metric_name: Option<&str> = None;
-    let mut duration_text: Option<&str> = None;
-    let mut matchers: Vec<(String, String, String)> = Vec::new();
+    let mut results = PromQLObject::new();
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::plus => {
+          let mut factor_results = self.process_factor(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(factor_results.get_vector());
+          } else {
+            results.add(&mut factor_results);
+          }
+        }
+        Rule::minus => {
+          let mut term_results = self.process_factor(&node).await?;
+          if results.get_vector().is_empty() {
+            results = term_results;
+          } else {
+            results.subtract(&mut term_results);
+          }
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+  async fn process_factor(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut results = PromQLObject::new();
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::multiply => {
+          let mut exponent_results = self.process_exponent(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(exponent_results.get_vector());
+          } else {
+            results.add(&mut exponent_results);
+          }
+        }
+        Rule::divide => {
+          let mut exponent_results = self.process_exponent(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(exponent_results.get_vector());
+          } else {
+            results.subtract(&mut exponent_results);
+          }
+        }
+        Rule::modulo => {
+          let mut exponent_results = self.process_exponent(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(exponent_results.get_vector());
+          } else {
+            results.subtract(&mut exponent_results);
+          }
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+  async fn process_exponent(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut results = PromQLObject::new();
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::power => {
+          let mut unary_results = self.process_unary(&node).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(unary_results.get_vector());
+          } else {
+            results.power(&mut unary_results);
+          }
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+  async fn process_unary(&self, root_node: &Pair<'_, Rule>) -> Result<PromQLObject, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut results = PromQLObject::new();
+    let mut duration = PromQLDuration::new();
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::offset => {
+          if let Some(offset_text) = node.into_inner().next() {
+            duration.set_offset(offset_text.as_str());
+          }
+        }
+        Rule::negative => {
+          let leaf_results = self.process_leaf(&node, &mut duration).await?;
+          if results.get_vector().is_empty() {
+            results.set_vector(leaf_results.get_vector());
+          } else {
+            results.negative();
+          }
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+  async fn process_leaf(
+    &self,
+    root_node: &Pair<'_, Rule>,
+    duration: &mut PromQLDuration,
+  ) -> Result<PromQLObject, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut results = PromQLObject::new();
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::scalar => {
+          if let Some(scalar) = node.into_inner().next() {
+            let scalar_text: &str = scalar.as_str();
+            let float: Result<f64, _> = scalar_text.parse();
+            match float {
+              Ok(number) => {
+                results.set_scalar(number);
+              }
+              Err(_) => {
+                return Err(AstError::UnsupportedQuery(
+                  "Could not convert scalar text to float for processing".to_string(),
+                ))
+              }
+            }
+          }
+        }
+        Rule::vector => {
+          let promql_object = self.process_vector(&node, duration).await?;
+          results.set_vector(promql_object.get_vector());
+        }
+        // Rule::aggregations => {
+        //   results.set_vector(self.process_aggregations(&node, offset).await?);
+        // }
+        // Rule::functions => {
+        //   results.set_vector(self.process_functions(&node, offset).await?);
+        // }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    Ok(results)
+  }
+
+  async fn process_vector(
+    &self,
+    root_node: &Pair<'_, Rule>,
+    duration: &mut PromQLDuration,
+  ) -> Result<PromQLObject, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut selectors: Vec<(&str, &str, &str)> = Vec::new();
+    let mut match_operator: Option<&str> = None;
+    let mut match_value: Option<&str> = None;
     let mut label_name: Option<&str> = None;
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
         Rule::metric_name => {
           if let Some(metric) = node.into_inner().next() {
-            metric = Some(metric.as_str());
+            let metric_name = Some(metric.as_str());
+            selectors.push(("__name__", "==", metric_name.unwrap_or_default()));
+          }
+        }
+        Rule::label_name => {
+          if let Some(label) = node.into_inner().next() {
+            label_name = Some(label.as_str());
+          }
+        }
+        Rule::match_operator => {
+          if let Some(operator) = node.into_inner().next() {
+            match_operator = Some(operator.as_str());
+          }
+        }
+        Rule::label_value => {
+          if let Some(value) = node.into_inner().next() {
+            match_value = Some(value.as_str());
           }
         }
         Rule::duration => {
-          duration_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::matcher => {
-          while let Some(matcher_node) = stack.pop_front() {
-            let mut match_operator: Option<&str> = None;
-            let mut match_value: Option<&str> = None;
-            match matcher_node.as_rule() {
-              // Assumes these are always in sequence in the expression
-              Rule::label_name => {
-                if let Some(label) = matcher_node.into_inner().next() {
-                  label_name = Some(label.as_str());
-                }
-              }
-              Rule::match_operator => {
-                if let Some(operator) = matcher_node.into_inner().next() {
-                  match_operator = Some(operator.as_str());
-                }
-              }
-              Rule::match_value => {
-                if let Some(value) = matcher_node.into_inner().next() {
-                  match_value = Some(value.as_str());
-                }
-              }
-              _ => {
-                for matcher_inner_node in matcher_node.into_inner() {
-                  stack.push_back(matcher_inner_node);
-                }
-              }
-            }
-            matchers.push((Some(label_name), Some(match_operator), Some(match_value)));
+          if let Some(duration_text) = node.into_inner().next() {
+            duration.set_duration(Some(duration_text.as_str()).unwrap_or_default());
           }
         }
         _ => {
@@ -270,34 +536,30 @@ impl Index {
           }
         }
       }
+      selectors.push((
+        label_name.unwrap_or_default(),
+        match_operator.unwrap_or_default(),
+        match_value.unwrap_or_default(),
+      ));
     }
 
-    let (start_time, end_time) = parse_promql_duration(duration_text);
+    let results = self.process_metric_search(selectors, duration).await?;
 
-    if let Some(match_operator) = label_name {
-      self
-        .process_metric_search(matchers, start_time, end_time)
-        .await;
-    } else {
-      Err(AstError::UnsupportedQuery(
-        "Query string is missing".to_string(),
-      ))
-    }
+    Ok(results)
   }
 
-  /// Search the index for the terms extracted from the AST
+  /// Search the index
   async fn process_metric_search(
     &self,
-    matchers: Vec<(String, String, String)>,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Result<PromQLVector, AstError> {
+    selectors: Vec<(&str, &str, &str)>,
+    duration: &PromQLDuration,
+  ) -> Result<PromQLObject, AstError> {
     // Extract the terms and perform the search
     let mut results = HashSet::new();
 
     // Get the segments overlapping with the given time range. This is in the reverse chronological order.
     let segment_numbers = self
-      .get_overlapping_segments(range_start_time, range_end_time)
+      .get_overlapping_segments(duration.start_time, duration.end_time)
       .await;
 
     // Get the metrics from each of the segments. If a segment isn't present is memory, it is loaded in memory temporarily.
@@ -305,18 +567,28 @@ impl Index {
       let segment = self.get_memory_segments_map().get(&segment_number);
       let mut segment_results = match segment {
         Some(segment) => {
-          for (label_name, operator, label_value) in matchers {
-            segment.search_metrics(&label_name, label_value, range_start_time, range_end_time)
+          for (label_name, operator, label_value) in selectors {
+            segment.search_metrics(
+              &label_name,
+              label_value,
+              duration.start_time,
+              duration.end_time,
+            )
           }
         }
         None => {
           let segment = self.refresh_segment(segment_number).await;
-          for (label_name, operator, label_value) in matchers {
-            segment.search_metrics(&label_name, &label_value, range_start_time, range_end_time)
+          for (label_name, operator, label_value) in selectors {
+            segment.search_metrics(
+              &label_name,
+              &label_value,
+              duration.start_time,
+              duration.end_time,
+            )
           }
         }
       };
-      results.get_metric_points().append(&mut segment_results);
+      results.get_vector().append(&mut segment_results);
     }
 
     if results.is_empty() {
@@ -325,58 +597,6 @@ impl Index {
     }
 
     Ok(results)
-  }
-
-  fn parse_promql_duration(duration_str: &str) -> Result<(u64, u64), &'static str> {
-    let duration_in_seconds = match duration_str.chars().last().unwrap() {
-      's' => {
-        duration_str
-          .trim_end_matches('s')
-          .parse::<i64>()
-          .map_err(|_| "Invalid duration")?
-          * 1
-      }
-      'm' => {
-        duration_str
-          .trim_end_matches('m')
-          .parse::<i64>()
-          .map_err(|_| "Invalid duration")?
-          * 60
-      }
-      'h' => {
-        duration_str
-          .trim_end_matches('h')
-          .parse::<i64>()
-          .map_err(|_| "Invalid duration")?
-          * 3600
-      }
-      'd' => {
-        duration_str
-          .trim_end_matches('d')
-          .parse::<i64>()
-          .map_err(|_| "Invalid duration")?
-          * 86400
-      }
-      'w' => {
-        duration_str
-          .trim_end_matches('w')
-          .parse::<i64>()
-          .map_err(|_| "Invalid duration")?
-          * 604800
-      }
-      'y' => {
-        duration_str
-          .trim_end_matches('y')
-          .parse::<i64>()
-          .map_err(|_| "Invalid duration")?
-          * 31536000
-      }
-      _ => return Err("Unsupported duration unit"),
-    };
-
-    let now = Utc::now();
-    let start_time = now - Duration::seconds(duration_in_seconds);
-    Ok((start_time.timestamp() as u64, now.timestamp() as u64))
   }
 }
 
@@ -423,7 +643,7 @@ mod tests {
 
     let promql_query = r#"metric_name_1{label_name_1=label_value_1"#;
 
-    let results = match index.get_metrics("label_name_1", 0, u64::MAX).await {
+    let results = match index.search_metrics("label_name_1", 0, u64::MAX).await {
       Ok(results) => {
         assert_eq!(
           results.len(),

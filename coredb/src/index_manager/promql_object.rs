@@ -1,16 +1,15 @@
-// TODO: Add error checking, particularly when a vector is not the expected instant vector
-// or range vector
-//
-// By the time the query reaches here, all time filters should have already been applied,
-// so range vector and instant vectors are largely treated the same.
-//
+// This code is licensed under Elastic License 2.0
+// https://www.elastic.co/licensing/elastic-license
+
+// TODO: Add error checking
 // TODO: Histograms are not yet supported
 use crate::index_manager::promql_time_series::PromQLTimeSeries;
 use crate::metric::metric_point::MetricPoint;
 use chrono::Utc;
 use std::collections::HashMap;
+use std::mem::drop;
 
-pub enum AggregationOperator {
+pub enum AggregationOperator<'a> {
   Sum,
   Min,
   Max,
@@ -19,37 +18,129 @@ pub enum AggregationOperator {
   Stddev,
   Stdvar,
   Count,
-  CountValues(String),
+  CountValues(&'a str),
   Bottomk(usize), // TODO: Check k is of type usize
   Topk(usize),    // TODO: Check k is of type usize
   Quantile(f64),  // TODO: Check phi is of type f64
 }
 
-// Represents both an Instant Vector and a Range Vector, with
-// and Instant Vector being a single sample (i.e. metric_points.len() == 1)
-// and Range Vector having a range of metrics points (i.e. metric_points.len() > 1)
 #[derive(Debug, Clone)]
-pub struct PromQLVector {
-  vector: Vec<PromQLTimeSeries>,
+pub enum PromQLObjectType {
+  Scalar,
+  InstantVector,
+  RangeVector,
+  Undefined,
 }
 
-impl PromQLVector {
-  pub fn new(vector: Vec<PromQLTimeSeries>) -> Self {
-    PromQLVector { vector }
+#[derive(Debug, Clone)]
+pub struct PromQLObject {
+  vector: Vec<PromQLTimeSeries>,
+  scalar: f64,
+  object_type: PromQLObjectType,
+}
+
+impl PromQLObject {
+  /// Constructor
+  pub fn new() -> Self {
+    PromQLObject {
+      vector: Vec::new(),
+      scalar: 0.0,
+      object_type: PromQLObjectType::Undefined,
+    }
+  }
+
+  /// Constructor for scalar
+  pub fn new_scalar(value: f64) -> Self {
+    PromQLObject {
+      vector: Vec::new(),
+      scalar: value,
+      object_type: PromQLObjectType::Scalar,
+    }
+  }
+
+  /// Constructor for instant and range vectors
+  pub fn new_vector(vector: Vec<PromQLTimeSeries>) -> Self {
+    let mut object = PromQLObject {
+      vector,
+      scalar: 0.0,
+      object_type: PromQLObjectType::InstantVector,
+    };
+    object.update_object_type();
+    object
+  }
+
+  /// Adjusted method name to match naming convention
+  pub fn update_object_type(&mut self) {
+    if !self.vector.is_empty() {
+      if self
+        .vector
+        .iter()
+        .all(|ts| ts.get_metric_points().len() == 1)
+      {
+        self.object_type = PromQLObjectType::InstantVector;
+      } else {
+        self.object_type = PromQLObjectType::RangeVector;
+      }
+    }
+  }
+
+  /// Getter for scalar type
+  pub fn is_scalar(&self) -> bool {
+    matches!(self.object_type, PromQLObjectType::Scalar)
+  }
+
+  /// Getter for vector type
+  pub fn is_vector(&self) -> bool {
+    self.is_instant_vector() || self.is_range_vector()
+  }
+
+  /// Getter for instant vector type
+  pub fn is_instant_vector(&self) -> bool {
+    matches!(self.object_type, PromQLObjectType::InstantVector)
+  }
+
+  /// Getter for range vector type
+  pub fn is_range_vector(&self) -> bool {
+    matches!(self.object_type, PromQLObjectType::RangeVector)
+  }
+
+  /// Getter for vector
+  pub fn get_vector(&self) -> &Vec<PromQLTimeSeries> {
+    &self.vector
+  }
+
+  /// Setter for vector
+  pub fn set_vector(&mut self, vector: &Vec<PromQLTimeSeries>) {
+    self.vector = *vector;
+    self.update_object_type();
+  }
+
+  /// Getter for scalar
+  pub fn get_scalar(&self) -> f64 {
+    self.scalar
+  }
+
+  /// Setter for scalar
+  pub fn set_scalar(&mut self, scalar: f64) {
+    self.scalar = scalar;
+    self.object_type = PromQLObjectType::Scalar;
   }
 
   // ******** Logical Operators: https://prometheus.io/docs/prometheus/latest/querying/operators/
 
-  pub fn and(&mut self, other: &PromQLVector) {
+  pub fn and(&mut self, other: &PromQLObject) {
     self.vector.retain(|self_ts| {
       other
         .vector
         .iter()
         .any(|other_ts| self_ts.get_labels() == other_ts.get_labels())
     });
+
+    // explicitly release the memory of the other vector here; it won't be reused
+    drop(other);
   }
 
-  pub fn or(&mut self, other: &PromQLVector) {
+  pub fn or(&mut self, other: &PromQLObject) {
     for other_ts in &other.vector {
       if !self
         .vector
@@ -59,88 +150,98 @@ impl PromQLVector {
         self.vector.push(other_ts.clone());
       }
     }
+
+    // explicitly release the memory of the other vector here; it won't be reused
+    drop(other);
   }
 
-  pub fn unless(&mut self, other: &PromQLVector) {
+  pub fn unless(&mut self, other: &PromQLObject) {
     self.vector.retain(|self_ts| {
       !other
         .vector
         .iter()
         .any(|other_ts| self_ts.get_labels() == other_ts.get_labels())
     });
+
+    // explicitly release the memory of the other vector here; it won't be reused
+    drop(other);
   }
 
-  // ******** Binary Operators: https://prometheus.io/docs/prometheus/latest/querying/operators/
+  // **** Binary Operators: https://prometheus.io/docs/prometheus/latest/querying/operators/
+  // apply to both scalars and vectors.
 
-  pub fn equal(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| if a == b { 1.0 } else { 0.0 });
-  }
-
-  pub fn plus(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| a + b);
-  }
-
-  pub fn multiply(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| a * b);
-  }
-
-  pub fn not_equal(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| if a != b { 1.0 } else { 0.0 });
-  }
-
-  pub fn greater_than(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| if a > b { 1.0 } else { 0.0 });
-  }
-
-  pub fn less_than(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| if a < b { 1.0 } else { 0.0 });
-  }
-
-  pub fn greater_than_or_equal(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| if a >= b { 1.0 } else { 0.0 });
-  }
-
-  pub fn less_than_or_equal(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| if a <= b { 1.0 } else { 0.0 });
-  }
-
-  pub fn minus(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| a - b);
-  }
-
-  pub fn divide(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| if b != 0.0 { a / b } else { f64::NAN });
-  }
-
-  pub fn percent(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| (a / b) * 100.0);
-  }
-
-  pub fn power(&mut self, other: &PromQLVector) {
-    self.apply_binary_operation(other, |a, b| (a.powf(b)));
-  }
-
-  // Helper method to apply a binary operation to matching metric points if the labels
-  // match: https://prometheus.io/docs/prometheus/latest/querying/operators/
-  fn apply_binary_operation<F: Fn(f64, f64) -> f64>(&mut self, other: &PromQLVector, op: F) {
-    for self_ts in &mut self.vector {
-      if let Some(other_ts) = other
-        .vector
-        .iter()
-        .find(|x| x.get_labels() == self_ts.get_labels())
-      {
-        // Assume both vectors have the same number of metric points and are aligned
-        for (i, self_mp) in self_ts.get_metric_points().iter_mut().enumerate() {
-          if let Some(other_mp) = other_ts.get_metric_points().get(i) {
-            // Apply the operation and update the metric point in place
-            self_mp.set_value(op(self_mp.get_value(), other_mp.get_value()));
+  pub fn apply_binary_operation<F: Fn(f64, f64) -> f64>(&mut self, other: &PromQLObject, op: F) {
+    if !self.is_vector() || !other.is_vector() {
+      // Scalar operations or scalar-vector operations
+      if self.is_vector() {
+        for ts in &mut self.vector {
+          for mp in ts.get_metric_points() {
+            mp.set_value(op(mp.get_value(), other.scalar));
+          }
+        }
+      } else {
+        self.scalar = op(self.scalar, other.scalar);
+      }
+    } else {
+      // Vector-vector operations
+      for self_ts in &mut self.vector {
+        if let Some(other_ts) = other
+          .vector
+          .iter()
+          .find(|x| x.get_labels() == self_ts.get_labels())
+        {
+          for (i, self_mp) in self_ts.get_metric_points().iter_mut().enumerate() {
+            if let Some(other_mp) = other_ts.get_metric_points().get(i) {
+              self_mp.set_value(op(self_mp.get_value(), other_mp.get_value()));
+            }
           }
         }
       }
+
+      // explicitly release the memory of the other vector here; it won't be reused
+      drop(other);
     }
   }
 
-  // ******** Aggregations: https://prometheus.io/docs/prometheus/latest/querying/operators/
+  pub fn equal(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| if a == b { 1.0 } else { 0.0 });
+  }
+  pub fn not_equal(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| if a != b { 1.0 } else { 0.0 });
+  }
+  pub fn greater_than(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| if a > b { 1.0 } else { 0.0 });
+  }
+  pub fn less_than(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| if a < b { 1.0 } else { 0.0 });
+  }
+  pub fn greater_than_or_equal(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| if a >= b { 1.0 } else { 0.0 });
+  }
+  pub fn less_than_or_equal(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| if a <= b { 1.0 } else { 0.0 });
+  }
+  pub fn add(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| a + b);
+  }
+  pub fn subtract(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| a - b);
+  }
+  pub fn multiply(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| a * b);
+  }
+  pub fn divide(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| if b != 0.0 { a / b } else { f64::NAN });
+  }
+  pub fn modulo(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| a % b);
+  }
+  pub fn power(&mut self, other: &PromQLObject) {
+    self.apply_binary_operation(other, |a, b| a.powf(b));
+  }
+
+  // **** Aggregations: https://prometheus.io/docs/prometheus/latest/querying/operators/
+  // apply only to vectors
 
   pub fn apply_aggregation_operator(&mut self, operator: AggregationOperator) {
     match operator {
@@ -304,9 +405,10 @@ impl PromQLVector {
       )];
 
       // Push a new PromQLTimeSeries with the derived label and the count as its only metric point
-      self
-        .vector
-        .push(PromQLTimeSeries::new(labels.clone(), metric_points));
+      self.vector.push(PromQLTimeSeries::new_with_params(
+        labels.clone(),
+        metric_points,
+      ));
     }
   }
 
@@ -357,7 +459,8 @@ impl PromQLVector {
     }
   }
 
-  // ******** Trigonometric Functions: https://prometheus.io/docs/prometheus/latest/querying/functions/
+  // **** Trigonometric Functions: https://prometheus.io/docs/prometheus/latest/querying/functions/
+  // apply only to vectors
 
   // Calculates the arccosine of all elements in v (special cases).
   pub fn acos(&mut self) {
@@ -444,6 +547,7 @@ impl PromQLVector {
   }
 
   // **** Functions: https://prometheus.io/docs/prometheus/latest/querying/functions/
+  // apply only to vectors
 
   // Applies the absolute value operation to every metric point in every time series
   pub fn abs(&mut self) {
@@ -459,7 +563,7 @@ impl PromQLVector {
       let mut labels = HashMap::new();
       labels.insert("absent".to_string(), "true".to_string());
       let mut absent_metric_point = MetricPoint::new(chrono::Utc::now().timestamp() as u64, 1.0);
-      let mut absent_series = PromQLTimeSeries::new(labels, vec![absent_metric_point]);
+      let mut absent_series = PromQLTimeSeries::new_with_params(labels, vec![absent_metric_point]);
       self.vector.push(absent_series);
     } else {
       self.vector.clear();
@@ -473,7 +577,7 @@ impl PromQLVector {
       let mut labels = HashMap::new();
       labels.insert("absent".to_string(), "true".to_string());
       let mut absent_metric_point = MetricPoint::new(chrono::Utc::now().timestamp() as u64, 1.0);
-      let mut absent_series = PromQLTimeSeries::new(labels, vec![absent_metric_point]);
+      let mut absent_series = PromQLTimeSeries::new_with_params(labels, vec![absent_metric_point]);
       self.vector.push(absent_series);
     } else {
       self.vector.clear();
@@ -658,6 +762,12 @@ impl PromQLVector {
     }
   }
 
+  pub fn negative(&mut self) {
+    for ts in &mut self.vector {
+      ts.negative();
+    }
+  }
+
   pub fn predict_linear(&mut self, t: f64) {
     for ts in &mut self.vector {
       ts.predict_linear(t);
@@ -728,9 +838,9 @@ impl PromQLVector {
     }
   }
 
-  pub fn vector(&self, s: f64) -> PromQLVector {
+  pub fn vector(&self, s: f64) -> PromQLObject {
     let current_time = Utc::now().timestamp();
-    PromQLVector::new(vec![PromQLTimeSeries::new(
+    PromQLObject::new_vector(vec![PromQLTimeSeries::new_with_params(
       HashMap::new(),
       vec![MetricPoint::new(current_time as u64, s)],
     )])
@@ -814,7 +924,7 @@ impl PromQLVector {
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-impl Hash for PromQLVector {
+impl Hash for PromQLObject {
   fn hash<H: Hasher>(&self, state: &mut H) {
     for ts in &self.vector {
       ts.hash(state);
@@ -822,21 +932,21 @@ impl Hash for PromQLVector {
   }
 }
 
-impl PartialEq for PromQLVector {
+impl PartialEq for PromQLObject {
   fn eq(&self, other: &Self) -> bool {
     self.vector == other.vector
   }
 }
 
-impl Eq for PromQLVector {}
+impl Eq for PromQLObject {}
 
-impl PartialOrd for PromQLVector {
+impl PartialOrd for PromQLObject {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     Some(self.vector.len().cmp(&other.vector.len()))
   }
 }
 
-impl Ord for PromQLVector {
+impl Ord for PromQLObject {
   fn cmp(&self, other: &Self) -> Ordering {
     self.vector.len().cmp(&other.vector.len())
   }
@@ -851,12 +961,12 @@ mod tests {
       .iter()
       .map(|&value| MetricPoint::new(timestamp, value))
       .collect();
-    PromQLTimeSeries::new(HashMap::new(), metric_points) // Assuming labels are not provided here
+    PromQLTimeSeries::new_with_params(HashMap::new(), metric_points) // Assuming labels are not provided here
   }
 
   #[test]
   fn test_abs() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![-1.0, 2.0, -3.0], 0),
       create_time_series(vec![4.0, -5.0], 0),
     ]);
@@ -874,7 +984,7 @@ mod tests {
 
   #[test]
   fn test_round() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.234, 2.345], 0),
       create_time_series(vec![3.456, 4.567], 0),
     ]);
@@ -892,7 +1002,7 @@ mod tests {
 
   #[test]
   fn test_acos() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![0.0, 0.5, 1.0], 0),
       create_time_series(vec![0.5, 1.0], 0),
     ]);
@@ -913,7 +1023,7 @@ mod tests {
 
   #[test]
   fn test_asin() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![0.0, 0.5, 1.0], 0),
       create_time_series(vec![0.5, 1.0], 0),
     ]);
@@ -934,7 +1044,7 @@ mod tests {
 
   #[test]
   fn test_min_over_time() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 2.0, 3.0], 0),
       create_time_series(vec![4.0, 5.0], 0),
     ]);
@@ -950,7 +1060,7 @@ mod tests {
 
   #[test]
   fn test_max_over_time() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 2.0, 3.0], 0),
       create_time_series(vec![4.0, 5.0], 0),
     ]);
@@ -966,7 +1076,7 @@ mod tests {
 
   #[test]
   fn test_ceil() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.2, 2.7, 3.5], 0),
       create_time_series(vec![4.8, -5.2], 0),
     ]);
@@ -985,7 +1095,7 @@ mod tests {
   // TODO: Not sure why clamp is saying it has wrong args
   // #[test]
   // fn test_clamp() {
-  //   let mut vector = PromQLVector::new(vec![
+  //   let mut vector = PromQLObject::new_vector(vec![
   //     create_time_series(vec![1.2, 2.7, 3.5], 0),
   //     create_time_series(vec![4.8, -5.2], 0),
   //   ]);
@@ -1003,7 +1113,7 @@ mod tests {
 
   #[test]
   fn test_clamp_max() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.2, 2.7, 3.5], 0),
       create_time_series(vec![4.8, -5.2], 0),
     ]);
@@ -1021,7 +1131,7 @@ mod tests {
 
   #[test]
   fn test_clamp_min() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.2, 2.7, 3.5], 0),
       create_time_series(vec![4.8, -5.2], 0),
     ]);
@@ -1039,7 +1149,7 @@ mod tests {
 
   #[test]
   fn test_changes() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 1.0, 2.0, 3.0, 3.0], 0),
       create_time_series(vec![1.0, 1.0, 1.0, 2.0], 0),
     ]);
@@ -1055,7 +1165,7 @@ mod tests {
 
   #[test]
   fn test_delta() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
       create_time_series(vec![5.0, 8.0, 12.0], 0),
     ]);
@@ -1071,7 +1181,7 @@ mod tests {
 
   #[test]
   fn test_deriv() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 4.0, 9.0, 16.0], 0),
       create_time_series(vec![5.0, 12.0, 21.0], 0),
     ]);
@@ -1090,7 +1200,7 @@ mod tests {
 
   #[test]
   fn test_increase() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
       create_time_series(vec![5.0, 8.0, 12.0], 0),
     ]);
@@ -1108,14 +1218,14 @@ mod tests {
 
   #[test]
   fn test_idelta() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
       create_time_series(vec![5.0, 8.0, 12.0], 0),
     ]);
 
     vector.idelta();
 
-    let expected = PromQLVector::new(vec![
+    let expected = PromQLObject::new_vector(vec![
       create_time_series(vec![0.0, 2.0, 3.0, 4.0], 0),
       create_time_series(vec![0.0, 3.0, 4.0], 0),
     ]);
@@ -1125,14 +1235,14 @@ mod tests {
 
   #[test]
   fn test_irate() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
       create_time_series(vec![5.0, 8.0, 12.0], 0),
     ]);
 
     vector.irate();
 
-    let expected = PromQLVector::new(vec![
+    let expected = PromQLObject::new_vector(vec![
       create_time_series(vec![0.0, 2.0, 3.0, 4.0], 0),
       create_time_series(vec![0.0, 3.0, 4.0], 0),
     ]);
@@ -1142,14 +1252,14 @@ mod tests {
 
   #[test]
   fn test_rate() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
       create_time_series(vec![5.0, 8.0, 12.0], 0),
     ]);
 
     vector.rate();
 
-    let expected = PromQLVector::new(vec![
+    let expected = PromQLObject::new_vector(vec![
       create_time_series(vec![0.0, 2.0, 3.0, 4.0], 0),
       create_time_series(vec![0.0, 3.0, 4.0], 0),
     ]);
@@ -1158,7 +1268,7 @@ mod tests {
   }
   #[test]
   fn test_absent() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
       create_time_series(vec![], 0),
       create_time_series(vec![5.0, 8.0, 12.0], 0),
@@ -1175,7 +1285,7 @@ mod tests {
 
   #[test]
   fn test_sgn() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![-10.0, 8.0, 0.0, 15.0, -18.0], 0),
       create_time_series(vec![5.0, -6.0, -6.0, 5.0], 0),
     ]);
@@ -1193,7 +1303,7 @@ mod tests {
 
   #[test]
   fn test_present_over_time() {
-    let mut vector = PromQLVector::new(vec![
+    let mut vector = PromQLObject::new_vector(vec![
       create_time_series(vec![10.0, 8.0, 12.0, 15.0, 18.0], 0),
       create_time_series(vec![5.0, 6.0, 6.0, 5.0], 0),
     ]);

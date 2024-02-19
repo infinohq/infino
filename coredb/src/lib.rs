@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use ::log::{debug, info};
 use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
+use index_manager::promql::{PromQLParser, Rule};
 use policy_manager::retention_policy::TimeBasedRetention;
 use storage_manager::storage::Storage;
 use utils::error::SearchLogsError;
@@ -178,19 +179,22 @@ impl CoreDB {
   }
 
   /// Get the metric points for given label and range.
-  pub async fn get_metrics(
+  pub async fn search_metrics(
     &self,
-    label_name: &str,
-    label_value: &str,
+    url_query: &str,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<MetricPoint>, CoreDBError> {
+    // Build the query AST
+    let ast = PromQLParser::parse(Rule::start, &url_query)
+      .map_err(|e| SearchMetricsError::JsonParseError(e.to_string()))?;
+
     self
       .index_map
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .get_metrics(label_name, label_value, range_start_time, range_end_time)
+      .search_metrics(&ast, range_start_time, range_end_time)
       .await
   }
 

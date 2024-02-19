@@ -644,9 +644,8 @@ async fn search_metrics(
 
   let results = state
     .coredb
-    .get_metrics(
-      &metrics_query.label_name,
-      &metrics_query.label_value,
+    .search_metrics(
+      &metrics_query,
       // The default for range start time is 0.
       metrics_query.start_time.unwrap_or(0_u64),
       // The default for range end time is the current time.
