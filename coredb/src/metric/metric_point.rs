@@ -2,7 +2,7 @@
 // https://www.elastic.co/licensing/elastic-license
 
 use approx::abs_diff_eq;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, LocalResult, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
@@ -58,7 +58,10 @@ impl MetricPoint {
 
   // Converts the epoch timestamp to a DateTime<Utc> object
   pub fn datetime(&self) -> DateTime<Utc> {
-    Utc.timestamp(self.time as i64, 0)
+    match Utc.timestamp_opt(self.time as i64, 0) {
+      LocalResult::Single(datetime) => datetime,
+      _ => panic!("Failed to convert timestamp to DateTime<Utc>"),
+    }
   }
 
   // Extracts the year from the timestamp

@@ -75,8 +75,7 @@ struct LogsQuery {
 #[derive(Debug, Deserialize, Serialize)]
 /// Represents a metrics query.
 struct MetricsQuery {
-  label_name: String,
-  label_value: String,
+  text: String,
   start_time: Option<u64>,
   end_time: Option<u64>,
 }
@@ -639,13 +638,15 @@ async fn summarize(
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
+  json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!("Searching metrics: {:?}", metrics_query);
 
   let results = state
     .coredb
     .search_metrics(
-      &metrics_query,
+      &metrics_query.text,
+      &json_body,
       // The default for range start time is 0.
       metrics_query.start_time.unwrap_or(0_u64),
       // The default for range end time is the current time.

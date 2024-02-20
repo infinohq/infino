@@ -16,18 +16,25 @@ use std::collections::HashMap;
 use ::log::{debug, info};
 use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
-use index_manager::promql::{PromQLParser, Rule};
+use index_manager::promql::Rule;
+use index_manager::promql_time_series::PromQLTimeSeries;
+use pest::error::Error as PestError;
 use policy_manager::retention_policy::TimeBasedRetention;
 use storage_manager::storage::Storage;
 use utils::error::SearchLogsError;
 
 use crate::index_manager::index::Index;
 use crate::log::log_message::LogMessage;
-use crate::metric::metric_point::MetricPoint;
-use crate::utils::config::Settings;
-use crate::utils::error::CoreDBError;
-
 use crate::policy_manager::retention_policy::RetentionPolicy;
+use crate::segment_manager::segment::Segment;
+use crate::utils::config::Settings;
+use crate::utils::error::{CoreDBError, SearchMetricsError};
+
+impl From<PestError<Rule>> for SearchMetricsError {
+  fn from(error: PestError<Rule>) -> Self {
+    SearchMetricsError::JsonParseError(error.to_string())
+  }
+}
 
 /// Database for storing telemetry data, mapping string keys to index objects.
 pub struct CoreDB {
@@ -160,13 +167,50 @@ impl CoreDB {
   }
 
   /// Search the log messages for given query and range.
+  ///
+  /// Infino log searches support Lucene Query Syntax: https://lucene.apache.org/core/2_9_4/queryparsersyntax.html
+  /// http://infino-endpoint?"my lucene query"&start_time=blah&end_time=blah
+  ///
+  /// but these can be overridden by a Query DSL in the
+  /// json body sent with the query: https://opensearch.org/docs/latest/query-dsl/.
+  ///
+  /// Note that while the query terms are not required in the URL, the query parameters
+  /// "start_time" and "end_time" are indeed required in the URL. They are always added by the
+  /// OpenSearch plugin that calls Infino.
   pub async fn search_logs(
     &self,
-    query: &str,
-    json_body: &str,
+    url_query: &str,
+    json_query: &str,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, CoreDBError> {
+    debug!(
+      "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
+      url_query, json_query, range_start_time, range_end_time
+    );
+
+    let mut json_query = json_query.to_string();
+
+    // Check if URL or JSON query is empty
+    let is_url_empty = url_query.trim().is_empty();
+    let is_json_empty = json_query.trim().is_empty();
+
+    // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
+    if is_json_empty {
+      if is_url_empty {
+        return Err(SearchLogsError::NoQueryProvided.into());
+      } else {
+        // Update json_query with the constructed query from url_query
+        json_query = format!(
+          r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+          url_query
+        );
+      }
+    }
+
+    // Build the query AST
+    let ast = Segment::parse_query(&json_query)?;
+
     let index = self
       .index_map
       .get(self.get_default_index_name())
@@ -174,20 +218,27 @@ impl CoreDB {
 
     index
       .value()
-      .search_logs(query, json_body, range_start_time, range_end_time)
+      .search_logs(&ast, range_start_time, range_end_time)
       .await
   }
 
   /// Get the metric points for given label and range.
+  /// Range boundaries can be overridden by PromQL query in the JSON body
   pub async fn search_metrics(
     &self,
     url_query: &str,
+    json_query: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<MetricPoint>, CoreDBError> {
+  ) -> Result<Vec<PromQLTimeSeries>, CoreDBError> {
+    debug!(
+      "Search metrics for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
+      url_query, json_query, range_start_time, range_end_time
+    );
+
     // Build the query AST
-    let ast = PromQLParser::parse(Rule::start, &url_query)
-      .map_err(|e| SearchMetricsError::JsonParseError(e.to_string()))?;
+    // TODO: for now we'll ignore the json body but come back to this
+    let ast = Index::parse_query(&url_query)?;
 
     self
       .index_map
@@ -431,7 +482,7 @@ mod tests {
 
     // Search for metric points.
     let results = coredb
-      .get_metrics("__name__", "some_metric", start, end)
+      .search_metrics("some_metric", start, end)
       .await
       .expect("Error in get_metrics");
     assert_eq!(results.first().unwrap().get_value(), 1.0);

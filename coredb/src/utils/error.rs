@@ -48,8 +48,11 @@ pub enum CoreDBError {
   #[error("Search Logs Error: {0}")]
   SearchLogsError(SearchLogsError),
 
-  #[error("Search Logs Error: {0}")]
+  #[error("Search Metrics Error: {0}")]
   SearchMetricsError(SearchMetricsError),
+
+  #[error("Ast Error: {0}")]
+  AstError(AstError),
 
   #[error("Segment in memory: {0}")]
   SegmentInMemory(u32),
@@ -86,6 +89,9 @@ pub enum AstError {
 
   #[error("Unsupported query: {0}")]
   UnsupportedQuery(String),
+
+  #[error("CoreDB error: {0}")]
+  CoreDBError(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -144,6 +150,9 @@ pub enum SearchMetricsError {
   #[error("Segment error: {0}")]
   SegmentError(SegmentError),
 
+  #[error("Ast error: {0}")]
+  AstError(AstError),
+
   #[error("No query provided")]
   NoQueryProvided,
 }
@@ -169,5 +178,11 @@ impl From<SearchLogsError> for CoreDBError {
 impl From<SearchMetricsError> for CoreDBError {
   fn from(error: SearchMetricsError) -> Self {
     CoreDBError::SearchMetricsError(error)
+  }
+}
+
+impl From<CoreDBError> for AstError {
+  fn from(error: CoreDBError) -> Self {
+    AstError::CoreDBError(error.to_string())
   }
 }

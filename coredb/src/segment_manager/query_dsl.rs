@@ -12,6 +12,7 @@
 
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::AstError;
+use crate::utils::error::SearchLogsError;
 use crate::utils::tokenize::tokenize;
 
 use log::debug;
@@ -29,6 +30,13 @@ use pest_derive::Parser;
 pub struct QueryDslParser;
 
 impl Segment {
+  pub fn parse_query(
+    json_query: &str,
+  ) -> Result<pest::iterators::Pairs<'_, Rule>, SearchLogsError> {
+    QueryDslParser::parse(Rule::start, json_query)
+      .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))
+  }
+
   /// Walk the AST using an iterator and process each node
   pub async fn traverse_query_dsl_ast(
     &self,

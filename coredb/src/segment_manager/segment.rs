@@ -6,7 +6,6 @@ use std::vec::Vec;
 
 use dashmap::DashMap;
 use log::debug;
-use pest::iterators::Pairs;
 
 use super::metadata::Metadata;
 use crate::log::inverted_map::InvertedMap;
@@ -14,11 +13,9 @@ use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
-use crate::segment_manager::query_dsl::Rule;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
-use crate::utils::error::SegmentSearchError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::thread;
@@ -381,31 +378,8 @@ impl Segment {
     Ok((segment, total_size))
   }
 
-  /// Search the segment for the given query.
-  pub async fn search_logs(
-    &self,
-    ast: &Pairs<'_, Rule>,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, SegmentSearchError> {
-    let matching_document_ids = self
-      .traverse_query_dsl_ast(&ast.clone())
-      .await
-      .map_err(SegmentSearchError::AstError)?;
-
-    // Since matching_document_ids is a HashSet, no need to dedup
-    let matching_document_ids_vec: Vec<u32> = matching_document_ids.into_iter().collect();
-
-    // Get the log messages and return with the query results
-    let log_messages = self
-      .get_log_messages_from_ids(&matching_document_ids_vec, range_start_time, range_end_time)
-      .map_err(SegmentSearchError::LogError)?;
-
-    Ok(log_messages)
-  }
-
   /// Return the log messages within the given time range corresponding to the given log message ids.
-  fn get_log_messages_from_ids(
+  pub fn get_log_messages_from_ids(
     &self,
     log_message_ids: &[u32],
     range_start_time: u64,
@@ -693,8 +667,8 @@ mod tests {
     assert_eq!(segment.metadata.get_end_time(), time);
   }
 
-  #[test]
-  fn test_one_metric_point() {
+  #[tokio::test]
+  async fn test_one_metric_point() {
     let segment = Segment::new();
     let time = Utc::now().timestamp_millis() as u64;
     let mut label_map = HashMap::new();
@@ -706,13 +680,14 @@ mod tests {
     assert_eq!(segment.metadata.get_start_time(), time);
     assert_eq!(segment.metadata.get_end_time(), time);
 
-    let conditions = [MetricsQueryCondition::Equals(
+    let conditions = vec![MetricsQueryCondition::Equals(
       "label_name_1".to_owned(),
       "label_value_1".to_owned(),
     )];
     assert_eq!(
       segment
-        .search_metrics(&conditions, time - 100, time + 100)
+        .search_metrics(conditions, time - 100, time + 100)
+        .await
         .len(),
       1
     )
@@ -739,8 +714,8 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
   }
 
-  #[test]
-  fn test_concurrent_append_metric_points() {
+  #[tokio::test]
+  async fn test_concurrent_append_metric_points() {
     let num_threads = 20;
     let num_metric_points_per_thread = 5000;
     let segment = Arc::new(Segment::new());
@@ -775,11 +750,13 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
 
     let mut expected = (*expected.read().unwrap()).clone();
-    let conditions = [MetricsQueryCondition::Equals(
+    let conditions = vec![MetricsQueryCondition::Equals(
       "label1".to_owned(),
       "value1".to_owned(),
     )];
-    let received = segment.search_metrics(&conditions, start_time - 100, end_time + 100);
+    let received = segment
+      .search_metrics(conditions, start_time - 100, end_time + 100)
+      .await;
 
     expected.sort();
     assert_eq!(expected, received);

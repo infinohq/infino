@@ -4,12 +4,12 @@
 use crate::metric::metric_point::MetricPoint;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use regex::Regex;
+use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f64::consts::PI;
-use std::hash::{Hash, Hasher};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PromQLTimeSeries {
   labels: HashMap<String, String>,
   metric_points: Vec<MetricPoint>,
@@ -36,8 +36,14 @@ impl PromQLTimeSeries {
     &self.labels
   }
 
-  pub fn get_metric_points(&self) -> &Vec<MetricPoint> {
-    &self.metric_points
+  pub fn get_metric_points(&mut self) -> &mut Vec<MetricPoint> {
+    &mut self.metric_points
+  }
+
+  /// Take for vector - getter to allow the vector to be
+  /// transferred out of the object and comply with Rust's ownership rules
+  pub fn take_metric_points(&mut self) -> Vec<MetricPoint> {
+    std::mem::replace(&mut self.metric_points, Vec::new())
   }
 
   pub fn set_labels(&mut self, labels: HashMap<String, String>) {
@@ -50,6 +56,10 @@ impl PromQLTimeSeries {
 
   pub fn is_empty(&self) -> bool {
     self.labels.is_empty() && self.metric_points.is_empty()
+  }
+
+  fn most_recent_timestamp(&self) -> Option<u64> {
+    self.metric_points.iter().map(|mp| mp.get_time()).max()
   }
 
   // **** Functions: https://prometheus.io/docs/prometheus/latest/querying/functions
@@ -68,7 +78,7 @@ impl PromQLTimeSeries {
     }
   }
 
-  pub fn changes(&self) {
+  pub fn changes(&mut self) {
     let count = self
       .metric_points
       .windows(2)
@@ -211,7 +221,7 @@ impl PromQLTimeSeries {
   }
 
   // Applies the floor function to each metric point's value
-  pub fn floor(&self) {
+  pub fn floor(&mut self) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().floor());
     }
@@ -321,7 +331,7 @@ impl PromQLTimeSeries {
   }
 
   pub fn label_join(&mut self, dst_label: &str, separator: &str, src_labels: &[&str]) {
-    for mp in &mut self.metric_points {
+    for _mp in &mut self.metric_points {
       let joined_value = src_labels
         .iter()
         .map(|label| self.labels.get(*label).unwrap_or(&"".to_string()).clone()) // Clone the string
@@ -339,9 +349,9 @@ impl PromQLTimeSeries {
     regex: &str,
   ) {
     let re = Regex::new(regex).unwrap();
-    for mp in &mut self.metric_points {
+    for _mp in &mut self.metric_points {
       if let Some(src_value) = self.labels.get(src_label) {
-        if let Some(captures) = re.captures(src_value) {
+        if re.is_match(src_value) {
           let replaced_value = re.replace_all(src_value, replacement);
           self
             .labels
@@ -684,7 +694,7 @@ impl PromQLTimeSeries {
   }
 
   // Converts the first metric point's value to a scalar, if it's the only point.
-  pub fn scalar(&self) -> Option<f64> {
+  pub fn scalar(&mut self) -> Option<f64> {
     if self.get_metric_points().len() == 1 {
       Some(self.get_metric_points()[0].get_value())
     } else {
@@ -779,21 +789,9 @@ impl PromQLTimeSeries {
   }
 }
 
-impl Hash for PromQLTimeSeries {
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    for (key, value) in &self.labels {
-      key.hash(state);
-      value.hash(state);
-    }
-    for point in self.get_metric_points() {
-      point.get_time().hash(state);
-    }
-  }
-}
-
 impl PartialEq for PromQLTimeSeries {
   fn eq(&self, other: &Self) -> bool {
-    self.labels == other.labels && self.get_metric_points() == other.get_metric_points()
+    self.labels == other.labels && self.metric_points == other.metric_points
   }
 }
 
@@ -801,21 +799,17 @@ impl Eq for PromQLTimeSeries {}
 
 impl PartialOrd for PromQLTimeSeries {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-    Some(
-      self
-        .get_metric_points()
-        .len()
-        .cmp(&other.get_metric_points().len()),
-    )
+    self
+      .most_recent_timestamp()
+      .partial_cmp(&other.most_recent_timestamp())
   }
 }
 
 impl Ord for PromQLTimeSeries {
   fn cmp(&self, other: &Self) -> Ordering {
     self
-      .get_metric_points()
-      .len()
-      .cmp(&other.get_metric_points().len())
+      .most_recent_timestamp()
+      .cmp(&other.most_recent_timestamp())
   }
 }
 

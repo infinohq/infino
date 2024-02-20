@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::metric::constants::{MetricsQueryCondition, LABEL_SEPARATOR};
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
 use crate::segment_manager::segment::Segment;
+use crate::utils::error::SearchMetricsError;
 
 impl Segment {
   /// Get the unique label names for this segment.
@@ -74,16 +75,6 @@ impl Segment {
     retval
   }
 
-  /// Get label name and label value from the given condition.
-  fn get_label_name_value(condition: &MetricsQueryCondition) -> (&str, &str) {
-    match condition {
-      MetricsQueryCondition::Equals(label, value)
-      | MetricsQueryCondition::NotEquals(label, value)
-      | MetricsQueryCondition::EqualsRegex(label, value)
-      | MetricsQueryCondition::NotEqualsRegex(label, value) => (label, value),
-    }
-  }
-
   // ---
   // TODO: This api currently only supports only label_name=label_value queries.
   // Additionally, the following need to be supported:
@@ -92,23 +83,26 @@ impl Segment {
   //   - label_name!=~label_value_regex.
   // ---
   /// Get the time series for the given label name/value, within the given (inclusive) time range.
-  pub fn search_metrics(
+  pub async fn search_metrics(
     &self,
-    label_conditions: &[MetricsQueryCondition],
+    labels: &HashMap<String, String>,
+    condition: &MetricsQueryCondition,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Vec<MetricPoint> {
-    // No conditions specified - means empty results.
-    if label_conditions.is_empty() {
-      return Vec::new();
+  ) -> Result<Vec<MetricPoint>, SearchMetricsError> {
+    // We don't yet support conditions other than label_name=label_value.
+    if *condition != MetricsQueryCondition::Equals {
+      return Ok(Vec::new());
     }
 
-    // We don't support conditions other than label_name=label_value. So, the code below assumes that these are the
-    // only conditions in the label_conditions array.
+    // Get the first label and its results.
+    let (initial_label_name, initial_label_value) =
+      if let Some((initial_label_name, initial_label_value)) = labels.iter().next() {
+        (initial_label_name, initial_label_value)
+      } else {
+        return Ok(Vec::new());
+      };
 
-    // Get the first condition and its results.
-    let initial_condition = label_conditions.first().unwrap();
-    let (initial_label_name, initial_label_value) = Self::get_label_name_value(initial_condition);
     let mut retval = self.get_metric_points_for_label(
       initial_label_name,
       initial_label_value,
@@ -117,9 +111,8 @@ impl Segment {
     );
 
     // Iterate through the remaining conditions and interest to find the matching metric points.
-    for current_condition in &label_conditions[1..] {
-      let (current_label_name, current_label_value) = Self::get_label_name_value(current_condition);
-      let current_metric_points: Vec<MetricPoint> = self.get_metric_points_for_label(
+    for (current_label_name, current_label_value) in labels.iter().skip(1) {
+      let current_metric_points = self.get_metric_points_for_label(
         current_label_name,
         current_label_value,
         range_start_time,
@@ -133,7 +126,7 @@ impl Segment {
     // Sort the retrieved time series in chronological order.
     retval.sort();
 
-    retval
+    Ok(retval)
   }
 }
 
@@ -208,60 +201,72 @@ mod tests {
     assert!(label_values.contains(&"label_value_4".to_owned()));
   }
 
-  #[test]
-  fn test_basic_search() {
+  #[tokio::test]
+  async fn test_basic_search() {
     let segment = create_segment();
+    let mut labels = HashMap::new();
+    labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
 
-    // Check basic search operation.
-    let conditions = [MetricsQueryCondition::Equals(
-      "label_name_1".to_owned(),
-      "label_value_1".to_owned(),
-    )];
-    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    let results = segment
+      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].get_time(), 1);
     assert_eq!(results[1].get_time(), 2);
-    let results = segment.search_metrics(&conditions, 0, 1);
+
+    let results = segment
+      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, 1)
+      .await
+      .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].get_time(), 1);
 
-    let conditions = [MetricsQueryCondition::Equals(
-      "label_name_3".to_owned(),
-      "label_value_3".to_owned(),
-    )];
-    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    labels.clear();
+    labels.insert("label_name_3".to_owned(), "label_value_3".to_owned());
+
+    let results = segment
+      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].get_time(), 1);
     assert_eq!(results[1].get_time(), 2);
     assert_eq!(results[2].get_time(), 3);
   }
 
-  #[test]
-  fn test_search_equal_conditions() {
+  #[tokio::test]
+  async fn test_search_equal_conditions() {
     let segment = create_segment();
 
-    let conditions = [
-      MetricsQueryCondition::Equals("label_name_1".to_owned(), "label_value_1".to_owned()),
-      MetricsQueryCondition::Equals("label_name_3".to_owned(), "label_value_3".to_owned()),
-    ];
-    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    let mut labels = HashMap::new();
+    labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
+    labels.insert("label_name_3".to_owned(), "label_value_3".to_owned());
+    let results = segment
+      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].get_time(), 1);
     assert_eq!(results[1].get_time(), 2);
 
-    let conditions = [
-      MetricsQueryCondition::Equals("label_name_3".to_owned(), "label_value_3".to_owned()),
-      MetricsQueryCondition::Equals("label_name_4".to_owned(), "label_value_4".to_owned()),
-    ];
-    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    labels.clear();
+    labels.insert("label_name_3".to_owned(), "label_value_3".to_owned());
+    labels.insert("label_name_4".to_owned(), "label_value_4".to_owned());
+    let results = segment
+      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].get_time(), 3);
 
-    let conditions = [
-      MetricsQueryCondition::Equals("label_name_1".to_owned(), "label_value_1".to_owned()),
-      MetricsQueryCondition::Equals("label_name_4".to_owned(), "label_value_4".to_owned()),
-    ];
-    let results = segment.search_metrics(&conditions, 0, u64::MAX);
+    labels.clear();
+    labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
+    labels.insert("label_name_4".to_owned(), "label_value_4".to_owned());
+    let results = segment
+      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
     assert!(results.is_empty());
   }
 }

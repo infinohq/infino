@@ -81,8 +81,8 @@ function  = { "abs" | "absent" | "absent_over_time" | "acos" | "acosh" | "asin" 
 // **** Vector creation ****
 scalar              = { float }
 vector              = { metric_name ~ (start_brace ~ label ~ (comma ~ label)* ~ end_brace)? ~ range? ~ offset_and_modifier? }
-label               = { label_name ~ match_operator ~ label_value }
-match_operator      = { equal_match | not_equal_match | regex_match | not_regex_match }
+label               = { label_name ~ condition ~ label_value }
+condition           = { equal_match | not_equal_match | regex_match | not_regex_match }
 offset              = { "offset" ~ duration }
 modifier            = { "@" ~ float }
 regex_match         = { "=~" }

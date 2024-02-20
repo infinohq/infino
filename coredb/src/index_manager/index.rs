@@ -7,39 +7,22 @@ use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use log::error;
 use log::{debug, info};
-use pest::error::Error as PestError;
 use pest::iterators::Pairs;
 
 use crate::index_manager::metadata::Metadata;
+use crate::index_manager::promql;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
-use crate::metric::constants::MetricsQueryCondition;
-use crate::metric::metric_point::MetricPoint;
-use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
+use crate::segment_manager::query_dsl;
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
-use crate::utils::error::CoreDBError;
-use crate::utils::error::SearchLogsError;
-use crate::utils::error::SearchMetricsError;
+use crate::utils::error::{CoreDBError, SearchMetricsError};
 use crate::utils::io;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex, TokioRwLock};
 
-#[allow(unused_imports)]
-use pest::Parser;
-
-impl From<PestError<Rule>> for SearchLogsError {
-  fn from(error: PestError<Rule>) -> Self {
-    SearchLogsError::JsonParseError(error.to_string())
-  }
-}
-
-impl From<PestError<Rule>> for SearchMetricsError {
-  fn from(error: PestError<Rule>) -> Self {
-    SearchMetricsError::JsonParseError(error.to_string())
-  }
-}
+use super::promql_time_series::PromQLTimeSeries;
 
 /// File name where the information about all segements is stored.
 const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
@@ -183,8 +166,8 @@ impl Index {
   }
 
   /// Get the memory segments map.
-  pub fn get_memory_segments_map(&self) -> DashMap<u32, Segment> {
-    self.memory_segments_map
+  pub fn get_memory_segments_map(&self) -> &DashMap<u32, Segment> {
+    &self.memory_segments_map
   }
 
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
@@ -311,52 +294,12 @@ impl Index {
   }
 
   /// Search for given query in the given time range.
-  ///
-  /// Infino log searches support Lucene Query Syntax: https://lucene.apache.org/core/2_9_4/queryparsersyntax.html
-  /// http://infino-endpoint?"my lucene query"&start_time=blah&end_time=blah
-  ///
-  /// but these can be overridden by a Query DSL in the
-  /// json body sent with the query: https://opensearch.org/docs/latest/query-dsl/.
-  ///
-  /// Note that while the query terms are not required in the URL, the query parameters
-  /// "start_time" and "end_time" are indeed required in the URL. They are always added by the
-  /// OpenSearch plugin that calls Infino.
   pub async fn search_logs(
     &self,
-    url_query: &str,
-    json_body: &str,
+    ast: &Pairs<'_, query_dsl::Rule>,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, CoreDBError> {
-    debug!(
-      "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
-      url_query, json_body, range_start_time, range_end_time
-    );
-
-    let mut json_query = json_body.to_string();
-
-    // Check if URL or JSON query is empty
-    let is_url_empty = url_query.trim().is_empty();
-    let is_json_empty = json_query.trim().is_empty();
-
-    // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
-    if is_json_empty {
-      if is_url_empty {
-        return Err(SearchLogsError::NoQueryProvided.into());
-      } else {
-        // Update json_query with the constructed query from url_query
-        json_query = format!(
-          r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
-          url_query
-        );
-      }
-    }
-
-    // Build the query AST
-    let ast = QueryDslParser::parse(Rule::start, &json_query)
-      .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))?;
-
-    // Now start the search
     let mut retval = Vec::new();
 
     // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
@@ -389,6 +332,26 @@ impl Index {
     retval.sort();
 
     Ok(retval)
+  }
+
+  /// Get metric points corresponding to a promql query.
+  pub async fn search_metrics(
+    &self,
+    ast: &Pairs<'_, promql::Rule>,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<Vec<PromQLTimeSeries>, CoreDBError> {
+    // Now start the search
+    let mut results = self
+      .traverse_promql_ast(&ast.clone(), range_start_time, range_end_time)
+      .await
+      .map_err(SearchMetricsError::AstError)?;
+
+    // Note that PromQL results are explicitly unsorted but we sort here
+    // to be consistent with search_logs.
+    results.sort();
+
+    Ok(results)
   }
 
   /// Helper function to commit a segment with given segment_number to disk.
@@ -659,27 +622,6 @@ impl Index {
     segment_numbers
   }
 
-  /// Get metric points corresponding to a promql query.
-  pub async fn search_metrics(
-    &self,
-    ast: &Pairs<'_, Rule>,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Result<Vec<MetricPoint>, CoreDBError> {
-    debug!(
-      "Search logs for Metric query: {:?}, range_start_time: {}, range_end_time: {}",
-      url_query, range_start_time, range_end_time
-    );
-
-    // Now start the search
-    let mut retval = self
-      .traverse_promql_ast(&ast.clone())
-      .await
-      .map_err(SearchMetricsError::AstError)?;
-
-    Ok(retval)
-  }
-
   pub fn get_index_dir(&self) -> String {
     self.index_dir_path.to_owned()
   }
@@ -721,10 +663,14 @@ mod tests {
   use std::time::Duration;
 
   use chrono::Utc;
+  use pest::Parser;
   use tempdir::TempDir;
   use test_case::test_case;
+  use tests::promql::PromQLParser;
 
   use super::*;
+  use crate::metric::metric_point::MetricPoint;
+  use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
   use crate::utils::io::get_joined_path;
   use crate::utils::sync::is_sync_send;
 
@@ -865,12 +811,12 @@ mod tests {
     );
 
     // For the query "message", handle errors from search_logs
-    let results = if let Ok(results) = index.search_logs("message", "", 0, u64::MAX).await {
-      results
-    } else {
-      eprintln!("Error in search_logs");
-      Vec::new()
-    };
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, "message").expect("Failed to parse query");
+    let results = index
+      .search_logs(&ast, 0, u64::MAX)
+      .await
+      .expect("Error in search_logs");
 
     // Continue with assertions
     assert_eq!(results.len(), num_log_messages - 1);
@@ -883,12 +829,13 @@ mod tests {
     assert_eq!(expected_log_messages, received_log_messages);
 
     // For the query "thisisunique", we should expect only 1 result.
-    let results = if let Ok(results) = index.search_logs("thisisunique", "", 0, u64::MAX).await {
-      results
-    } else {
-      eprintln!("Error in search_logs");
-      Vec::new()
-    };
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, "thisisunique").expect("Failed to parse query");
+    let results = index
+      .search_logs(&ast, 0, u64::MAX)
+      .await
+      .expect("Error in search_logs");
+
     assert_eq!(results.len(), 1);
     assert_eq!(results.first().unwrap().get_text(), "thisisunique");
   }
@@ -908,7 +855,7 @@ mod tests {
 
     let metric_name_label = "__name__";
     let received_metric_points = index
-      .get_metrics(metric_name_label, "some_name", 0, u64::MAX)
+      .search_metrics(metric_name_label, "some_name")
       .await
       .expect("Error in get_metrics");
 
@@ -928,7 +875,7 @@ mod tests {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
       let (index, index_dir_path) =
-        create_index_with_thresholds("test_two_segments", &storage_type, 1500, 1024 * 1024);
+        create_index_with_thresholds("test_two_segments", &storage_type, 1500, 1024 * 1024).await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
@@ -1212,41 +1159,36 @@ mod tests {
     }
 
     // Ensure the prefix is in every log message.
-    let results = match index
-      .search_logs(message_prefix, "", start_time, end_time)
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, message_prefix).expect("Failed to parse query");
+    let results = index
+      .search_logs(&ast, start_time, end_time)
       .await
-    {
-      Ok(results) => results,
-      Err(err) => {
-        eprintln!("Error searching logs: {:?}", err);
-        return;
-      }
-    };
+      .expect("Error in search_logs");
     assert_eq!(results.len(), num_log_messages);
 
     // Ensure the suffix is in exactly one log message.
     for i in 1..=num_log_messages {
       let suffix = &format!("{}", i);
-      let results = match index.search_logs(suffix, "", start_time, end_time).await {
-        Ok(results) => results,
-        Err(err) => {
-          eprintln!("Error searching logs: {:?}", err);
-          return;
-        }
-      };
+      let ast =
+        QueryDslParser::parse(query_dsl::Rule::start, suffix).expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, start_time, end_time)
+        .await
+        .expect("Error in search_logs");
       assert_eq!(results.len(), 1);
     }
 
     // Ensure the prefix+suffix is in exactly one log message.
     for i in 1..=num_log_messages {
       let message = &format!("{} {}", message_prefix, i);
-      let results = match index.search_logs(message, "", start_time, end_time).await {
-        Ok(results) => results,
-        Err(err) => {
-          eprintln!("Error searching logs: {:?}", err);
-          return;
-        }
-      };
+      let ast =
+        QueryDslParser::parse(query_dsl::Rule::start, message).expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, start_time, end_time)
+        .await
+        .expect("Error in search_logs");
+
       assert_eq!(results.len(), 1);
     }
   }
@@ -1278,18 +1220,15 @@ mod tests {
     for i in 1..num_message_suffixes {
       let message = &format!("{}{}", message_prefix, i);
       let expected_count = 2u32.pow(i);
-      let results = index
-        .search_logs(message, "", 0, Utc::now().timestamp_millis() as u64)
-        .await;
 
-      match results {
-        Ok(logs) => {
-          assert_eq!(expected_count, logs.len() as u32);
-        }
-        Err(err) => {
-          eprintln!("Error in search_logs for '{}': {:?}", message, err);
-        }
-      }
+      let ast =
+        QueryDslParser::parse(query_dsl::Rule::start, message).expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, 0, Utc::now().timestamp_millis() as u64)
+        .await
+        .expect("Error in search_logs");
+
+      assert_eq!(expected_count, results.len() as u32);
     }
   }
 
@@ -1354,15 +1293,14 @@ mod tests {
     }
 
     // The number of metric points in the index should be equal to the number of metric points we indexed.
-    let ts = index
-      .search_metrics(
-        "{label_name_1=label_value_1}",
-        start_time - 100,
-        end_time + 100,
-      )
+    let ast = PromQLParser::parse(promql::Rule::start, "{label_name_1=label_value_1}[1y]")
+      .expect("Failed to parse query");
+    let results = index
+      .search_metrics(&ast)
       .await
-      .expect("Error in calling get_metrics");
-    assert_eq!(num_metric_points, ts.len() as u32)
+      .expect("Error in get_metrics");
+
+    assert_eq!(num_metric_points, results.len() as u32)
   }
 
   #[tokio::test]
@@ -1550,27 +1488,22 @@ mod tests {
       .expect("Could not refresh index");
     let expected_len = num_threads * num_appends_per_thread;
 
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, "message").expect("Failed to parse query");
     let results = index
-      .search_logs("message", "", 0, expected_len as u64)
-      .await;
-    match results {
-      Ok(logs) => {
-        let received_logs_len = logs.len();
-        assert_eq!(expected_len, received_logs_len);
-      }
-      Err(err) => {
-        eprintln!("Error in search_logs: {:?}", err);
-      }
-    }
+      .search_logs(&ast, 0, expected_len as u64)
+      .await
+      .expect("Error in search_logs");
+    assert_eq!(expected_len, results.len());
 
+    let ast = PromQLParser::parse(promql::Rule::start, "{label_name_1=label_value_1}")
+      .expect("Failed to parse query");
     let results = index
-      .search_metrics("{label_name_1=label_value_1}", 0, expected_len as u64)
+      .search_metrics(&ast)
       .await
       .expect("Error in get_metrics");
-    let received_metric_points_len = results.len();
 
     assert_eq!(expected_len, results.len());
-    assert_eq!(expected_len, received_metric_points_len);
   }
 
   #[tokio::test]
@@ -1595,22 +1528,18 @@ mod tests {
       .unwrap();
 
     // Call search_logs and handle errors
+    let ast = QueryDslParser::parse(query_dsl::Rule::start, "some_message_1")
+      .expect("Failed to parse query");
     let search_result = index
       .search_logs(
-        "some_message_1",
-        "",
+        &ast,
         start_time as u64,
         Utc::now().timestamp_millis() as u64,
       )
-      .await;
+      .await
+      .expect("Error in search_logs");
 
-    // Check if there was an error calling search_logs.
-    if let Err(err) = search_result {
-      eprintln!("Error in search_logs: {:?}", err);
-    } else {
-      // Assert the results when there's no error.
-      assert_eq!(search_result.unwrap().len(), 1);
-    }
+    assert_eq!(search_result.len(), 1);
   }
 
   #[tokio::test]
@@ -1677,40 +1606,21 @@ mod tests {
       let message_end = &format!("message_{}", end);
 
       // Check that the queries for unique messages across the entire time range returns exactly one result.
-      assert_eq!(
-        index
-          .search_logs(message_start, "", 0, u64::MAX)
-          .await
-          .unwrap()
-          .len(),
-        1
-      );
-      assert_eq!(
-        index
-          .search_logs(message_end, "", 0, u64::MAX)
-          .await
-          .unwrap()
-          .len(),
-        1
-      );
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, message_start)
+        .expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, 0, u64::MAX)
+        .await
+        .expect("Error in search_logs");
+      assert_eq!(results.len(), 1);
 
-      // Check that the queries for unique messages across the specific time range returns exactly one result.
-      assert_eq!(
-        index
-          .search_logs(message_start, "", start, end)
-          .await
-          .unwrap()
-          .len(),
-        1
-      );
-      assert_eq!(
-        index
-          .search_logs(message_end, "", start, end)
-          .await
-          .unwrap()
-          .len(),
-        1
-      );
+      let ast =
+        QueryDslParser::parse(query_dsl::Rule::start, message_end).expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, 0, u64::MAX)
+        .await
+        .expect("Error in search_logs");
+      assert_eq!(results.len(), 1);
     }
   }
 
