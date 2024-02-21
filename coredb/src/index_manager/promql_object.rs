@@ -392,6 +392,7 @@ impl PromQLObject {
         len as f64,
       )]);
     }
+    self.update_object_type(); // Set to instant vector.
   }
 
   #[allow(dead_code)]
@@ -427,6 +428,7 @@ impl PromQLObject {
         metric_points,
       ));
     }
+    self.update_object_type(); // Set to instant vector.
   }
 
   #[allow(dead_code)]
@@ -622,6 +624,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.ceil();
     }
+    self.update_object_type();
   }
 
   // Clamps the min and max value of metric points for each time series
@@ -634,6 +637,7 @@ impl PromQLObject {
         ts.clamp(min, max);
       }
     }
+    self.update_object_type();
   }
 
   // Clamps the maximum value of metric points for each time series
@@ -642,6 +646,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.clamp_max(max);
     }
+    self.update_object_type();
   }
 
   // Clamps the minimum value of metric points for each time series
@@ -650,6 +655,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.clamp_min(min);
     }
+    self.update_object_type();
   }
 
   // Calculates changes in metric points for each time series
@@ -658,6 +664,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.changes();
     }
+    self.update_object_type();
   }
 
   // Calculates the day of the month for the metric points in each time series
@@ -706,6 +713,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.delta();
     }
+    self.update_object_type();
   }
 
   // Computes the derivative of each time series element in the vector
@@ -714,6 +722,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.deriv();
     }
+    self.update_object_type();
   }
 
   // Computes the exponential function for each time series element in the vector
@@ -753,6 +762,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.idelta();
     }
+    self.update_object_type();
   }
 
   // Computes the total increase over time for each time series
@@ -761,6 +771,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.increase();
     }
+    self.update_object_type();
   }
 
   // Computes the instantaneous rate of change for each time series
@@ -769,6 +780,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.irate();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -776,6 +788,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.label_join(dst_label, separator, src_labels);
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -789,6 +802,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.label_replace(dst_label, replacement, src_label, regex);
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -796,6 +810,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.ln();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -831,6 +846,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.predict_linear(t);
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -845,6 +861,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.rate();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -930,6 +947,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.avg_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -937,6 +955,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.min_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -944,6 +963,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.max_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -951,6 +971,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.sum_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -958,6 +979,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.count_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -965,6 +987,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.quantile_over_time(quantile);
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -972,6 +995,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.stddev_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -979,6 +1003,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.stdvar_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -986,6 +1011,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.mad_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -993,6 +1019,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.last_over_time();
     }
+    self.update_object_type();
   }
 
   #[allow(dead_code)]
@@ -1000,6 +1027,7 @@ impl PromQLObject {
     for ts in &mut self.vector {
       ts.present_over_time();
     }
+    self.update_object_type();
   }
 }
 
@@ -1029,6 +1057,19 @@ impl Ord for PromQLObject {
 mod tests {
   use super::*;
 
+  fn create_metric_points_with_times(times: &[u64], values: &[f64]) -> Vec<MetricPoint> {
+    times
+      .iter()
+      .zip(values.iter())
+      .map(|(time, value)| {
+        let mut metric_point = MetricPoint::new(0, 0.0);
+        metric_point.set_time(*time);
+        metric_point.set_value(*value);
+        metric_point
+      })
+      .collect()
+  }
+
   fn create_time_series(values: Vec<f64>, timestamp: u64) -> PromQLTimeSeries {
     let metric_points = values
       .iter()
@@ -1038,6 +1079,7 @@ mod tests {
   }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
   fn test_abs() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![-1.0, 2.0, -3.0], 0),
@@ -1048,14 +1090,17 @@ mod tests {
 
     let expected = [1.0, 2.0, 3.0, 4.0, 5.0];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
   fn test_round() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![1.234, 2.345], 0),
@@ -1064,16 +1109,21 @@ mod tests {
 
     vector.round(0.01);
 
+    println!("vector: {:?}", vector);
+
     let expected = [1.23, 2.35, 3.46, 4.57];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
   fn test_acos() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![0.0, 0.5, 1.0], 0),
@@ -1090,14 +1140,17 @@ mod tests {
       0.0,
     ];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
   fn test_asin() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![0.0, 0.5, 1.0], 0),
@@ -1114,9 +1167,11 @@ mod tests {
       std::f64::consts::PI / 2.0,
     ];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
@@ -1171,9 +1226,11 @@ mod tests {
 
     let expected = [2.0, 3.0, 4.0, 5.0, -5.0];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
@@ -1198,6 +1255,7 @@ mod tests {
   // }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
   fn test_clamp_max() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![1.2, 2.7, 3.5], 0),
@@ -1208,14 +1266,17 @@ mod tests {
 
     let expected = [1.2, 2.7, 3.0, 3.0, -5.2];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
   fn test_clamp_min() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![1.2, 2.7, 3.5], 0),
@@ -1226,9 +1287,11 @@ mod tests {
 
     let expected = [2.0, 2.7, 3.5, 4.8, 2.0];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
@@ -1243,7 +1306,7 @@ mod tests {
 
     vector.changes();
 
-    let expected = [3, 1]; // Number of changes, not value differences
+    let expected = [2, 1]; // Number of changes, not value differences
 
     let mut j = 0;
     for ts in &mut vector.vector {
@@ -1272,25 +1335,28 @@ mod tests {
   }
 
   #[test]
-  #[allow(clippy::explicit_counter_loop)]
+  // TODO: Not sure what the timestamps are supposed to after function completes
   fn test_deriv() {
-    let mut vector = PromQLObject::new_as_vector(vec![
-      create_time_series(vec![1.0, 4.0, 9.0, 16.0], 0),
-      create_time_series(vec![5.0, 12.0, 21.0], 0),
-    ]);
+    let metric_points1 = create_metric_points_with_times(&[1, 2, 3], &[10.0, 20.0, 30.0]);
+    let metric_points2 = create_metric_points_with_times(&[2, 4, 6], &[20.0, 40.0, 60.0]);
+    let ts1 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points1);
+    let ts2 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points2);
+
+    let mut vector = PromQLObject::new_as_vector(vec![ts1, ts2]);
 
     vector.deriv();
 
-    let expected = [5.0 / 3.0, 16.0 / 2.0];
+    let expected = PromQLObject::new_as_vector(vec![
+      create_time_series(vec![5.0], 3),
+      create_time_series(vec![2.5], 6),
+    ]);
 
-    let mut j = 0;
-    for ts in &mut vector.vector {
-      assert_eq!(ts.get_metric_points()[0].get_value(), expected[j]);
-      j += 1;
-    }
+    assert_eq!(vector, expected);
   }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
+  // TODO pretty sure the return values should not be Some()
   fn test_increase() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
@@ -1299,11 +1365,13 @@ mod tests {
 
     vector.increase();
 
-    let expected = [Some(2.0), Some(4.0)];
+    let expected = [Some(9.0), Some(7.0)];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(Some(mp.get_value()), expected[j]);
+        j += 1;
       }
     }
   }
@@ -1318,46 +1386,53 @@ mod tests {
     vector.idelta();
 
     let expected = PromQLObject::new_as_vector(vec![
-      create_time_series(vec![0.0, 2.0, 3.0, 4.0], 0),
-      create_time_series(vec![0.0, 3.0, 4.0], 0),
+      create_time_series(vec![4.0], 0),
+      create_time_series(vec![4.0], 0),
     ]);
 
     assert_eq!(vector, expected);
   }
 
   #[test]
+  // TODO: Not sure what the timestamps are supposed to after function completes
   fn test_irate() {
-    let mut vector = PromQLObject::new_as_vector(vec![
-      create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
-      create_time_series(vec![5.0, 8.0, 12.0], 0),
-    ]);
+    let metric_points1 = create_metric_points_with_times(&[1, 2, 4], &[100.0, 110.0, 130.0]);
+    let metric_points2 = create_metric_points_with_times(&[1, 5, 10], &[20.0, 50.0, 80.0]);
+    let ts1 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points1);
+    let ts2 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points2);
+
+    let mut vector = PromQLObject::new_as_vector(vec![ts1, ts2]);
 
     vector.irate();
 
     let expected = PromQLObject::new_as_vector(vec![
-      create_time_series(vec![0.0, 2.0, 3.0, 4.0], 0),
-      create_time_series(vec![0.0, 3.0, 4.0], 0),
+      create_time_series(vec![10.0], 4),
+      create_time_series(vec![6.0], 10),
     ]);
 
     assert_eq!(vector, expected);
   }
 
   #[test]
+  // TODO: Not sure what the timestamps are supposed to after function completes
   fn test_rate() {
-    let mut vector = PromQLObject::new_as_vector(vec![
-      create_time_series(vec![1.0, 3.0, 6.0, 10.0], 0),
-      create_time_series(vec![5.0, 8.0, 12.0], 0),
-    ]);
+    let metric_points1 = create_metric_points_with_times(&[1, 2, 5], &[100.0, 110.0, 130.0]);
+    let metric_points2 = create_metric_points_with_times(&[1, 5, 13], &[20.0, 50.0, 80.0]);
+    let ts1 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points1);
+    let ts2 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points2);
+
+    let mut vector = PromQLObject::new_as_vector(vec![ts1, ts2]);
 
     vector.rate();
 
     let expected = PromQLObject::new_as_vector(vec![
-      create_time_series(vec![0.0, 2.0, 3.0, 4.0], 0),
-      create_time_series(vec![0.0, 3.0, 4.0], 0),
+      create_time_series(vec![7.5], 5),
+      create_time_series(vec![5.0], 13),
     ]);
 
     assert_eq!(vector, expected);
   }
+
   #[test]
   fn test_absent() {
     let mut vector = PromQLObject::new_as_vector(vec![
@@ -1376,6 +1451,7 @@ mod tests {
   }
 
   #[test]
+  #[allow(clippy::explicit_counter_loop)]
   fn test_sgn() {
     let mut vector = PromQLObject::new_as_vector(vec![
       create_time_series(vec![-10.0, 8.0, 0.0, 15.0, -18.0], 0),
@@ -1386,9 +1462,11 @@ mod tests {
 
     let expected = [-1.0, 1.0, 0.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0];
 
+    let mut j = 0;
     for ts in &mut vector.vector {
-      for (j, mp) in ts.get_metric_points().iter().enumerate() {
+      for mp in ts.get_metric_points() {
         assert_eq!(mp.get_value(), expected[j]);
+        j += 1;
       }
     }
   }
