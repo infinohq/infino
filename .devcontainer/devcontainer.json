@@ -37,16 +37,21 @@
 				// Disable rust analyzer running on save, so that it doesn't
 				// start automatically and consume CPU + Memory.
 				"rust-analyzer.checkOnSave": false,
-				"gradle.autoDetect": "off"
+				"gradle.autoDetect": "off",
+				"java.gradle.buildServer.enabled": "off",
+				"java.import.gradle.enabled": false,
+				"java.configuration.detectJdksAtStart": false,
+				"java.autobuild.enabled": false
 			},
 			"extensions": [
 				// List of vscode extensions to be installed in the devcontainer
 				"rust-lang.rust-analyzer",
 				"tamasfe.even-better-toml",
 				"ms-vscode.makefile-tools",
-				"vscjava.vscode-java-pack",
+				"vadimcn.vscode-lldb",
+				"redhat.java",
 				"vscjava.vscode-gradle",
-				"vadimcn.vscode-lldb"
+				"vscjava.vscode-java-debug"
 			]
 		}
 	},

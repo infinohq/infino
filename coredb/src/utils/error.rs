@@ -51,6 +51,9 @@ pub enum CoreDBError {
   #[error("Segment in memory: {0}")]
   SegmentInMemory(u32),
 
+  #[error("Invalid postings block: {0}")]
+  InvalidPostingsBlock(String),
+
   #[error("AWS SDK Error: {0}")]
   AwsSdkError(String),
 

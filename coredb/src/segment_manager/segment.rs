@@ -4,14 +4,16 @@
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use log::debug;
-
 use dashmap::DashMap;
+use log::debug;
+use pest::iterators::Pairs;
 
+use super::metadata::Metadata;
+use crate::log::inverted_map::InvertedMap;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
-use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
+use crate::metric::time_series_map::TimeSeriesMap;
 use crate::segment_manager::query_dsl::Rule;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
@@ -20,11 +22,7 @@ use crate::utils::error::SegmentSearchError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::thread;
-use crate::utils::sync::TokioMutex;
-
-use pest::iterators::Pairs;
-
-use super::metadata::Metadata;
+use crate::utils::sync::{Arc, RwLock, TokioMutex};
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
 const TERMS_FILE_NAME: &str = "terms.bin";
@@ -46,7 +44,7 @@ pub struct Segment {
 
   /// Inverted map - term-id to a postings list.
   /// Applicable only for log messages.
-  inverted_map: DashMap<u32, PostingsList>,
+  inverted_map: InvertedMap,
 
   /// Forward map - log_message-id to the corresponding log message.
   /// Applicable only for log messages.
@@ -57,8 +55,8 @@ pub struct Segment {
   labels: DashMap<String, u32>,
 
   // Time series map - label-id to corresponding time series.
-  // Applicable only for log messages.
-  time_series: DashMap<u32, TimeSeries>,
+  // Applicable only for time series.
+  time_series_map: TimeSeriesMap,
 
   // Mutex for only one thread to commit this segment at a time.
   commit_lock: TokioMutex<thread::ThreadId>,
@@ -71,9 +69,9 @@ impl Segment {
       metadata: Metadata::new(),
       terms: DashMap::new(),
       forward_map: DashMap::new(),
-      inverted_map: DashMap::new(),
+      inverted_map: InvertedMap::new(),
       labels: DashMap::new(),
-      time_series: DashMap::new(),
+      time_series_map: TimeSeriesMap::new(),
       commit_lock: TokioMutex::new(thread::current().id()),
     }
   }
@@ -89,14 +87,26 @@ impl Segment {
     result.map(|result| *result.value())
   }
 
-  /// Get the inverted map for this segment.
-  pub fn get_inverted_map(&self) -> &DashMap<u32, PostingsList> {
-    &self.inverted_map
+  /// Get a PostingsList for a given term
+  pub fn get_postings_list(&self, term: &str) -> Option<Arc<RwLock<PostingsList>>> {
+    // Attempt to find the term in the terms DashMap
+    self.terms.get(term).and_then(|term_id| {
+      // If found, use the term_id to look up the corresponding PostingsList in the inverted_map
+      self.inverted_map.get_postings_list(*term_id)
+    })
   }
 
   /// Get the forward map for this segment.
   pub fn get_forward_map(&self) -> &DashMap<u32, LogMessage> {
     &self.forward_map
+  }
+
+  pub fn get_labels(&self) -> &DashMap<String, u32> {
+    &self.labels
+  }
+
+  pub fn get_time_series_map(&self) -> &TimeSeriesMap {
+    &self.time_series_map
   }
 
   /// Get id of this segment.
@@ -147,7 +157,7 @@ impl Segment {
       && self.forward_map.is_empty()
       && self.inverted_map.is_empty()
       && self.labels.is_empty()
-      && self.time_series.is_empty()
+      && self.time_series_map.is_empty()
   }
 
   // This functions with #[cfg(test)] annotation below should only be used in testing -
@@ -156,11 +166,15 @@ impl Segment {
   // map for a term, but not in terms or corresponding document in the forward map).
   #[cfg(test)]
   pub fn insert_in_inverted_map(&self, term_id: u32, postings_list: PostingsList) {
-    self.inverted_map.insert(term_id, postings_list);
+    self.inverted_map.insert_unchecked(term_id, postings_list);
   }
   #[cfg(test)]
   pub fn insert_in_terms(&self, term: &str, term_id: u32) {
     self.terms.insert(term.to_owned(), term_id);
+  }
+  #[cfg(test)]
+  pub fn clear_inverted_map(&self) {
+    self.inverted_map.clear_inverted_map();
   }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
@@ -173,36 +187,28 @@ impl Segment {
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
+    // Increment the number of log messages appended so far, and get the id for this log message.
     let log_message_id = self.metadata.fetch_increment_log_message_count();
-    // Update the forward map.
-    self.forward_map.insert(log_message_id, log_message); // insert in forward map
 
     // Update the inverted map.
-    for term in terms {
-      // We actually mutate this variable in the match block below, so suppress the warning.
-      #[allow(unused_mut)]
-      let mut term_id: u32;
+    terms.into_iter().for_each(|term| {
+      let term_id = *self
+        .terms
+        .entry(term)
+        .or_insert_with(|| self.metadata.fetch_increment_term_count());
 
-      // Need to lock the shard that contains the term, so that some other thread doesn't insert the same term.
-      // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
-      {
-        let entry = self
-          .terms
-          .entry(term)
-          .or_insert(self.metadata.fetch_increment_term_count());
-        term_id = *entry;
-      }
+      self
+        .inverted_map
+        .append(term_id, log_message_id)
+        .expect("Could not append to postings list");
+    });
 
-      // Need to lock the shard that contains the term, so that some other thread doesn't insert the same term.
-      // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
-      {
-        let entry = self.inverted_map.entry(term_id).or_default();
-        let pl = &*entry;
-        pl.append(log_message_id);
-      }
-    }
+    // Insert in the forward map.
+    self.forward_map.insert(log_message_id, log_message);
 
+    // Update the start and end time for this segment.
     self.update_start_end_time(time);
+
     Ok(())
   }
 
@@ -246,11 +252,9 @@ impl Segment {
       }
 
       // Need to lock the shard that contains the label_id, so that some other thread doesn't insert the same label_id.
-      // Use the entry api - https://github.com/xacrimon/dashmap/issues/169#issuecomment-1009920032
+      // Add this in a separate block to minimize the locking time.
       {
-        let entry = self.time_series.entry(label_id).or_default();
-        let ts = &*entry;
-        ts.append(time, value);
+        self.time_series_map.append(label_id, time, value)?;
       }
     } // end for label in my_labels
 
@@ -299,8 +303,9 @@ impl Segment {
       uncompressed_labels_size, compressed_labels_size
     );
 
-    let (uncompressed_time_series_size, compressed_time_series_size) =
-      storage.write(&self.time_series, &time_series_path).await?;
+    let (uncompressed_time_series_size, compressed_time_series_size) = storage
+      .write(&self.time_series_map, &time_series_path)
+      .await?;
     debug!(
       "Serialized time series to {} bytes uncompressed, {} bytes compressed",
       uncompressed_time_series_size, compressed_time_series_size
@@ -343,17 +348,17 @@ impl Segment {
     let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
     let forward_map_path = get_joined_path(dir, FORWARD_MAP_FILE_NAME);
     let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
-    let time_series_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
+    let time_series_map_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
 
     let (metadata, metadata_size): (Metadata, _) = storage.read(&metadata_path).await?;
     let (terms, terms_size): (DashMap<String, u32>, _) = storage.read(&terms_path).await?;
-    let (inverted_map, inverted_map_size): (DashMap<u32, PostingsList>, _) =
+    let (inverted_map, inverted_map_size): (InvertedMap, _) =
       storage.read(&inverted_map_path).await?;
     let (forward_map, forward_map_size): (DashMap<u32, LogMessage>, _) =
       storage.read(&forward_map_path).await?;
     let (labels, labels_size): (DashMap<String, u32>, _) = storage.read(&labels_path).await?;
-    let (time_series, time_series_size): (DashMap<u32, TimeSeries>, _) =
-      storage.read(&time_series_path).await?;
+    let (time_series_map, time_series_map_size): (TimeSeriesMap, _) =
+      storage.read(&time_series_map_path).await?;
     let commit_lock = TokioMutex::new(thread::current().id());
 
     let total_size = metadata_size
@@ -361,7 +366,7 @@ impl Segment {
       + inverted_map_size
       + forward_map_size
       + labels_size
-      + time_series_size;
+      + time_series_map_size;
 
     let segment = Segment {
       metadata,
@@ -369,7 +374,7 @@ impl Segment {
       inverted_map,
       forward_map,
       labels,
-      time_series,
+      time_series_map,
       commit_lock,
     };
 
@@ -436,28 +441,6 @@ impl Segment {
     )
   }
 
-  // TODO: This api needs to be made richer (filter on multiple tags, metric name, prefix/regex, etc)
-  /// Get the time series for the given label name/value, within the given (inclusive) time range.
-  pub fn search_metrics(
-    &self,
-    label_name: &str,
-    label_value: &str,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Vec<MetricPoint> {
-    let label = TimeSeries::get_label(label_name, label_value);
-    let label_id = self.labels.get(&label);
-    let retval = match label_id {
-      Some(label_id) => {
-        let ts = self.time_series.get(&label_id).unwrap();
-        ts.get_metrics(range_start_time, range_end_time)
-      }
-      None => Vec::new(),
-    };
-
-    retval
-  }
-
   /// Update the start and end time of this segment.
   fn update_start_end_time(&self, time: u64) {
     // Update start and end timestamps.
@@ -487,15 +470,14 @@ mod tests {
   use std::sync::{Arc, RwLock};
 
   use chrono::Utc;
+  use pest::Parser;
   use tempdir::TempDir;
 
   use super::*;
-  use crate::{
-    segment_manager::query_dsl::{QueryDslParser, Rule},
-    storage_manager::storage::StorageType,
-  };
-  use pest::Parser;
-
+  use crate::metric::constants::MetricsQueryCondition;
+  use crate::metric::metric_point::MetricPoint;
+  use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
+  use crate::storage_manager::storage::StorageType;
   use crate::utils::sync::{is_sync_send, thread};
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, Box<pest::error::Error<Rule>>> {
@@ -624,27 +606,34 @@ mod tests {
     // Test time series.
     assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 1);
     let result = from_disk_segment.labels.get(&metric_name_key).unwrap();
-    let metric_name_id = result.value();
+    let metric_name_id = *result.value();
     let other_result = from_disk_segment.labels.get(&other_label_key).unwrap();
-    let other_label_id = &other_result.value();
-    let ts = from_disk_segment.time_series.get(metric_name_id).unwrap();
-    let other_label_ts = from_disk_segment.time_series.get(other_label_id).unwrap();
-    assert!(ts.eq(&other_label_ts));
-    assert_eq!(ts.get_compressed_blocks().read().unwrap().len(), 0);
-    assert_eq!(ts.get_initial_times().read().unwrap().len(), 1);
-    assert_eq!(ts.get_last_block().read().unwrap().len(), 1);
-    assert_eq!(
-      ts.get_last_block()
-        .read()
-        .unwrap()
-        .get_metrics_metric_points()
-        .read()
-        .unwrap()
-        .first()
-        .unwrap()
-        .get_value(),
-      100.0
-    );
+    let other_label_id = *other_result.value();
+    let ts = from_disk_segment
+      .time_series_map
+      .get_time_series(metric_name_id)
+      .unwrap();
+    {
+      let ts = ts.clone();
+      let ts = &*ts.read().unwrap();
+      let other_label_ts = from_disk_segment
+        .time_series_map
+        .get_time_series(other_label_id)
+        .unwrap();
+      let other_label_ts = other_label_ts.read().unwrap();
+      assert!(ts.eq(&other_label_ts));
+      assert_eq!(ts.get_compressed_blocks().len(), 0);
+      assert_eq!(ts.get_initial_times().len(), 1);
+      assert_eq!(ts.get_last_block().len(), 1);
+      assert_eq!(
+        ts.get_last_block()
+          .get_metric_points()
+          .first()
+          .unwrap()
+          .get_value(),
+        100.0
+      );
+    }
 
     let query_node_result_for_this = create_term_test_node("this");
 
@@ -717,9 +706,13 @@ mod tests {
     assert_eq!(segment.metadata.get_start_time(), time);
     assert_eq!(segment.metadata.get_end_time(), time);
 
+    let conditions = [MetricsQueryCondition::Equals(
+      "label_name_1".to_owned(),
+      "label_value_1".to_owned(),
+    )];
     assert_eq!(
       segment
-        .search_metrics("label_name_1", "label_value_1", time - 100, time + 100)
+        .search_metrics(&conditions, time - 100, time + 100)
         .len(),
       1
     )
@@ -782,7 +775,11 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
 
     let mut expected = (*expected.read().unwrap()).clone();
-    let received = segment.search_metrics("label1", "value1", start_time - 100, end_time + 100);
+    let conditions = [MetricsQueryCondition::Equals(
+      "label1".to_owned(),
+      "value1".to_owned(),
+    )];
+    let received = segment.search_metrics(&conditions, start_time - 100, end_time + 100);
 
     expected.sort();
     assert_eq!(expected, received);

@@ -1,7 +1,7 @@
 ![Infino Logo (Light)](docs/images/Infino_logo_light.png#gh-light-mode-only)
 ![Infino Logo (Dark)](docs/images/Infino_logo_dark.png#gh-dark-mode-only)
 
-# Store, search, and analyze telemetry data at scale with OpenSearch.
+<p style="color: #ff5f07; font-size: 2em; font-weight: bold;">Store, search, and analyze telemetry data at scale with OpenSearch.</p>
 
 ![Elastic Logo](docs/images/ElasticLicenseLogo.svg)
 [![Github Commits](https://img.shields.io/github/commit-activity/m/infinohq/infino)](https://github.com/infinohq/infino/commits)
@@ -14,17 +14,36 @@
 [Report Bug](https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=bug_report.md) |
 [Request Feature](https://github.com/infinohq/infino/issues/new?assignees=&labels=&template=feature_request.md)
 
-<hr style="border:2px solid gray">
+<hr style="border:2px solid gray"><br/>
 
+Table of Contents
+===================
+  * [Infino Overview](#infino-overview)
+    * [What is Infino?](#what-is-infino)
+    * [Why Infino?](#why-infino)
+    * [How it works](#how-it-works)
+    * [Features](#features)
+      * [Available Now](#available-now)
+      * [Coming soon](#coming-soon)
+    * [License](#license)
+  * [Getting Started](#getting-started)
+    * [Quickstart](#quickstart)
+    * [Examples](#examples)
+  * [Developer Resources](#developer-resources)
+    * [VS Code Dev Container](#vs-code-dev-container)
+    * [Developer Docs](#developer-docs)
+  * [Contribution](#contributions)
+  * [Contact Us](#contact-us)
+  * [Contributors](#contributors)
+  
+# Infino Overview
 ## What is Infino?
-
-Infino is a next-gen telemetry plugin for OpenSearch designed to handle logs, metrics, and traces at scale. It is designed to turn OpenSearch into a unified, state-of-the-art, AI-led observability stack.
+Infino is a next-generation telemetry plugin for OpenSearch that efficiently handles logs, metrics, and traces at scale. It transforms OpenSearch into a unified, state-of-the-art, AI-driven observability stack.
 
 ## Why Infino?
-Telemetry data volumes are increasing exponentially yet there is no purpose-built search engine for telemetry. Most observability stacks are built on [Lucene](https://lucene.apache.org/), [Clickhouse](https://github.com/ClickHouse/ClickHouse) or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data so the stacks become complex and expensive to manage. Infino's goal is to rethink observability with smart, high-performance telemetry engine for OpenSearch.
+Telemetry data volumes are increasing exponentially, yet there is no purpose-built search engine for telemetry. Most observability stacks are built on [Lucene](https://lucene.apache.org/), [ClickHouse](https://github.com/ClickHouse/ClickHouse), or [Prometheus](https://github.com/prometheus/prometheus), which are powerful tools but are not built for modern telemetry data. As a result, the stacks become complex and expensive to manage. Infino's goal is to rethink observability with a smart, high-performance telemetry engine for OpenSearch.
 
 ## How it works
-
 Infino defines a set of telemetry data as a **collection**, which is effectively a set of automanaged indexes in OpenSearch.  A collection consists internally of optimized indexes for both documents (Lucene) and telemetry (Infino) that are searchable together. Collections also have built-in AI co-pilots to do summarizations and root cause analysis.
 
 You can access a collection just like you would a normal OpenSearch index, except you don't have to worry about managing clusters or optimizing your index as collections are automatically scaled and optimized. When you access a collection you just need to preface your index with **/infino** as shown in the diagram below. You can read more about accessing OpenSearch [here](https://opensearch.org/docs/latest/).
@@ -37,32 +56,30 @@ It is worth noting that a collection is represented by a mirror Lucene index pre
 
 Cluster requests work as normal but do not impact Infino Collections which are automanaged.
 
-## Developer Resources
-### [Developing with Visual Studio Code and Dev Containers](docs/DevContainer.md)
-
-### Developer Docs
-Read our repo documentation [here](https://infinohq.github.io/infino/doc/infino/index.html).
-
 ## Features
 Note that we are still very much an alpha product but we have lots on the roadmap. Our development at the moment is focused on increasing the performance of the core engine to address **cost** but we are starting to add features to address **complexity**. 
 
-#### Available now
+### Available Now
  - Store logs and metrics
  - OpenSearch plugin
  - Basic boolean Query DSL support
  - Basic OpenSearch dashboard support
 
-#### Coming soon
+### Coming Soon
 - DQL support
 - More Query DSL coverage
 - NLP
 - Traces
-- AI copilot
+- Observability copilot
 
-## Getting started
+## License
+Infino is distributed under the Elastic 2.0 license.
 
-### Examples
+# Getting started
+## Quickstart
+Try Infino with OpenSearch using docker. Follow the steps in [Infino docker compose setup](docs/infino-docker-compose.md) to quickly deploy Infino, OpenSearch with Infino plugin and OpenSearch dashboard.
 
+## Examples
 The core Infino engine has some legacy integrations which might give you a sense of Infino's capabilities. Please note that these integrations are being ported to OpenSearch as Infino is not supported as a standalone engine.
 
 * [Integration with Fluentbit](examples/fluentbit/README.md) - Learn how to publish telemetry to Infino using FluentBit.
@@ -70,26 +87,27 @@ The core Infino engine has some legacy integrations which might give you a sense
 * [LLM monitoring with OpenAI](examples/llm-monitoring-openai/llm-monitoring-openai.ipynb) - See an example of monitoring OpenAI's services.
 * [Using Infino's Python client](examples/python-client/rally-tracks.ipynb) - Get started with the [Python client](https://pyup.io/packages/pypi/infinopy/) for Infino and explore its functionalities.
 
-</br>
+# Developer Resources
+## VS Code Dev Container
+The repo has a devcontainer configuration for easily deploying the development environment in a container. Read the [dev container doc](docs/DevContainer.md) to get started with the Infino dev container.
 
-Please file an issue if you face any problems or contact us directly if you want to discuss your use-case over virtual coffee.
+## Developer Docs
+Read our repo documentation [here](https://infinohq.github.io/infino/doc/infino/index.html).
 
-## Contributions
 
-Contributions are welcome and highly appreciated! To get started, check out our [repo docs](http://infinohq.github.io/infino/doc/infino/index.html) and the [contributing guidelines](CONTRIBUTING.md).
+# Contributions
 
-## Contact Us
+Contributions are welcome and highly appreciated! To get started, check out our [repo docs](http://infinohq.github.io/infino/doc/infino/index.html) and the [contributing guidelines](CONTRIBUTING.md). Please file an issue if you face any problems or have any questions.
 
-Ping us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email) or send us an email: ![Infino Logo (Light)](docs/images/Infino_email_light.svg#gh-light-mode-only)
+# Contact Us
+
+Contact us directly if you want to discuss your use-case over virtual coffee. You can ping us on [Slack](https://infinohq.slack.com/join/shared_invite/zt-1tqqc0vsz-jF80cpkGy7aFsALQKggy8g#/shared-invite/email) or send us an email: ![Infino Logo (Light)](docs/images/Infino_email_light.svg#gh-light-mode-only)
 ![Infino Logo (Dark)](docs/images/Infino_email_dark.svg#gh-dark-mode-only).
 
-## Contributors
+# Contributors
 
 A big thank you to the community for making Infino possible!
 
 <a href="https://github.com/infinohq/infino/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=infinohq/infino" />
 </a>
-
-## License
-Infino is distributed under the Elastic 2.0 license.

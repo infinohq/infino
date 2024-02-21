@@ -5,42 +5,58 @@ use unicode_segmentation::UnicodeSegmentation;
 
 pub const FIELD_DELIMITER: char = '~';
 
-// Tokenize a given string. Note that FIELD_DELIMITER is a special character that we
-// use a field separator in queries, and so we do not tokenize on "~".
-pub fn tokenize(input: &str) -> Vec<String> {
+/// Tokenize a given string. Note that FIELD_DELIMITER is a special character that we
+/// use a field separator in queries, and so we do not tokenize on "~".
+pub fn tokenize<'a>(input: &'a str, output: &mut Vec<&'a str>) {
   if !input.contains(FIELD_DELIMITER) {
     // Input does not have FIELD_DELIMITER, so just do unicode_words().
     // This improves performance in this hot method, as we do not need to split
     // the input on FIELD_DELIMITER.
     let tokens: Vec<&str> = input.unicode_words().collect();
-    return tokens.iter().map(|x| x.to_string()).collect();
+    output.extend(tokens);
+    return;
   }
 
-  // Input has FIELD_DELIMITER, so we need to do a bit more work.
-  // We need to split the input on FIELD_DELIMITER, and then tokenize each segment.
+  // Temporary storage for combining tokens with '~'
+  let mut current_token: Option<&'a str> = None;
 
-  // First, create different segments based on FIELD_DELIMITER separator.
-  let segments: Vec<&str> = input.split(FIELD_DELIMITER).collect();
+  // Iterate through the unicode words
+  for word in input.unicode_words() {
+    let start = word.as_ptr() as usize - input.as_ptr() as usize;
+    let end = start + word.len();
 
-  let mut tokens: Vec<String> = Vec::new();
-  for segment in segments {
-    // Unicode tokenize each segment.
-    let words: Vec<&str> = segment.unicode_words().collect();
-
-    // Merge each segment, making sure to add the special delimiter FIELD_DELIMITER back at the end of each segment.
-    // As an example, if the first segment is vec!["a", "b"], and the next segment is vec!["c", "d"], and the
-    // field delimiter is "~", the tokens will be vec!["a", "b~c", "d"]
-    for (pos, word) in words.iter().enumerate() {
-      if pos == 0 && !tokens.is_empty() {
-        let word_with_tilde = format!("{}{}", FIELD_DELIMITER, word);
-        tokens.last_mut().unwrap().push_str(&word_with_tilde);
+    // Check if current_token is Some and should be combined with the current word
+    if let Some(ct) = current_token {
+      // Check if there's a '~' between the current token and the word
+      if &input[start - 1..start] == "~" {
+        let combined_start = ct.as_ptr() as usize - input.as_ptr() as usize;
+        output.push(&input[combined_start..end]);
+        current_token = None; // Reset current_token
+        continue;
       } else {
-        tokens.push(word.to_string());
+        // Push the previous token if it's not followed by '~'
+        output.push(ct);
+        current_token = None;
       }
+    }
+
+    // If there's no '~' directly before this word, set current_token to Some
+    if current_token.is_none() {
+      current_token = Some(word);
     }
   }
 
-  tokens
+  // Handle the last token
+  if let Some(ct) = current_token {
+    output.push(ct);
+  }
+
+  // Special handling for when the input itself ends with '~'
+  if input.ends_with('~') && !output.is_empty() {
+    let last = output.pop().unwrap(); // Safe because output is not empty
+    let combined_end = last.as_ptr() as usize - input.as_ptr() as usize + last.len() + 1; // +1 for '~'
+    output.push(&input[last.as_ptr() as usize - input.as_ptr() as usize..combined_end]);
+  }
 }
 
 #[cfg(test)]
@@ -49,27 +65,32 @@ mod tests {
 
   #[test]
   fn test_tokenize() {
-    let words = tokenize("a quick brown fox jumped 5.2 feet");
+    let mut words = Vec::new();
+    tokenize("a quick brown fox jumped 5.2 feet", &mut words);
     assert_eq!(
       words,
       vec!["a", "quick", "brown", "fox", "jumped", "5.2", "feet"]
     );
 
-    let words = tokenize("[notice]: this is last boarding call.");
+    let mut words = Vec::new();
+    tokenize("[notice]: this is last boarding call.", &mut words);
     assert_eq!(
       words,
       vec!["notice", "this", "is", "last", "boarding", "call"]
     );
 
-    let words = tokenize("He said, \"Hi, there!\"");
+    let mut words = Vec::new();
+    tokenize("He said, \"Hi, there!\"", &mut words);
     assert_eq!(words, vec!["He", "said", "Hi", "there"]);
 
     // "~" appearing at the beginning of the text does get treated a seperator,
     // while the one appearing in between doesn't.
-    let words = tokenize(&format!(
+    let mut words = Vec::new();
+    let input = &format!(
       "~sky:1 test{}2 thisisaword test{}345",
       FIELD_DELIMITER, FIELD_DELIMITER
-    ));
+    );
+    tokenize(input, &mut words);
     assert_eq!(
       words,
       vec![
@@ -81,10 +102,9 @@ mod tests {
       ]
     );
 
-    let words = tokenize(&format!(
-      "sky:1 test{}2 test{}345",
-      FIELD_DELIMITER, FIELD_DELIMITER
-    ));
+    let mut words = Vec::new();
+    let input = &format!("sky:1 test{}2 test{}345", FIELD_DELIMITER, FIELD_DELIMITER);
+    tokenize(input, &mut words);
     assert_eq!(
       words,
       vec![

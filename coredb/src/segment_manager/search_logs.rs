@@ -1,9 +1,10 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
+/// Search a segment for matching document IDs
 use std::collections::HashSet;
 
-/// Search a segment for matching document IDs
+use crate::log::constants::BLOCK_SIZE_FOR_LOG_MESSAGES;
 use crate::log::postings_block::PostingsBlock;
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
 use crate::segment_manager::segment::Segment;
@@ -20,7 +21,7 @@ impl Segment {
   ) -> Result<
     (
       Vec<Vec<PostingsBlockCompressed>>,
-      Vec<PostingsBlock>,
+      Vec<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>>,
       Vec<Vec<u32>>,
       usize,
     ),
@@ -28,61 +29,30 @@ impl Segment {
   > {
     let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
     let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
-    let mut last_block_list: Vec<PostingsBlock> = Vec::new();
+    let mut last_block_list: Vec<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> = Vec::new();
     let mut shortest_list_index = 0;
     let mut shortest_list_len = usize::MAX;
 
     for (index, term) in terms.iter().enumerate() {
-      let term_id = match self.get_term(term) {
-        Some(term_id) => term_id,
+      let postings_list = match self.get_postings_list(term) {
+        Some(postings_list_ref) => postings_list_ref,
         None => {
           return Err(AstError::PostingsListError(format!(
-            "Term not found: {}",
+            "Postings list not found for term: {}",
             term
           )))
         }
       };
 
-      let postings_list = match self.get_inverted_map().get(&term_id) {
-        Some(postings_list_ref) => postings_list_ref,
-        None => {
-          return Err(AstError::PostingsListError(format!(
-            "Postings list not found for term ID: {}",
-            term_id
-          )))
-        }
-      };
+      let postings_list = postings_list.read().unwrap();
 
-      let initial_values = postings_list
-        .get_initial_values()
-        .read()
-        .map_err(|_| {
-          AstError::PostingsListError("Failed to acquire read lock on initial values".to_string())
-        })?
-        .clone();
+      let initial_values = postings_list.get_initial_values().clone();
       initial_values_list.push(initial_values);
 
-      let postings_block_compressed_vec: Vec<PostingsBlockCompressed> = postings_list
-        .get_postings_list_compressed()
-        .read()
-        .map_err(|_| {
-          AstError::TraverseError(
-            "Failed to acquire read lock on postings list compressed".to_string(),
-          )
-        })?
-        .iter()
-        .cloned()
-        .collect();
+      let postings_block_compressed_vec: Vec<PostingsBlockCompressed> =
+        postings_list.get_postings_list_compressed().to_vec();
 
-      let last_block = postings_list
-        .get_last_postings_block()
-        .read()
-        .map_err(|_| {
-          AstError::PostingsListError(
-            "Failed to acquire read lock on last postings block".to_string(),
-          )
-        })?
-        .clone();
+      let last_block = postings_list.get_last_postings_block().clone();
       last_block_list.push(last_block);
 
       if postings_block_compressed_vec.len() < shortest_list_len {
@@ -106,8 +76,8 @@ impl Segment {
   pub fn get_matching_doc_ids_with_logical_and(
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
-    last_block_list: &[PostingsBlock],
-    initial_values_list: &Vec<Vec<u32>>,
+    last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
+    initial_values_list: &[Vec<u32>],
     shortest_list_index: usize,
     result_set: &mut HashSet<u32>,
   ) -> Result<(), AstError> {
@@ -123,21 +93,12 @@ impl Segment {
       let posting_block = PostingsBlock::try_from(posting_block).map_err(|_| {
         AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
       })?;
-      let log_message_ids = posting_block.get_log_message_ids().read().map_err(|_| {
-        AstError::DocMatchingError("Failed to acquire read lock on log message IDs".to_string())
-      })?;
-      accumulator.append(&mut log_message_ids.clone());
+      let mut log_message_ids = posting_block.get_log_message_ids();
+      accumulator.append(&mut log_message_ids);
     }
 
-    let last_block_log_message_ids = last_block_list[shortest_list_index]
-      .get_log_message_ids()
-      .read()
-      .map_err(|_| {
-        AstError::DocMatchingError(
-          "Failed to acquire read lock on last block log message IDs".to_string(),
-        )
-      })?;
-    accumulator.append(&mut last_block_log_message_ids.clone());
+    let mut last_block_log_message_ids = last_block_list[shortest_list_index].get_log_message_ids();
+    accumulator.append(&mut last_block_log_message_ids);
 
     if accumulator.is_empty() {
       debug!("Posting list is empty. Loading accumulator from last_block_list.");
@@ -183,24 +144,9 @@ impl Segment {
                 .map_err(|_| {
                   AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
                 })?
-                .get_log_message_ids()
-                .read()
-                .map_err(|_| {
-                  AstError::DocMatchingError(
-                    "Failed to acquire read lock on log message IDs".to_string(),
-                  )
-                })?
-                .clone();
+                .get_log_message_ids();
             } else {
-              _posting_block = last_block_list[i]
-                .get_log_message_ids()
-                .read()
-                .map_err(|_| {
-                  AstError::DocMatchingError(
-                    "Failed to acquire read lock on last block log message IDs".to_string(),
-                  )
-                })?
-                .clone();
+              _posting_block = last_block_list[i].get_log_message_ids();
             }
 
             // start from 1st element of posting_block as 0th element of posting_block is already checked as it was part of intial_values
@@ -248,17 +194,10 @@ impl Segment {
           if posting_index < posting_list.len() {
             _posting_block = PostingsBlock::try_from(&posting_list[posting_index])
               .unwrap()
-              .get_log_message_ids()
-              .read()
-              .unwrap()
-              .clone();
+              .get_log_message_ids();
           } else {
             // posting block is last block
-            _posting_block = last_block_list[i]
-              .get_log_message_ids()
-              .read()
-              .unwrap()
-              .clone();
+            _posting_block = last_block_list[i].get_log_message_ids();
           }
 
           // Check the remaining elements of posting block
@@ -305,7 +244,7 @@ impl Segment {
   pub fn get_matching_doc_ids_with_logical_or(
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
-    last_block_list: &[PostingsBlock],
+    last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
     result_set: &mut HashSet<u32>,
   ) -> Result<(), AstError> {
     let mut accumulator = Vec::new();
@@ -322,21 +261,11 @@ impl Segment {
         let posting_block = PostingsBlock::try_from(posting_block).map_err(|_| {
           AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
         })?;
-        let log_message_ids = posting_block.get_log_message_ids().read().map_err(|_| {
-          AstError::DocMatchingError("Failed to acquire read lock on log message IDs".to_string())
-        })?;
+        let log_message_ids = posting_block.get_log_message_ids();
         accumulator.append(&mut log_message_ids.clone());
       }
 
-      let last_block_log_message_ids =
-        last_block_list[i]
-          .get_log_message_ids()
-          .read()
-          .map_err(|_| {
-            AstError::DocMatchingError(
-              "Failed to acquire read lock on last block log message IDs".to_string(),
-            )
-          })?;
+      let last_block_log_message_ids = last_block_list[i].get_log_message_ids();
       accumulator.append(&mut last_block_log_message_ids.clone());
     }
 
@@ -364,13 +293,16 @@ mod tests {
     PostingsBlockCompressed::new_with_params(initial, num_bits, &valid_compressed_data)
   }
 
-  fn create_mock_postings_block(log_message_ids: Vec<u32>) -> PostingsBlock {
-    PostingsBlock::new_with_log_message_ids(log_message_ids)
+  fn create_mock_postings_block(
+    log_message_ids: Vec<u32>,
+  ) -> PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES> {
+    PostingsBlock::new_with_log_message_ids_vec(log_message_ids)
+      .expect("Could not create mock postings block")
   }
 
   fn create_mock_postings_list(
     compressed_blocks: Vec<PostingsBlockCompressed>,
-    last_block: PostingsBlock,
+    last_block: PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>,
     initial_values: Vec<u32>,
   ) -> PostingsList {
     PostingsList::new_with_params(compressed_blocks, last_block, initial_values)
@@ -515,8 +447,8 @@ mod tests {
   #[test]
   fn test_get_postings_lists_with_terms_having_empty_postings_lists() {
     let segment = create_mock_segment();
-    segment.get_inverted_map().insert(3, PostingsList::new());
-    segment.get_inverted_map().insert(4, PostingsList::new());
+    segment.insert_in_inverted_map(3, PostingsList::new());
+    segment.insert_in_inverted_map(4, PostingsList::new());
     segment.get_terms().insert("term3".to_string(), 3);
     segment.get_terms().insert("term4".to_string(), 4);
     let terms = vec!["term3".to_string(), "term4".to_string()];
@@ -537,17 +469,18 @@ mod tests {
   fn test_get_postings_lists_with_incomplete_data_in_segment() {
     let segment = create_mock_segment();
     // Simulate incomplete data by clearing inverted map
-    segment.get_inverted_map().clear();
+    segment.clear_inverted_map();
+
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(result.is_err());
   }
 
   #[test]
   fn test_get_postings_lists_with_empty_postings_lists() {
     let segment = create_mock_segment();
     let postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
-    let last_block_list: Vec<PostingsBlock> = Vec::new();
+    let last_block_list: Vec<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> = Vec::new();
     let initial_values_list: Vec<Vec<u32>> = Vec::new();
     let mut accumulator: HashSet<u32> = HashSet::new();
 

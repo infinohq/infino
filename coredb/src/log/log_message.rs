@@ -57,20 +57,30 @@ impl LogMessage {
   }
 
   /// Get the terms corresponding to this log message.
+  //
+  // TODO: This function could be optimized to reduce string operations. We process
+  // the strings dynamically (e.g., changing case, adding FIELD_DELIMITER, etc) so it
+  // it isn't as straightforward.
   pub fn get_terms(&self) -> Vec<String> {
-    let text_lower = self.text.to_lowercase();
+    let text = self.text.to_lowercase();
     let mut terms: Vec<String> = Vec::new();
 
     // Each word in text goes as it is in terms.
-    let tokens = tokenize(&text_lower);
-    terms.extend(tokens);
+    let mut tokens: Vec<&str> = Vec::new();
+    tokenize(&text, &mut tokens);
+    terms.extend(tokens.into_iter().map(|s| s.to_string()));
 
     // Each word in a field value goes with a perfix a of its field name, followed by ":".
     for field in &self.fields {
       let name = field.0;
-      let values = tokenize(field.1);
+      let mut values: Vec<&str> = Vec::new();
+      tokenize(field.1, &mut values);
       for value in values {
-        let term = format!("{}{}{}", name, FIELD_DELIMITER, value);
+        let term_capacity = name.len() + 1 + value.len();
+        let mut term = String::with_capacity(term_capacity);
+        term.push_str(name);
+        term.push(FIELD_DELIMITER);
+        term.push_str(value);
         terms.push(term);
       }
     }

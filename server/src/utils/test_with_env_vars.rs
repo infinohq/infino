@@ -36,6 +36,7 @@ where
     }
   }
 
+  #[allow(clippy::all)]
   match panic::catch_unwind(|| {
     closure();
   }) {
