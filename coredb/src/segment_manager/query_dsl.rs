@@ -263,17 +263,17 @@ impl Segment {
       }
     }
 
+    // Creating the vector of all search strings in the format "field1~field1element", "field1~field2element"
+    // etc from the field_element array in the query.
     let query_terms: Vec<String> = futures::stream::iter(query_values)
-      .then(|term| async move {
-        // Assuming your analyze_query_text returns a Future<Vec<String>>
-        self.analyze_query_text(term, fieldname, false).await
-      })
+      .then(|term| async move { self.analyze_query_text(term, fieldname, false).await })
       .collect::<Vec<_>>()
       .await
       .into_iter()
       .flatten()
       .collect();
 
+    // Using the "OR" operator to get all the logs with any of the field elements from the logs.
     if !query_terms.is_empty() {
       self.process_search(query_terms, "OR").await
     } else {
@@ -830,8 +830,6 @@ mod tests {
             }
         }
     }"#;
-
-    println!("\n\n\n\n\n in hereeee \n\n\n\n");
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
