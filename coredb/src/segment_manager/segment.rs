@@ -453,6 +453,7 @@ mod tests {
   use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
   use crate::storage_manager::storage::StorageType;
   use crate::utils::sync::{is_sync_send, thread};
+  use pest::iterators::Pairs;
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, Box<pest::error::Error<Rule>>> {
     let test_string = term;
@@ -680,17 +681,19 @@ mod tests {
     assert_eq!(segment.metadata.get_start_time(), time);
     assert_eq!(segment.metadata.get_end_time(), time);
 
-    let conditions = vec![MetricsQueryCondition::Equals(
-      "label_name_1".to_owned(),
-      "label_value_1".to_owned(),
-    )];
-    assert_eq!(
-      segment
-        .search_metrics(conditions, time - 100, time + 100)
-        .await
-        .len(),
-      1
-    )
+    let mut labels = HashMap::new();
+    labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
+    let results = segment
+      .search_metrics(
+        &labels,
+        &MetricsQueryCondition::Equals,
+        time - 100,
+        time + 100,
+      )
+      .await
+      .unwrap();
+
+    assert_eq!(results.len(), 1)
   }
 
   #[test]
@@ -750,13 +753,18 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
 
     let mut expected = (*expected.read().unwrap()).clone();
-    let conditions = vec![MetricsQueryCondition::Equals(
-      "label1".to_owned(),
-      "value1".to_owned(),
-    )];
+
+    let mut labels = HashMap::new();
+    labels.insert("label1".to_owned(), "value1".to_owned());
     let received = segment
-      .search_metrics(conditions, start_time - 100, end_time + 100)
-      .await;
+      .search_metrics(
+        &labels,
+        &MetricsQueryCondition::Equals,
+        start_time - 100,
+        end_time + 100,
+      )
+      .await
+      .expect("Error search metrics");
 
     expected.sort();
     assert_eq!(expected, received);

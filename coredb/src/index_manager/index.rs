@@ -320,7 +320,7 @@ impl Index {
         None => {
           let segment = self.refresh_segment(segment_number).await?;
           segment
-            .search_logs(&ast, range_start_time, range_end_time)
+            .search_logs(ast, range_start_time, range_end_time)
             .await
             .unwrap_or_else(|_| Vec::new())
         }
@@ -670,7 +670,7 @@ mod tests {
 
   use super::*;
   use crate::metric::metric_point::MetricPoint;
-  use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
+  use crate::segment_manager::query_dsl::QueryDslParser;
   use crate::utils::io::get_joined_path;
   use crate::utils::sync::is_sync_send;
 
@@ -691,7 +691,7 @@ mod tests {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
     let index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, segment_size, memory_budget)
+      Index::new_with_threshold_params(storage_type, &index_dir_path, segment_size, memory_budget)
         .await
         .unwrap();
     (index, index_dir_path)
@@ -789,7 +789,7 @@ mod tests {
   #[tokio::test]
   async fn test_basic_search_logs() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) = create_index("test_basic_search", &storage_type).await;
+    let (index, _index_dir_path) = create_index("test_basic_search", &storage_type).await;
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -843,7 +843,7 @@ mod tests {
   #[tokio::test]
   async fn test_basic_time_series() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) = create_index("test_basic_time_series", &storage_type).await;
+    let (index, _index_dir_path) = create_index("test_basic_time_series", &storage_type).await;
     let num_metric_points = 1000;
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
@@ -853,13 +853,18 @@ mod tests {
       expected_metric_points.push(dp);
     }
 
-    let metric_name_label = "__name__";
-    let received_metric_points = index
-      .search_metrics(metric_name_label, "some_name")
+    // The number of metric points in the index should be equal to the number of metric points we indexed.
+    let ast = PromQLParser::parse(promql::Rule::start, "{__name__=some_name}")
+      .expect("Failed to parse query");
+    let results = index
+      .search_metrics(&ast, 0, u64::MAX)
       .await
-      .expect("Error in get_metrics");
+      .expect("Error in searching metrics");
 
-    assert_eq!(expected_metric_points, received_metric_points);
+    assert_eq!(
+      expected_metric_points,
+      *results.first().unwrap().clone().get_metric_points()
+    );
   }
 
   #[test_case(true, false; "when only logs are appended")]
@@ -1096,7 +1101,7 @@ mod tests {
     let start_time = Utc::now().timestamp_millis() as u64;
 
     // Create a new index with a low threshold for the segment size.
-    let (index, index_dir_path) = create_index_with_thresholds(
+    let (mut index, index_dir_path) = create_index_with_thresholds(
       "test_multiple_segments_logs",
       &storage_type,
       1024,
@@ -1196,7 +1201,7 @@ mod tests {
   #[tokio::test]
   async fn test_search_logs_count() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) =
+    let (index, _index_dir_path) =
       create_index_with_thresholds("test_search_logs_count", &storage_type, 1024, 1024 * 1024)
         .await;
 
@@ -1235,7 +1240,7 @@ mod tests {
   #[tokio::test]
   async fn test_multiple_segments_metric_points() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) = create_index_with_thresholds(
+    let (mut index, index_dir_path) = create_index_with_thresholds(
       "test_multiple_segments_metric_points",
       &storage_type,
       1024,
@@ -1252,12 +1257,7 @@ mod tests {
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     for _ in 1..=num_metric_points {
-      index.append_metric_point(
-        "some_name",
-        &label_map,
-        Utc::now().timestamp_millis() as u64,
-        100.0,
-      );
+      index.append_metric_point("some_name", &label_map, start_time, 100.0);
       num_metric_points_from_last_commit += 1;
 
       // Commit after we have indexed more than commit_after messages.
@@ -1269,8 +1269,6 @@ mod tests {
     // Commit and sleep to make sure the index is written to disk.
     index.commit().await.expect("Could not commit index");
     sleep(Duration::from_millis(10000));
-
-    let end_time = Utc::now().timestamp_millis() as u64;
 
     // Refresh the segment from disk.
     index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
@@ -1296,7 +1294,7 @@ mod tests {
     let ast = PromQLParser::parse(promql::Rule::start, "{label_name_1=label_value_1}[1y]")
       .expect("Failed to parse query");
     let results = index
-      .search_metrics(&ast)
+      .search_metrics(&ast, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 
@@ -1344,7 +1342,7 @@ mod tests {
   #[tokio::test]
   async fn test_overlap_one_segment() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) = create_index("test_overlap_one_segment", &storage_type).await;
+    let (index, _index_dir_path) = create_index("test_overlap_one_segment", &storage_type).await;
 
     index.append_log_message(1000, &HashMap::new(), "message_1");
     index.append_log_message(2000, &HashMap::new(), "message_2");
@@ -1499,7 +1497,7 @@ mod tests {
     let ast = PromQLParser::parse(promql::Rule::start, "{label_name_1=label_value_1}")
       .expect("Failed to parse query");
     let results = index
-      .search_metrics(&ast)
+      .search_metrics(&ast, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 
@@ -1627,7 +1625,7 @@ mod tests {
   #[tokio::test]
   async fn test_delete_segment_in_memory() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) =
+    let (index, _index_dir_path) =
       create_index("test_delete_segment_in_memory", &storage_type).await;
     let message = "test_message";
     index.append_log_message(
@@ -1653,7 +1651,7 @@ mod tests {
     let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) = create_index_with_thresholds(
+    let (index, _index_dir_path) = create_index_with_thresholds(
       "test_delete_multiple_segments",
       &storage_type,
       // This size depends on the number of log messages added in each segment in the for loop below.

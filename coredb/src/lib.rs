@@ -238,7 +238,7 @@ impl CoreDB {
 
     // Build the query AST
     // TODO: for now we'll ignore the json body but come back to this
-    let ast = Index::parse_query(&url_query)?;
+    let ast = Index::parse_query(url_query)?;
 
     self
       .index_map
@@ -481,12 +481,26 @@ mod tests {
     }
 
     // Search for metric points.
-    let results = coredb
-      .search_metrics("some_metric", start, end)
+    let mut results = coredb
+      .search_metrics("some_metric", "", start, end)
       .await
       .expect("Error in get_metrics");
-    assert_eq!(results.first().unwrap().get_value(), 1.0);
-    assert_eq!(results.get(1).unwrap().get_value(), 2.0);
+    assert_eq!(
+      results[0]
+        .get_metric_points()
+        .first()
+        .expect("Could not unwrap result")
+        .get_value(),
+      1.0
+    );
+    assert_eq!(
+      results[1]
+        .get_metric_points()
+        .first()
+        .expect("Could not unwrap result")
+        .get_value(),
+      2.0
+    );
 
     coredb
       .trigger_retention()

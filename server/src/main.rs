@@ -930,9 +930,8 @@ mod tests {
       .end_time
       .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value));
     let query_string = format!(
-      "label_name={}&label_value={}{}{}",
-      encode(&query.label_name),
-      encode(&query.label_value),
+      "{}{}{}",
+      encode(&query.text),
       query_start_time,
       query_end_time
     );
@@ -958,7 +957,7 @@ mod tests {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
       .await
       .unwrap();
-    let mut metric_points_received: Vec<MetricPoint> = serde_json::from_slice(&body).unwrap();
+    let metric_points_received: Vec<MetricPoint> = serde_json::from_slice(&body).unwrap();
 
     check_metric_point_vectors(&metric_points_expected, &metric_points_received);
 
@@ -970,12 +969,13 @@ mod tests {
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    metric_points_received = refreshed_coredb
-      .get_metrics(&query.label_name, &query.label_value, start_time, end_time)
+    let mut results = refreshed_coredb
+      .search_metrics(&query.text, "", start_time, end_time)
       .await
       .expect("Could not get metrics");
 
-    check_metric_point_vectors(&metric_points_expected, &metric_points_received);
+    let metric_points_received = results[0].get_metric_points();
+    check_metric_point_vectors(&metric_points_expected, metric_points_received);
 
     Ok(())
   }
@@ -1128,22 +1128,22 @@ mod tests {
 
     // Check whether we get all the metric points back when the start and end_times are not specified
     // (i.e., they will default to 0 and to current time respectively).
+    let query_text = format!("{{ {} = {} }}", name_for_metric_name_label, metric_name);
     let query = MetricsQuery {
-      label_name: name_for_metric_name_label.to_owned(),
-      label_value: metric_name.to_owned(),
+      text: query_text,
       start_time: None,
       end_time: None,
     };
     check_time_series(&mut app, config_dir_path, query, metric_points_expected).await?;
 
     // End time in this query is too old - this should yield 0 results.
-    let query_too_old = MetricsQuery {
-      label_name: name_for_metric_name_label.to_owned(),
-      label_value: metric_name.to_owned(),
+    let query_too_old_text = format!("{{ {} = {} }}", name_for_metric_name_label, metric_name);
+    let query = MetricsQuery {
+      text: query_too_old_text,
       start_time: Some(1),
       end_time: Some(10000),
     };
-    check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await?;
+    check_time_series(&mut app, config_dir_path, query, Vec::new()).await?;
 
     // Check whether the /flush works.
     let response = app

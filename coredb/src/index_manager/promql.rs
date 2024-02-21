@@ -82,6 +82,12 @@ impl PromQLSelector {
   }
 }
 
+impl Default for PromQLSelector {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 pub struct PromQLDuration {
   start_time: u64,
   end_time: u64,
@@ -99,11 +105,11 @@ impl PromQLDuration {
     }
   }
 
-  pub fn new_with_params(start_time: u64, end_time: u64, offset: u64) -> Self {
+  pub fn new_with_params(range_start_time: u64, range_end_time: u64, range_offset: u64) -> Self {
     PromQLDuration {
-      start_time: start_time,
-      end_time: end_time,
-      offset: offset,
+      start_time: range_start_time,
+      end_time: range_end_time,
+      offset: range_offset,
     }
   }
 
@@ -167,6 +173,12 @@ impl PromQLDuration {
   }
 }
 
+impl Default for PromQLDuration {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl Index {
   pub fn parse_query(
     json_query: &str,
@@ -223,7 +235,7 @@ impl Index {
     match node.as_rule() {
       Rule::expression => {
         self
-          .process_expression(&node, range_start_time, range_end_time)
+          .process_expression(node, range_start_time, range_end_time)
           .await
       }
       _ => Err(AstError::UnsupportedQuery(format!(
@@ -253,17 +265,17 @@ impl Index {
           if results.get_vector().is_empty() {
             results.set_vector(and_results.take_vector());
           } else {
-            results.or(&mut and_results);
+            results.or(&and_results);
           }
         }
         Rule::unless => {
-          let mut and_results = self
+          let and_results = self
             .process_and(&node, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results = and_results;
           } else {
-            results.unless(&mut and_results);
+            results.unless(&and_results);
           }
         }
         _ => {
@@ -297,7 +309,7 @@ impl Index {
           if results.get_vector().is_empty() {
             results.set_vector(equality_results.take_vector());
           } else {
-            results.and(&mut equality_results);
+            results.and(&equality_results);
           }
         }
         _ => {
@@ -679,7 +691,7 @@ impl Index {
         }
         Rule::duration => {
           if let Some(duration_text) = node.into_inner().next() {
-            duration.set_duration(Some(duration_text.as_str()).unwrap_or_default())?;
+            duration.set_duration(duration_text.as_str())?;
           }
         }
         _ => {

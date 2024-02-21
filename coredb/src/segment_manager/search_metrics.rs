@@ -208,7 +208,7 @@ mod tests {
     labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
 
     let results = segment
-      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .search_metrics(&labels, &MetricsQueryCondition::Equals, 0, u64::MAX)
       .await
       .unwrap();
     assert_eq!(results.len(), 2);
@@ -216,7 +216,7 @@ mod tests {
     assert_eq!(results[1].get_time(), 2);
 
     let results = segment
-      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, 1)
+      .search_metrics(&labels, &MetricsQueryCondition::Equals, 0, 1)
       .await
       .unwrap();
     assert_eq!(results.len(), 1);
@@ -226,7 +226,7 @@ mod tests {
     labels.insert("label_name_3".to_owned(), "label_value_3".to_owned());
 
     let results = segment
-      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .search_metrics(&labels, &MetricsQueryCondition::Equals, 0, u64::MAX)
       .await
       .unwrap();
     assert_eq!(results.len(), 3);
@@ -243,7 +243,7 @@ mod tests {
     labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     labels.insert("label_name_3".to_owned(), "label_value_3".to_owned());
     let results = segment
-      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .search_metrics(&labels, &MetricsQueryCondition::Equals, 0, u64::MAX)
       .await
       .unwrap();
     assert_eq!(results.len(), 2);
@@ -254,7 +254,7 @@ mod tests {
     labels.insert("label_name_3".to_owned(), "label_value_3".to_owned());
     labels.insert("label_name_4".to_owned(), "label_value_4".to_owned());
     let results = segment
-      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .search_metrics(&labels, &MetricsQueryCondition::Equals, 0, u64::MAX)
       .await
       .unwrap();
     assert_eq!(results.len(), 1);
@@ -264,7 +264,7 @@ mod tests {
     labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     labels.insert("label_name_4".to_owned(), "label_value_4".to_owned());
     let results = segment
-      .search_metrics(&labels, MetricsQueryCondition::Equals, 0, u64::MAX)
+      .search_metrics(&labels, &MetricsQueryCondition::Equals, 0, u64::MAX)
       .await
       .unwrap();
     assert!(results.is_empty());
