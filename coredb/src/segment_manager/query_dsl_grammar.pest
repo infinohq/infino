@@ -61,15 +61,17 @@ term_level_query = { term_query | terms_query | terms_set_query | range_query | 
 
 // *** Term Queries
 
+// Infino Supported
 // Term Queries: https://opensearch.org/docs/latest/query-dsl/term/term/
 term_query  = { start_brace ~ quote ~ "term" ~ quote ~ colon ~ term_search ~ end_brace }
 term_search = { start_brace ~ fieldname ~ colon ~ start_brace ~ term ~ end_brace ~ end_brace }
 term        = { value ~ (comma ~ boost)? ~ (comma ~ case_insensitive)? }
 
 // Terms Queries: https://opensearch.org/docs/latest/query-dsl/term/terms/
-terms_query  = { start_brace ~ quote ~ "terms" ~ quote ~ colon ~ terms_search ~ end_brace }
-terms_search = { start_brace ~ (fieldname | boost) ~ colon ~ start_bracket ~ terms ~ end_bracket ~ end_brace }
-terms        = { index ~ comma ~ id ~ comma ~ path ~ (comma ~ routing)? }
+terms_query         = { start_brace ~ quote ~ "terms" ~ quote ~ colon ~ terms_search ~ end_brace }
+terms_search        = { start_brace ~ (fieldname | boost) ~ colon ~ start_bracket ~ (terms | terms_array_values) ~ end_bracket ~ end_brace }
+terms               = { index ~ comma ~ id ~ comma ~ path ~ (comma ~ routing)? }
+terms_array_values  = { (field_element ~ (comma ~ field_element)*)? }
 
 // Terms Set Queries: https://opensearch.org/docs/latest/query-dsl/term/terms-set/
 terms_set_query  = { start_brace ~ quote ~ "terms_set" ~ quote ~ colon ~ terms_set_search ~ end_brace }
@@ -117,6 +119,7 @@ exists_search = { start_brace ~ quote ~ "field" ~ quote ~ string ~ end_brace }
 
 // *** Full Text Queries
 
+// Infino Supported
 // Match Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match/
 match_query  = { start_brace ~ quote ~ "match" ~ quote ~ colon ~ match_search ~ end_brace }
 match_search = { start_brace ~ ((quote ~ "_all" ~ quote) | fieldname) ~ colon ~ (match_string | match_array) ~ end_brace }
@@ -278,6 +281,7 @@ span_clauses               = { start_bracket ~ (span_query ~ (comma ~ span_query
 
 // *** COMPOUND queries ****
 
+// Infino Supported
 // Boolean Queries: https://opensearch.org/docs/latest/query-dsl/compound/bool/
 bool_query  = { start_brace ~ quote ~ "bool" ~ quote ~ colon ~ bool_search ~ end_brace }
 bool_search = { start_brace ~ (bool_clause ~ (comma ~ bool_clause)*)? ~ end_brace }
