@@ -37,7 +37,7 @@ use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
@@ -62,6 +62,7 @@ struct AppState {
   coredb: CoreDB,
   settings: Settings,
   openai_helper: OpenAIHelper,
+  commit_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -100,16 +101,17 @@ struct SummarizeQueryResponse {
 /// can be asyncronously committed), and triggers retention policy every hour
 async fn commit_in_loop(
   state: Arc<AppState>,
-  commit_interval_in_seconds: u32,
+  notify: Arc<Notify>,
   shutdown_flag: Arc<Mutex<bool>>,
 ) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
+  let policy_interval_ms = 3600000; // 1hr in ms
   loop {
     let result = state.coredb.commit().await;
 
     let current_time = Utc::now().timestamp_millis() as u64;
     // TODO: make trigger policy interval configurable
-    if current_time - last_trigger_policy_time > 3600000 {
+    if current_time - last_trigger_policy_time > policy_interval_ms {
       info!("Triggering retention policy on index in coredb");
       let result = state.coredb.trigger_retention().await;
 
@@ -123,16 +125,26 @@ async fn commit_in_loop(
       last_trigger_policy_time = current_time;
     }
 
-    if *shutdown_flag.lock().await {
+    let shutdown = shutdown_flag.lock().await;
+    if *shutdown {
       info!("Received shutdown in commit thread. Exiting...");
       break;
     }
+    drop(shutdown); // Explicitly drop the lock before awaiting
 
     if let Err(e) = result {
       error!("Error committing to coredb: {}", e);
     }
 
-    sleep(Duration::from_secs(commit_interval_in_seconds as u64)).await;
+    // Park the task until another thread calls notify.notify_one().
+    tokio::select! {
+        _ = notify.notified() => {
+            info!("Commit thread waking up as it was notified");
+        }
+        _ = sleep(Duration::from_millis(policy_interval_ms)) => {
+            info!("Commit thread waking up as it timed out. Timeout is {} ms", policy_interval_ms);
+        }
+    }
   }
 }
 
@@ -141,6 +153,7 @@ async fn app(
   config_dir_path: &str,
   image_name: &str,
   image_tag: &str,
+  commit_notify: Arc<Notify>,
 ) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
@@ -179,17 +192,15 @@ async fn app(
     coredb,
     settings,
     openai_helper,
+    commit_notify: commit_notify.clone(),
   });
-
-  let server_settings = shared_state.settings.get_server_settings();
-  let commit_interval_in_seconds = server_settings.get_commit_interval_in_seconds();
 
   // Start a thread to periodically commit coredb.
   info!("Spawning new thread to periodically commit");
   let commit_thread_shutdown_flag = Arc::new(Mutex::new(false));
   let commit_thread_handle = tokio::spawn(commit_in_loop(
     shared_state.clone(),
-    commit_interval_in_seconds,
+    commit_notify.clone(),
     commit_thread_shutdown_flag.clone(),
   ));
 
@@ -230,9 +241,16 @@ async fn run_server() {
   let image_name = "rabbitmq";
   let image_tag = "3";
 
+  let commit_notify = Arc::new(Notify::new());
+
   // Create app.
-  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) =
-    app(config_dir_path, image_name, image_tag).await;
+  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) = app(
+    config_dir_path,
+    image_name,
+    image_tag,
+    commit_notify.clone(),
+  )
+  .await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -264,7 +282,10 @@ async fn run_server() {
   }
 
   info!("Shutting down commit thread and waiting for it to finish...");
+
+  // Signal the commit thread to shutdown, wake it up, and wait for it to finish.
   *commit_thread_shutdown_flag.lock().await = true;
+  commit_notify.notify_one();
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
@@ -407,6 +428,7 @@ async fn append_log(
     state.coredb.append_log_message(timestamp, &fields, &text);
   }
 
+  state.commit_notify.notify_one();
   Ok(())
 }
 
@@ -492,6 +514,7 @@ async fn append_metric(
     }
   }
 
+  state.commit_notify.notify_one();
   Ok(())
 }
 
@@ -814,7 +837,6 @@ mod tests {
       file.write_all(b"[server]\n").unwrap();
       file.write_all(b"port = 3000\n").unwrap();
       file.write_all(b"host = \"0.0.0.0\"\n").unwrap();
-      file.write_all(b"commit_interval_in_seconds = 1\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();
       file.write_all(use_rabbitmq_line.as_bytes()).unwrap();
@@ -1002,7 +1024,7 @@ mod tests {
     println!("Config dir path {}", config_dir_path);
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3", Arc::new(Notify::new())).await;
 
     // Check whether the / works.
     let response = app
@@ -1187,7 +1209,7 @@ mod tests {
     );
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3", Arc::new(Notify::new())).await;
 
     // Create an index.
     let index_name = "test_index";
