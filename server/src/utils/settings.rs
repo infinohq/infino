@@ -10,7 +10,6 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 #[derive(Debug, Deserialize)]
 /// Settings for infino server.
 pub struct ServerSettings {
-  commit_interval_in_seconds: u32,
   port: u16,
   host: String,
   timestamp_key: String,
@@ -19,11 +18,6 @@ pub struct ServerSettings {
 }
 
 impl ServerSettings {
-  /// Get the commit interval in seconds.
-  pub fn get_commit_interval_in_seconds(&self) -> u32 {
-    self.commit_interval_in_seconds
-  }
-
   /// Get the port.
   pub fn get_port(&self) -> u16 {
     self.port
@@ -137,7 +131,6 @@ mod tests {
 
     // Check server settings.
     let server_settings = settings.get_server_settings();
-    assert_eq!(server_settings.get_commit_interval_in_seconds(), 30);
     assert_eq!(server_settings.get_port(), 3000);
     assert_eq!(server_settings.get_host(), "0.0.0.0");
     assert_eq!(server_settings.get_timestamp_key(), "date");

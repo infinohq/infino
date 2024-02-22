@@ -7,14 +7,13 @@ index_dir_path = "data"
 
 # Index configuration.
 default_index_name = ".default"
-segment_size_threshold_megabytes = 256
+segment_size_threshold_megabytes = 16
 memory_budget_megabytes = 1024
 retention_days = 30
 
 [server]
 port = 3000
 host = "0.0.0.0"
-commit_interval_in_seconds = 30
 timestamp_key = "date"
 labels_key = "labels"
 use_rabbitmq = "no"             # specifies whether to write incoming messages to rabbitmq
