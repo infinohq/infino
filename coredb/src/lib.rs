@@ -194,9 +194,7 @@ impl CoreDB {
       .await
   }
 
-  /// Commit the index to disk. If the flag sync_after_commit is set to true,
-  /// the directory is sync'd immediately instead of relying on the OS to do so,
-  /// hence this flag is usually set to true only in tests.
+  /// Commit the index to disk.
   pub async fn commit(&self) -> Result<(), CoreDBError> {
     self
       .index_map
