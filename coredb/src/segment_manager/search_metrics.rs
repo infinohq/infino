@@ -90,6 +90,11 @@ impl Segment {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<MetricPoint>, SearchMetricsError> {
+    println!(
+      "Search Metrics is {:?} {:?} {} {}",
+      labels, condition, range_start_time, range_end_time
+    );
+
     // We don't yet support conditions other than label_name=label_value.
     if *condition != MetricsQueryCondition::Equals {
       return Ok(Vec::new());
@@ -110,6 +115,11 @@ impl Segment {
       range_end_time,
     );
 
+    println!(
+      "initial metric points is {:?} for {:?}\n",
+      retval, initial_label_name
+    );
+
     // Iterate through the remaining conditions and interest to find the matching metric points.
     for (current_label_name, current_label_value) in labels.iter().skip(1) {
       let current_metric_points = self.get_metric_points_for_label(
@@ -123,8 +133,12 @@ impl Segment {
       retval.retain(|metric_point| current_metric_points.contains(metric_point));
     }
 
+    println!("Returning Search Metric before sorting is {:?}\n", retval);
+
     // Sort the retrieved time series in chronological order.
     retval.sort();
+
+    println!("Returning Search Metric Results is {:?}\n", retval);
 
     Ok(retval)
   }

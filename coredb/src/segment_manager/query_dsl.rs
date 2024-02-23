@@ -146,7 +146,6 @@ impl Segment {
 
     let mut results = HashSet::new();
 
-    // To avoid recursion, we replicate query dispatching here.
     while let Some(node) = queue.pop_front() {
       let processing_result = match node.as_rule() {
         Rule::term_query => self.process_term_query(&node).await,

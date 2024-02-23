@@ -8,13 +8,12 @@ use crate::metric::metric_point::MetricPoint;
 use chrono::Utc;
 use std::collections::HashMap;
 
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub enum AggregationOperator<'a> {
   Sum,
   Min,
   Max,
   Avg,
-  Group,
   Stddev,
   Stdvar,
   Count,
@@ -22,6 +21,82 @@ pub enum AggregationOperator<'a> {
   Bottomk(usize), // TODO: Check k is of type usize
   Topk(usize),    // TODO: Check k is of type usize
   Quantile(f64),  // TODO: Check phi is of type f64
+  Undefined,
+}
+
+#[derive(Debug, Clone)]
+pub enum FunctionOperator {
+  // Trigonometric Functions
+  Acos,
+  Acosh,
+  Asin,
+  Asinh,
+  Atan,
+  Atanh,
+  Cos,
+  Cosh,
+  Sin,
+  Sinh,
+  Tan,
+  Tanh,
+
+  // General Functions
+  Abs,
+  Absent,
+  AbsentOverTime,
+  Ceil,
+  Clamp(f64, f64),
+  ClampMax(f64),
+  ClampMin(f64),
+  Changes,
+  DayOfMonth,
+  DayOfWeek,
+  DayOfYear,
+  DaysInMonth,
+  Deg,
+  Delta,
+  Deriv,
+  Exp,
+  Floor,
+  HoltWinters(f64, f64),
+  Hour,
+  Idelta,
+  Increase,
+  Irate,
+  LabelJoin(String, String, Vec<String>), // dst_label, separator, src_labels
+  LabelReplace(String, String, String, String), // dst_label, replacement, src_label, regex
+  Ln,
+  Log2,
+  Log10,
+  Minute,
+  Month,
+  Negative,
+  PredictLinear(f64),
+  Rad,
+  Rate,
+  Resets,
+  Round(f64),
+  Scalar,
+  Sgn,
+  Sort,
+  SortDesc,
+  Sqrt,
+  Timestamp,
+  ConvertToVector(f64),
+  Year,
+
+  // Aggregations Over Time
+  AvgOverTime,
+  MinOverTime,
+  MaxOverTime,
+  SumOverTime,
+  CountOverTime,
+  QuantileOverTime(f64),
+  StddevOverTime,
+  StdvarOverTime,
+  MadOverTime,
+  LastOverTime,
+  PresentOverTime,
 }
 
 #[derive(Debug, Clone)]
@@ -254,14 +329,12 @@ impl PromQLObject {
   // **** Aggregations: https://prometheus.io/docs/prometheus/latest/querying/operators/
   // apply only to vectors
 
-  #[allow(dead_code)]
   pub fn apply_aggregation_operator(&mut self, operator: AggregationOperator) {
     match operator {
       AggregationOperator::Sum => self.sum(),
-      AggregationOperator::Min => self.min(),
-      AggregationOperator::Max => self.max(),
+      AggregationOperator::Min => self.minimum(),
+      AggregationOperator::Max => self.maximum(),
       AggregationOperator::Avg => self.avg(),
-      AggregationOperator::Group => self.group(),
       AggregationOperator::Stddev => self.stddev(),
       AggregationOperator::Stdvar => self.stdvar(),
       AggregationOperator::Count => self.count(),
@@ -269,11 +342,12 @@ impl PromQLObject {
       AggregationOperator::Bottomk(k) => self.bottomk(k),
       AggregationOperator::Topk(k) => self.topk(k),
       AggregationOperator::Quantile(phi) => self.quantile(phi),
+      AggregationOperator::Undefined => {} // TODO: throw an error here
     }
   }
 
   #[allow(dead_code)]
-  fn sum(&mut self) {
+  pub fn sum(&mut self) {
     for ts in &mut self.vector {
       let sum = ts
         .get_metric_points()
@@ -287,7 +361,7 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  fn min(&mut self) {
+  pub fn minimum(&mut self) {
     for ts in &mut self.vector {
       let min = ts
         .get_metric_points()
@@ -303,7 +377,7 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  fn max(&mut self) {
+  pub fn maximum(&mut self) {
     for ts in &mut self.vector {
       let max = ts
         .get_metric_points()
@@ -319,7 +393,7 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  fn avg(&mut self) {
+  pub fn avg(&mut self) {
     for ts in &mut self.vector {
       let sum: f64 = ts.get_metric_points().iter().map(|mp| mp.get_value()).sum();
       let avg = sum / ts.get_metric_points().len() as f64;
@@ -331,7 +405,7 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  fn group(&mut self) {
+  pub fn group(&mut self) {
     for ts in &mut self.vector {
       ts.set_metric_points(vec![MetricPoint::new(
         Utc::now().timestamp().try_into().unwrap(),
@@ -341,7 +415,7 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  fn stddev(&mut self) {
+  pub fn stddev(&mut self) {
     for ts in &mut self.vector {
       let mean: f64 = ts
         .get_metric_points()
@@ -363,7 +437,7 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  fn stdvar(&mut self) {
+  pub fn stdvar(&mut self) {
     for ts in &mut self.vector {
       let mean: f64 = ts
         .get_metric_points()
@@ -384,7 +458,7 @@ impl PromQLObject {
     }
   }
 
-  fn count(&mut self) {
+  pub fn count(&mut self) {
     for ts in &mut self.vector {
       let len = ts.get_metric_points().len();
       ts.set_metric_points(vec![MetricPoint::new(
@@ -395,7 +469,6 @@ impl PromQLObject {
     self.update_object_type(); // Set to instant vector.
   }
 
-  #[allow(dead_code)]
   pub fn count_values(&mut self, label_key: &str) {
     // Initialize a HashMap to store label values and their counts
     let mut value_counts: HashMap<String, usize> = HashMap::new();
@@ -431,8 +504,7 @@ impl PromQLObject {
     self.update_object_type(); // Set to instant vector.
   }
 
-  #[allow(dead_code)]
-  fn bottomk(&mut self, k: usize) {
+  pub fn bottomk(&mut self, k: usize) {
     for ts in &mut self.vector {
       let points = ts.get_metric_points();
       let mut points_clone = points.clone(); // Clone the vector to get Vec<MetricPoint>
@@ -447,8 +519,7 @@ impl PromQLObject {
     }
   }
 
-  #[allow(dead_code)]
-  fn topk(&mut self, k: usize) {
+  pub fn topk(&mut self, k: usize) {
     for ts in &mut self.vector {
       let points = ts.get_metric_points();
       let mut points_clone = points.clone();
@@ -465,7 +536,7 @@ impl PromQLObject {
     }
   }
 
-  fn quantile(&mut self, phi: f64) {
+  pub fn quantile(&mut self, phi: f64) {
     for ts in &mut self.vector {
       let points = ts.get_metric_points();
       if points.is_empty() {
@@ -482,6 +553,85 @@ impl PromQLObject {
 
   // **** Trigonometric Functions: https://prometheus.io/docs/prometheus/latest/querying/functions/
   // apply only to vectors
+
+  pub fn apply_function_operator(&mut self, operator: FunctionOperator) {
+    match operator {
+      FunctionOperator::Acos => self.acos(),
+      FunctionOperator::Acosh => self.acosh(),
+      FunctionOperator::Asin => self.asin(),
+      FunctionOperator::Asinh => self.asinh(),
+      FunctionOperator::Atan => self.atan(),
+      FunctionOperator::Atanh => self.atanh(),
+      FunctionOperator::Cos => self.cos(),
+      FunctionOperator::Cosh => self.cosh(),
+      FunctionOperator::Sin => self.sin(),
+      FunctionOperator::Sinh => self.sinh(),
+      FunctionOperator::Tan => self.tan(),
+      FunctionOperator::Tanh => self.tanh(),
+      FunctionOperator::Abs => self.abs(),
+      FunctionOperator::Absent => self.absent(),
+      FunctionOperator::AbsentOverTime => self.absent_over_time(),
+      FunctionOperator::Ceil => self.ceil(),
+      FunctionOperator::Clamp(min, max) => self.clamp(min, max),
+      FunctionOperator::ClampMax(max) => self.clamp_max(max),
+      FunctionOperator::ClampMin(min) => self.clamp_min(min),
+      FunctionOperator::Changes => self.changes(),
+      FunctionOperator::DayOfMonth => self.day_of_month(),
+      FunctionOperator::DayOfWeek => self.day_of_week(),
+      FunctionOperator::DayOfYear => self.day_of_year(),
+      FunctionOperator::DaysInMonth => self.days_in_month(),
+      FunctionOperator::Deg => self.deg(),
+      FunctionOperator::Delta => self.delta(),
+      FunctionOperator::Deriv => self.deriv(),
+      FunctionOperator::Exp => self.exp(),
+      FunctionOperator::Floor => self.floor(),
+      FunctionOperator::HoltWinters(alpha, beta) => self.holt_winters(alpha, beta),
+      FunctionOperator::Hour => self.hour(),
+      FunctionOperator::Idelta => self.idelta(),
+      FunctionOperator::Increase => self.increase(),
+      FunctionOperator::Irate => self.irate(),
+      FunctionOperator::LabelJoin(dst_label, separator, src_labels) => {
+        self.label_join(&dst_label, &separator, src_labels)
+      }
+      FunctionOperator::LabelReplace(dst_label, replacement, src_label, regex) => {
+        self.label_replace(&dst_label, &replacement, &src_label, &regex)
+      }
+      FunctionOperator::Ln => self.ln(),
+      FunctionOperator::Log2 => self.log2(),
+      FunctionOperator::Log10 => self.log10(),
+      FunctionOperator::Minute => self.minute(),
+      FunctionOperator::Month => self.month(),
+      FunctionOperator::Negative => self.negative(),
+      FunctionOperator::PredictLinear(t) => self.predict_linear(t),
+      FunctionOperator::Rad => self.rad(),
+      FunctionOperator::Rate => self.rate(),
+      FunctionOperator::Resets => self.resets(),
+      FunctionOperator::Round(to_nearest) => self.round(to_nearest),
+      FunctionOperator::Scalar => {
+        let _ = self.scalar();
+      } // Assuming scalar() returns a value that might not be used directly
+      FunctionOperator::Sgn => self.sgn(),
+      FunctionOperator::Sort => self.sort(),
+      FunctionOperator::SortDesc => self.sort_desc(),
+      FunctionOperator::Sqrt => self.sqrt(),
+      FunctionOperator::Timestamp => self.timestamp(),
+      FunctionOperator::ConvertToVector(s) => {
+        let _ = self.convert_to_vector(s);
+      } // Assuming convert_to_vector() returns a PromQLObject
+      FunctionOperator::Year => self.year(),
+      FunctionOperator::AvgOverTime => self.avg_over_time(),
+      FunctionOperator::MinOverTime => self.min_over_time(),
+      FunctionOperator::MaxOverTime => self.max_over_time(),
+      FunctionOperator::SumOverTime => self.sum_over_time(),
+      FunctionOperator::CountOverTime => self.count_over_time(),
+      FunctionOperator::QuantileOverTime(quantile) => self.quantile_over_time(quantile),
+      FunctionOperator::StddevOverTime => self.stddev_over_time(),
+      FunctionOperator::StdvarOverTime => self.stdvar_over_time(),
+      FunctionOperator::MadOverTime => self.mad_over_time(),
+      FunctionOperator::LastOverTime => self.last_over_time(),
+      FunctionOperator::PresentOverTime => self.present_over_time(),
+    }
+  }
 
   // Calculates the arccosine of all elements in v (special cases).
   #[allow(dead_code)]
@@ -784,9 +934,9 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  pub fn label_join(&mut self, dst_label: &str, separator: &str, src_labels: &[&str]) {
+  pub fn label_join(&mut self, dst_label: &str, separator: &str, src_labels: Vec<String>) {
     for ts in &mut self.vector {
-      ts.label_join(dst_label, separator, src_labels);
+      ts.label_join(dst_label, separator, &src_labels);
     }
     self.update_object_type();
   }
@@ -817,6 +967,13 @@ impl PromQLObject {
   pub fn log2(&mut self) {
     for ts in &mut self.vector {
       ts.log2();
+    }
+  }
+
+  #[allow(dead_code)]
+  pub fn log10(&mut self) {
+    for ts in &mut self.vector {
+      ts.log10();
     }
   }
 
@@ -925,7 +1082,7 @@ impl PromQLObject {
   }
 
   #[allow(dead_code)]
-  pub fn vector(&self, s: f64) -> PromQLObject {
+  pub fn convert_to_vector(&self, s: f64) -> PromQLObject {
     let current_time = Utc::now().timestamp();
     PromQLObject::new_as_vector(vec![PromQLTimeSeries::new_with_params(
       HashMap::new(),

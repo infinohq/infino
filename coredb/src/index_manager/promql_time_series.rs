@@ -336,11 +336,11 @@ impl PromQLTimeSeries {
     self.metric_points = vec![MetricPoint::new(last_point.get_time(), rate)];
   }
 
-  pub fn label_join(&mut self, dst_label: &str, separator: &str, src_labels: &[&str]) {
+  pub fn label_join(&mut self, dst_label: &str, separator: &str, src_labels: &Vec<String>) {
     for _mp in &mut self.metric_points {
       let joined_value = src_labels
         .iter()
-        .map(|label| self.labels.get(*label).unwrap_or(&"".to_string()).clone()) // Clone the string
+        .map(|label| self.labels.get(label).unwrap_or(&"".to_string()).clone())
         .collect::<Vec<_>>()
         .join(separator);
       self.labels.insert(dst_label.to_string(), joined_value);
@@ -923,7 +923,11 @@ mod tests {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
     let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
 
-    ts.label_join("new_label", "-", &["job", "region"]);
+    ts.label_join(
+      "new_label",
+      "-",
+      &["job", "region"].iter().map(|&s| s.to_owned()).collect(),
+    );
     assert_eq!(ts.labels.get("new_label").unwrap(), &"prometheus-us-west");
   }
 

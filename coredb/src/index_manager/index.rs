@@ -810,9 +810,20 @@ mod tests {
       "thisisunique",
     );
 
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "message", "operator" : "AND" } } }
+          ]
+        }
+      }
+    }
+    "#;
+
     // For the query "message", handle errors from search_logs
     let ast =
-      QueryDslParser::parse(query_dsl::Rule::start, "message").expect("Failed to parse query");
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
       .search_logs(&ast, 0, u64::MAX)
       .await
@@ -828,9 +839,20 @@ mod tests {
     received_log_messages.sort();
     assert_eq!(expected_log_messages, received_log_messages);
 
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "thisisunique", "operator" : "AND" } } }
+          ]
+        }
+      }
+    }
+    "#;
+
     // For the query "thisisunique", we should expect only 1 result.
     let ast =
-      QueryDslParser::parse(query_dsl::Rule::start, "thisisunique").expect("Failed to parse query");
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
       .search_logs(&ast, 0, u64::MAX)
       .await
@@ -854,7 +876,7 @@ mod tests {
     }
 
     // The number of metric points in the index should be equal to the number of metric points we indexed.
-    let ast = PromQLParser::parse(promql::Rule::start, "{__name__=some_name}")
+    let ast = PromQLParser::parse(promql::Rule::start, "metric{__name__=some_name}")
       .expect("Failed to parse query");
     let results = index
       .search_metrics(&ast, 0, u64::MAX)
@@ -1163,9 +1185,14 @@ mod tests {
       }
     }
 
+    let query_message = &format!(
+      r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+      message_prefix
+    );
+
     // Ensure the prefix is in every log message.
     let ast =
-      QueryDslParser::parse(query_dsl::Rule::start, message_prefix).expect("Failed to parse query");
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
       .search_logs(&ast, start_time, end_time)
       .await
@@ -1174,7 +1201,10 @@ mod tests {
 
     // Ensure the suffix is in exactly one log message.
     for i in 1..=num_log_messages {
-      let suffix = &format!("{}", i);
+      let suffix = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+        i
+      );
       let ast =
         QueryDslParser::parse(query_dsl::Rule::start, suffix).expect("Failed to parse query");
       let results = index
@@ -1186,9 +1216,12 @@ mod tests {
 
     // Ensure the prefix+suffix is in exactly one log message.
     for i in 1..=num_log_messages {
-      let message = &format!("{} {}", message_prefix, i);
-      let ast =
-        QueryDslParser::parse(query_dsl::Rule::start, message).expect("Failed to parse query");
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{} {}", "operator" : "AND" }} }} }} }}"#,
+        message_prefix, i
+      );
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
+        .expect("Failed to parse query");
       let results = index
         .search_logs(&ast, start_time, end_time)
         .await
@@ -1223,11 +1256,14 @@ mod tests {
     }
 
     for i in 1..num_message_suffixes {
-      let message = &format!("{}{}", message_prefix, i);
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{} {}", "operator" : "AND" }} }} }} }}"#,
+        message_prefix, i
+      );
       let expected_count = 2u32.pow(i);
 
-      let ast =
-        QueryDslParser::parse(query_dsl::Rule::start, message).expect("Failed to parse query");
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
+        .expect("Failed to parse query");
       let results = index
         .search_logs(&ast, 0, Utc::now().timestamp_millis() as u64)
         .await
@@ -1291,8 +1327,11 @@ mod tests {
     }
 
     // The number of metric points in the index should be equal to the number of metric points we indexed.
-    let ast = PromQLParser::parse(promql::Rule::start, "{label_name_1=label_value_1}[1y]")
-      .expect("Failed to parse query");
+    let ast = PromQLParser::parse(
+      promql::Rule::start,
+      "metric{label_name_1=label_value_1}[1y]",
+    )
+    .expect("Failed to parse query");
     let results = index
       .search_metrics(&ast, 0, u64::MAX)
       .await
@@ -1486,15 +1525,26 @@ mod tests {
       .expect("Could not refresh index");
     let expected_len = num_threads * num_appends_per_thread;
 
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "message", "operator" : "AND" } } }
+          ]
+        }
+      }
+    }
+    "#;
+
     let ast =
-      QueryDslParser::parse(query_dsl::Rule::start, "message").expect("Failed to parse query");
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
       .search_logs(&ast, 0, expected_len as u64)
       .await
       .expect("Error in search_logs");
     assert_eq!(expected_len, results.len());
 
-    let ast = PromQLParser::parse(promql::Rule::start, "{label_name_1=label_value_1}")
+    let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
       .expect("Failed to parse query");
     let results = index
       .search_metrics(&ast, 0, u64::MAX)
@@ -1525,9 +1575,20 @@ mod tests {
       .await
       .unwrap();
 
+    let query_message = r#"{
+        "query": {
+          "bool": {
+            "must": [
+              { "match": { "_all" : { "query": "some_message_1", "operator" : "AND" } } }
+            ]
+          }
+        }
+      }
+      "#;
+
     // Call search_logs and handle errors
-    let ast = QueryDslParser::parse(query_dsl::Rule::start, "some_message_1")
-      .expect("Failed to parse query");
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let search_result = index
       .search_logs(
         &ast,
@@ -1603,8 +1664,13 @@ mod tests {
       let message_start = &format!("message_{}", start);
       let message_end = &format!("message_{}", end);
 
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+        message_start
+      );
+
       // Check that the queries for unique messages across the entire time range returns exactly one result.
-      let ast = QueryDslParser::parse(query_dsl::Rule::start, message_start)
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
         .search_logs(&ast, 0, u64::MAX)
@@ -1612,8 +1678,13 @@ mod tests {
         .expect("Error in search_logs");
       assert_eq!(results.len(), 1);
 
-      let ast =
-        QueryDslParser::parse(query_dsl::Rule::start, message_end).expect("Failed to parse query");
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+        message_end
+      );
+
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
+        .expect("Failed to parse query");
       let results = index
         .search_logs(&ast, 0, u64::MAX)
         .await
