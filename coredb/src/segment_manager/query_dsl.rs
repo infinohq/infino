@@ -15,6 +15,7 @@ use crate::utils::error::AstError;
 use crate::utils::error::SearchLogsError;
 use crate::utils::tokenize::tokenize;
 
+use futures::StreamExt;
 use log::debug;
 use pest::iterators::{Pair, Pairs};
 use std::collections::HashSet;
@@ -79,6 +80,7 @@ impl Segment {
       Rule::term_query => self.process_term_query(node).await,
       Rule::match_query => self.process_match_query(node).await,
       Rule::bool_query => self.process_bool_query(node).await,
+      Rule::terms_query => self.process_terms_query(node).await,
       _ => Err(AstError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
@@ -242,6 +244,55 @@ impl Segment {
     }
   }
 
+  /// Terms Query Processor: https://opensearch.org/docs/latest/query-dsl/term/terms/
+  async fn process_terms_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+  ) -> Result<HashSet<u32>, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut fieldname: Option<&str> = None;
+    let mut query_values: Vec<&str> = Vec::new();
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::fieldname => {
+          if let Some(field) = node.into_inner().next() {
+            fieldname = Some(field.as_str());
+          }
+        }
+        Rule::field_element => {
+          query_values.push(node.into_inner().next().map(|v| v.as_str()).unwrap_or(""));
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    // Creating the vector of all search strings in the format "field1~field1element", "field1~field2element"
+    // etc from the field_element array in the query.
+    let query_terms: Vec<String> = futures::stream::iter(query_values)
+      .then(|term| async move { self.analyze_query_text(term, fieldname, false).await })
+      .collect::<Vec<_>>()
+      .await
+      .into_iter()
+      .flatten()
+      .collect();
+
+    // Using the "OR" operator to get all the logs with any of the field elements from the logs.
+    if !query_terms.is_empty() {
+      self.process_search(query_terms, "OR").await
+    } else {
+      Err(AstError::UnsupportedQuery(
+        "No query terms found".to_string(),
+      ))
+    }
+  }
+
   /// Match Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match/
   async fn process_match_query(
     &self,
@@ -385,8 +436,10 @@ mod tests {
 
     let log_messages = [
       ("log 1", "this is a test log message"),
-      ("log 2", "this is another log message"),
+      ("log 2", "this is another log message field1value"),
       ("log 3", "test log for different term"),
+      ("log 4", "field1~field1value testing field name and value"),
+      ("log 5", "field1~field2value testing field name two value"),
     ];
 
     for (key, message) in log_messages.iter() {
@@ -688,6 +741,72 @@ mod tests {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert!(results.iter().all(|log| log.get_text().contains("log")));
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_term_query() {
+    let segment = create_mock_segment();
+
+    let query_dsl_query = r#"{
+      "query": {
+        "term": {
+          "field1": {
+            "value": "field1value"
+          }
+        }
+      }
+    }
+    "#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert!(results
+            .iter()
+            .all(|log| log.get_text().contains("field1~field1value")));
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_terms_array_query() {
+    let segment = create_mock_segment();
+
+    let query_dsl_query = r#"{
+      "query": {
+        "terms": {
+          "field1": [
+            "field1value",
+            "field2value"
+          ]
+        }
+      }
+    }
+    "#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert!(results
+            .iter()
+            .all(|log| log.get_text().contains("field1~field1value")
+              || log.get_text().contains("field1~field2value")));
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);
