@@ -700,8 +700,17 @@ mod tests {
   #[tokio::test]
   async fn test_empty_index() {
     is_sync_send::<Index>();
-    let (index, index_dir_path) = create_index("test_empty_index", &StorageType::Local).await;
 
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_empty_index"
+    );
+
+    let index = Index::new(&StorageType::Local, &index_dir_path)
+      .await
+      .unwrap();
     let segment_ref = index.get_current_segment_ref();
     let segment = segment_ref.value();
     assert_eq!(segment.get_log_message_count(), 0);
@@ -709,7 +718,7 @@ mod tests {
     assert_eq!(index.index_dir_path, index_dir_path);
 
     // Check that the index directory exists, and has expected structure.
-    let all_segments_file_path = get_joined_path(&index.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file_path = get_joined_path(&index_dir_path, ALL_SEGMENTS_FILE_NAME);
     assert!(
       index
         .storage
@@ -718,7 +727,7 @@ mod tests {
     );
 
     let segment_path = get_joined_path(
-      &index.index_dir_path,
+      &index_dir_path,
       &index.metadata.get_current_segment_number().to_string(),
     );
     let segment_metadata_path = get_joined_path(&segment_path, &Segment::get_metadata_file_name());
@@ -870,23 +879,20 @@ mod tests {
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
     for i in 1..num_metric_points {
-      index.append_metric_point("some_name", &HashMap::new(), i, i as f64);
+      index.append_metric_point("metric", &HashMap::new(), i, i as f64);
       let dp = MetricPoint::new(i, i as f64);
       expected_metric_points.push(dp);
     }
 
     // The number of metric points in the index should be equal to the number of metric points we indexed.
-    let ast = PromQLParser::parse(promql::Rule::start, "metric{__name__=some_name}")
+    let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
       .expect("Failed to parse query");
-    let results = index
+    let mut results = index
       .search_metrics(&ast, 0, u64::MAX)
       .await
-      .expect("Error in searching metrics");
+      .expect("Error in get_metrics");
 
-    assert_eq!(
-      expected_metric_points,
-      *results.first().unwrap().clone().get_metric_points()
-    );
+    assert_eq!(&mut expected_metric_points, results[0].get_metric_points())
   }
 
   #[test_case(true, false; "when only logs are appended")]
@@ -1257,7 +1263,7 @@ mod tests {
 
     for i in 1..num_message_suffixes {
       let query_message = &format!(
-        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{} {}", "operator" : "AND" }} }} }} }}"#,
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}{}", "operator" : "AND" }} }} }} }}"#,
         message_prefix, i
       );
       let expected_count = 2u32.pow(i);
@@ -1293,7 +1299,7 @@ mod tests {
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     for _ in 1..=num_metric_points {
-      index.append_metric_point("some_name", &label_map, start_time, 100.0);
+      index.append_metric_point("metric", &label_map, start_time, 100.0);
       num_metric_points_from_last_commit += 1;
 
       // Commit after we have indexed more than commit_after messages.
@@ -1327,17 +1333,17 @@ mod tests {
     }
 
     // The number of metric points in the index should be equal to the number of metric points we indexed.
-    let ast = PromQLParser::parse(
-      promql::Rule::start,
-      "metric{label_name_1=label_value_1}[1y]",
-    )
-    .expect("Failed to parse query");
-    let results = index
+    let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
+      .expect("Failed to parse query");
+    let mut results = index
       .search_metrics(&ast, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 
-    assert_eq!(num_metric_points, results.len() as u32)
+    assert_eq!(
+      num_metric_points,
+      results[0].get_metric_points().len() as u32
+    )
   }
 
   #[tokio::test]
@@ -1503,7 +1509,7 @@ mod tests {
         for j in 0..num_appends_per_thread {
           let time = start + j;
           arc_index_clone.append_log_message(time as u64, &HashMap::new(), "message");
-          arc_index_clone.append_metric_point("some_name", &label_map, time as u64, 1.0);
+          arc_index_clone.append_metric_point("metric", &label_map, time as u64, 1.0);
         }
       });
       append_handles.push(handle);
@@ -1546,12 +1552,12 @@ mod tests {
 
     let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
       .expect("Failed to parse query");
-    let results = index
+    let mut results = index
       .search_metrics(&ast, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 
-    assert_eq!(expected_len, results.len());
+    assert_eq!(expected_len, results[0].get_metric_points().len());
   }
 
   #[tokio::test]

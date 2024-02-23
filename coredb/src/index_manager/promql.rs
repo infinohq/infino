@@ -481,8 +481,6 @@ impl Index {
       }
     }
 
-    println!("Factor Results is {:?}\n", results);
-
     Ok(results)
   }
 
@@ -518,8 +516,6 @@ impl Index {
       }
     }
 
-    println!("Exponent Results is {:?}\n", results);
-
     Ok(results)
   }
 
@@ -553,8 +549,6 @@ impl Index {
         }
       }
     }
-
-    println!("Unary Results is {:?}\n", results);
 
     Ok(results)
   }
@@ -614,8 +608,6 @@ impl Index {
       }
     }
 
-    println!("Leaf Results is {:?}\n", results);
-
     Ok(results)
   }
 
@@ -627,20 +619,14 @@ impl Index {
   ) -> Result<PromQLObject, AstError> {
     let mut operator = AggregationOperator::Undefined;
 
-    println!("In aggregation");
-
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
     let mut results = PromQLObject::new();
 
     while let Some(node) = stack.pop_front() {
-      println!("In aggregation in the loop on the stack");
-
       match node.as_rule() {
         Rule::vector => {
-          println!("In aggregation getting vector");
-
           let mut promql_object = self
             .process_vector(&node, range_start_time, range_end_time)
             .await?;
@@ -686,8 +672,6 @@ impl Index {
     }
 
     results.apply_aggregation_operator(operator);
-
-    println!("Aggregation Results is {:?}\n", results);
 
     Ok(results)
   }
@@ -905,8 +889,6 @@ impl Index {
       .process_metric_search(&mut selectors, &duration)
       .await?;
 
-    println!("Vector Results is {:?}\n", results);
-
     Ok(results)
   }
 
@@ -960,7 +942,7 @@ impl Index {
     selectors: &mut Vec<PromQLSelector>,
     duration: &PromQLDuration,
   ) -> Result<PromQLObject, AstError> {
-    println!(
+    debug!(
       "Metric Search Results is going to be {:?} {:?}\n",
       selectors, duration
     );
@@ -991,10 +973,8 @@ impl Index {
       results.add_to_vector(PromQLTimeSeries::new_with_params(labels, metrics_results));
     }
 
-    println!("Metric Search Results is {:?}\n", results);
-
     if results.get_vector().is_empty() {
-      log::debug!("No results found. Returning empty handed.");
+      debug!("No results found. Returning empty handed.");
       return Ok(PromQLObject::new());
     }
 
@@ -1022,7 +1002,6 @@ impl Index {
     for segment_number in segment_numbers {
       let mut segment_results =
         if let Some(segment) = self.get_memory_segments_map().get(&segment_number) {
-          print!("Segment labels: {:?}\n", segment.get_label_names());
           segment
             .search_metrics(labels, condition, range_start_time, range_end_time)
             .await
@@ -1054,7 +1033,7 @@ mod tests {
   use tempdir::TempDir;
 
   // Helper function to create index
-  async fn create_index<'a>(name: &'a str, num_metric_points: u32) -> (Index, String) {
+  async fn create_index(name: &str, num_metric_points: u32) -> (Index, String) {
     let storage_type = StorageType::Local;
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
@@ -1116,5 +1095,38 @@ mod tests {
     );
   }
 
+  #[tokio::test]
+  async fn test_basic_label_only() {
+    let query = "{label_name_1=\"label_value_1\"}";
+    let num_metric_points = 10;
+    let (index, _index_dir_path) = create_index("test_index", num_metric_points).await;
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+      results[0].get_metric_points().len(),
+      num_metric_points as usize
+    );
+  }
+
+  #[tokio::test]
+  async fn test_avg_aggregation() {
+    let query = "avg(metric{label_name_1=\"label_value_1\"})";
+    let num_metric_points = 10; // Assuming each has a value of 100.0
+    let (index, _index_dir_path) = create_index("test_index_avg", num_metric_points).await;
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points().len(), 1); // Only one aggregated result
+    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0); // Average value
+  }
+
+  #[tokio::test]
+  async fn test_max_aggregation() {
+    let query = "max(metric{label_name_1=\"label_value_1\"})";
+    let num_metric_points = 10; // Assuming varied values
+    let (index, _index_dir_path) = create_index("test_index_max", num_metric_points).await;
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0);
+  }
   // Add more test cases for each function and aggregation mentioned in the code...
 }

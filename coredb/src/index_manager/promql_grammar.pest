@@ -152,7 +152,7 @@ year               = { "year" }
 
 // **** Vector creation ****
 scalar              = { float }
-vector              = { !(aggregation | function) ~ metric_name ~ (start_brace ~ label ~ (comma ~ label)* ~ end_brace)? ~ range? ~ offset_and_modifier? }
+vector              = { !(aggregation | function) ~ metric_name? ~ (start_brace ~ label ~ (comma ~ label)* ~ end_brace)? ~ range? ~ offset_and_modifier? }
 label               = { label_name ~ condition ~ quote ~ label_value ~ quote }
 condition           = { equal_match | not_equal_match | regex_match | not_regex_match }
 offset              = { "offset" ~ duration }

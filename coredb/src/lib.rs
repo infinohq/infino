@@ -494,9 +494,9 @@ mod tests {
       1.0
     );
     assert_eq!(
-      results[1]
+      results[0]
         .get_metric_points()
-        .first()
+        .get(1)
         .expect("Could not unwrap result")
         .get_value(),
       2.0
