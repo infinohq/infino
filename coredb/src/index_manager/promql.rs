@@ -186,9 +186,11 @@ impl Default for PromQLDuration {
 
 impl Index {
   pub fn parse_query(
-    json_query: &str,
+    url_query: &str,
   ) -> Result<pest::iterators::Pairs<'_, Rule>, SearchMetricsError> {
-    PromQLParser::parse(Rule::start, json_query)
+    debug!("PROMQL: Parsing URL query {:?},\n", url_query);
+
+    PromQLParser::parse(Rule::start, url_query)
       .map_err(|e| SearchMetricsError::JsonParseError(e.to_string()))
   }
 
@@ -199,6 +201,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<PromQLTimeSeries>, AstError> {
+    debug!("Traversing ast {:?},\n", nodes);
+
     let mut stack = VecDeque::new();
 
     // Push all nodes to the stack to start processing
@@ -238,11 +242,11 @@ impl Index {
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     match node.as_rule() {
-      Rule::expression => {
+      Rule::expression => Ok(
         self
           .process_expression(node, range_start_time, range_end_time)
-          .await
-      }
+          .await?,
+      ),
       _ => Err(AstError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
@@ -256,6 +260,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Expression Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut and_results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -294,6 +300,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("AND Expression Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut equality_results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -329,6 +337,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Equality Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut comparison_results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -367,6 +377,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Comparison Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut term_results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -411,6 +423,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Term Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut factor_results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -449,6 +463,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Factor Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut exponent_results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -490,6 +506,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Exponent Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut unary_results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -525,6 +543,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Unary Node {:?},\n", root_node);
+
     let mut results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
@@ -559,6 +579,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Leaf Node {:?},\n", root_node);
+
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
@@ -617,6 +639,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Aggregation Node {:?},\n", root_node);
+
     let mut operator = AggregationOperator::Undefined;
 
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -682,6 +706,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Functions Node {:?},\n", root_node);
+
     let mut operator = FunctionOperator::Absent; // Default or placeholder
 
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -850,6 +876,8 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
+    debug!("Vector Node {:?},\n", root_node);
+
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
 
@@ -868,10 +896,10 @@ impl Index {
             MetricsQueryCondition::Equals,
           ));
         }
-        Rule::label => match self.process_label(node) {
-          Ok(selector) => selectors.push(selector),
-          Err(e) => return Err(e),
-        },
+        Rule::label => {
+          let selector = self.process_label(node)?;
+          selectors.push(selector);
+        }
         Rule::duration => {
           if let Some(duration_text) = node.into_inner().next() {
             duration.set_duration(duration_text.as_str())?;
@@ -885,6 +913,11 @@ impl Index {
       }
     }
 
+    debug!(
+      "Calling Metric Search with {:?} {:?},\n",
+      selectors, duration
+    );
+
     let results = self
       .process_metric_search(&mut selectors, &duration)
       .await?;
@@ -893,31 +926,42 @@ impl Index {
   }
 
   fn process_label(&self, node: Pair<Rule>) -> Result<PromQLSelector, AstError> {
-    let inner_nodes: Vec<Pair<Rule>> = node.into_inner().collect();
+    debug!("Label Node {:?},\n", node);
+
     let mut label_name: Option<&str> = None;
     let mut label_value: Option<&str> = None;
     let mut condition = MetricsQueryCondition::Undefined;
 
-    for inner_node in inner_nodes {
+    for inner_node in node.into_inner() {
       match inner_node.as_rule() {
         Rule::label_name => label_name = Some(inner_node.as_str()),
         Rule::label_value => label_value = Some(inner_node.as_str()),
         Rule::condition => {
-          condition = match inner_node.as_str() {
-            "=" => MetricsQueryCondition::Equals,
-            "!=" => MetricsQueryCondition::NotEquals,
-            "=~" => MetricsQueryCondition::EqualsRegex,
-            "!~" => MetricsQueryCondition::NotEqualsRegex,
-            _ => {
-              return Err(AstError::UnsupportedQuery(
-                "Unsupported condition".to_string(),
-              ))
+          // Directly navigate into the inner of the condition node
+          if let Some(condition_node) = inner_node.into_inner().next() {
+            condition = match condition_node.as_rule() {
+              Rule::equal_match => MetricsQueryCondition::Equals,
+              Rule::not_equal_match => MetricsQueryCondition::NotEquals,
+              Rule::regex_match => MetricsQueryCondition::EqualsRegex,
+              Rule::not_regex_match => MetricsQueryCondition::NotEqualsRegex,
+              // Handle other conditions as needed
+              _ => {
+                debug!("Unsupported condition encountered");
+                return Err(AstError::UnsupportedQuery(
+                  "Unsupported condition".to_string(),
+                ));
+              }
             }
           }
         }
         _ => {}
       }
     }
+
+    debug!(
+      "Label: Setting label_name to {:?} and label_value to {:?},\n",
+      label_name, label_value
+    );
 
     if let (Some(ln), Some(lv)) = (label_name, label_value) {
       Ok(PromQLSelector::new_with_params(
@@ -943,7 +987,7 @@ impl Index {
     duration: &PromQLDuration,
   ) -> Result<PromQLObject, AstError> {
     debug!(
-      "Metric Search Results is going to be {:?} {:?}\n",
+      "PromQL: Searching metrics with selectors {:?} and duration {:?}\n",
       selectors, duration
     );
 
@@ -974,7 +1018,7 @@ impl Index {
     }
 
     if results.get_vector().is_empty() {
-      debug!("No results found. Returning empty handed.");
+      debug!("No results found from searching segments. Returning empty handed.");
       return Ok(PromQLObject::new());
     }
 
@@ -989,7 +1033,7 @@ impl Index {
     range_end_time: u64,
   ) -> Result<Vec<MetricPoint>, AstError> {
     debug!(
-      "Searching segments with args {:?} {:?} {} {}",
+      "PromQL: Searching segments with args {:?} {:?} {} {}",
       labels, condition, range_start_time, range_end_time
     );
 
@@ -1056,6 +1100,8 @@ mod tests {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<PromQLTimeSeries>, AstError> {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let parsed_query = PromQLParser::parse(Rule::start, query)
       .expect("Failed to parse query")
       .next()
@@ -1087,7 +1133,28 @@ mod tests {
     let query = "metric{label_name_1=\"label_value_1\"}";
     let num_metric_points = 10;
     let (index, _index_dir_path) = create_index("test_index", num_metric_points).await;
-    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    let result = execute_query(&index, query, 0, u64::MAX).await;
+
+    match result {
+      Ok(mut results) => {
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+          results[0].get_metric_points().len(),
+          num_metric_points as usize
+        );
+      }
+      Err(e) => panic!("Test failed with error: {:?}", e),
+    }
+  }
+
+  #[tokio::test]
+  async fn test_basic_with_space() {
+    let query = "metric{label_name_1 =\"label_value_1\"}";
+    let num_metric_points = 10;
+    let (index, _index_dir_path) = create_index("test_index", num_metric_points).await;
+    let mut results = execute_query(&index, query, 0, u64::MAX)
+      .await
+      .expect("Did not execute query correctly");
     assert_eq!(results.len(), 1);
     assert_eq!(
       results[0].get_metric_points().len(),

@@ -444,6 +444,7 @@ mod tests {
   use std::sync::{Arc, RwLock};
 
   use chrono::Utc;
+  use log::error;
   use pest::Parser;
   use tempdir::TempDir;
 
@@ -478,13 +479,13 @@ mod tests {
 
     if let Ok(query_node) = query_node_result {
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
-        eprintln!("Error in search_logs: {:?}", err);
+        error!("Error in search_logs: {:?}", err);
       } else {
         let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         assert!(results.is_empty());
       }
     } else {
-      eprintln!("Error parsing the query.");
+      error!("Error parsing the query.");
     }
   }
 
@@ -497,13 +498,13 @@ mod tests {
 
     if let Ok(query_node) = query_node_result {
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
-        eprintln!("Error in search_logs: {:?}", err);
+        error!("Error in search_logs: {:?}", err);
       } else {
         let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         assert!(results.is_empty());
       }
     } else {
-      eprintln!("Error parsing the query.");
+      error!("Error parsing the query.");
     }
   }
 
@@ -625,11 +626,11 @@ mod tests {
           );
         }
         Err(err) => {
-          eprintln!("Error in search_logs for 'this': {:?}", err);
+          error!("Error in search_logs for 'this': {:?}", err);
         }
       }
     } else {
-      eprintln!("Error parsing the query for 'this'.");
+      error!("Error parsing the query for 'this'.");
     }
 
     // Test search for "blah".
@@ -644,11 +645,11 @@ mod tests {
           assert!(logs.is_empty());
         }
         Err(err) => {
-          eprintln!("Error in search_logs for 'blah': {:?}", err);
+          error!("Error in search_logs for 'blah': {:?}", err);
         }
       }
     } else {
-      eprintln!("Error parsing the query for 'blah'.");
+      error!("Error parsing the query for 'blah'.");
     }
 
     // Test metadata for labels.
@@ -829,7 +830,7 @@ mod tests {
 
     if let Ok(query_node) = query_node_result {
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
-        eprintln!("Error in search_logs: {:?}", err);
+        error!("Error in search_logs: {:?}", err);
       } else {
         // Sort the expected results to match the sorted results from the function.
         let mut expected_results = vec!["hello world", "hello world hello world"];
@@ -847,7 +848,7 @@ mod tests {
         assert_eq!(actual_results, expected_results);
       }
     } else {
-      eprintln!("Error parsing the query for 'hello'.");
+      error!("Error parsing the query for 'hello'.");
     }
   }
 }

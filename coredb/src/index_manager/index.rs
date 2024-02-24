@@ -300,6 +300,11 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, CoreDBError> {
+    debug!(
+      "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
+      ast, range_start_time, range_end_time
+    );
+
     let mut retval = Vec::new();
 
     // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
@@ -341,6 +346,11 @@ impl Index {
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<PromQLTimeSeries>, CoreDBError> {
+    debug!(
+      "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
+      ast, range_start_time, range_end_time
+    );
+
     // Now start the search
     let mut results = self
       .traverse_promql_ast(&ast.clone(), range_start_time, range_end_time)
@@ -1170,7 +1180,7 @@ mod tests {
     index = match Index::refresh(&storage_type, &index_dir_path, 1024 * 1024).await {
       Ok(index) => index,
       Err(err) => {
-        eprintln!("Error refreshing index: {:?}", err);
+        error!("Error refreshing index: {:?}", err);
         return;
       }
     };

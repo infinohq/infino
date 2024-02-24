@@ -13,5 +13,5 @@ pub mod index;
 pub mod metadata;
 pub mod promql;
 pub(crate) mod promql_object;
-pub(crate) mod promql_time_series;
+pub mod promql_time_series;
 pub mod segment_summary;

@@ -4,12 +4,12 @@
 use crate::metric::metric_point::MetricPoint;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromQLTimeSeries {
   labels: HashMap<String, String>,
   metric_points: Vec<MetricPoint>,

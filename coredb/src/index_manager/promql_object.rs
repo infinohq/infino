@@ -1266,8 +1266,6 @@ mod tests {
 
     vector.round(0.01);
 
-    println!("vector: {:?}", vector);
-
     let expected = [1.23, 2.35, 3.46, 4.57];
 
     let mut j = 0;

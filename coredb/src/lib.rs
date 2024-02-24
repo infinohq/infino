@@ -185,7 +185,7 @@ impl CoreDB {
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, CoreDBError> {
     debug!(
-      "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
+      "COREDB: Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
       url_query, json_query, range_start_time, range_end_time
     );
 
@@ -232,7 +232,7 @@ impl CoreDB {
     range_end_time: u64,
   ) -> Result<Vec<PromQLTimeSeries>, CoreDBError> {
     debug!(
-      "Search metrics for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
+      "COREDB: Search metrics for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
       url_query, json_query, range_start_time, range_end_time
     );
 

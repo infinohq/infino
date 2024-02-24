@@ -24,6 +24,7 @@
 // - Non-operation expressions are expressions that do not immediately involve binary or unary operations
 // - Expressions can also have an offset modifier
 
+// We support a simple label for Infino backwards compatibility
 start = { expression }
 
 // Define an expression as a series of operations with increasing precedence
@@ -38,22 +39,22 @@ unary          = { negative? ~ leaf }
 leaf           = { aggregations | functions | vector | scalar }
 
 // *** Operations ***
-or                    = { "or" }
-and                   = { "and" }
-unless                = { "unless" }
-equal                 = { "=" }
-not_equal             = { "!=" }
-greater_than          = { ">" }
-less_than             = { "<" }
-greater_than_or_equal = { ">=" }
-less_than_or_equal    = { ">=" }
-plus                  = { "+" }
-minus                 = { "-" }
-multiply              = { "*" }
-divide                = { "/" }
-modulo                = { "%" }
-power                 = { "^" }
-negative              = { "-" }
+or                    = @{ ws ~ "or" ~ ws }
+and                   = @{ ws ~ "and" ~ ws }
+unless                = @{ ws ~ "unless" ~ ws }
+equal                 = @{ ws ~ "=" ~ ws }
+not_equal             = @{ ws ~ "!=" ~ ws }
+greater_than          = @{ ws ~ ">" ~ ws }
+less_than             = @{ ws ~ "<" ~ ws }
+greater_than_or_equal = @{ ws ~ ">=" ~ ws }
+less_than_or_equal    = @{ ws ~ ">=" ~ ws }
+plus                  = @{ ws ~ "+" ~ ws }
+minus                 = @{ ws ~ "-" ~ ws }
+multiply              = @{ ws ~ "*" ~ ws }
+divide                = @{ ws ~ "/" ~ ws }
+modulo                = @{ ws ~ "%" ~ ws }
+power                 = @{ ws ~ "^" ~ ws }
+negative              = @{ ws ~ "-" ~ ws }
 
 // Aggregations
 aggregations   = { aggregation ~ group_modifier? ~ start_paren ~ (parameter ~ comma)? ~ expression ~ end_paren }
@@ -151,14 +152,15 @@ vector_convert     = { "vector" }
 year               = { "year" }
 
 // **** Vector creation ****
-scalar              = { float }
+scalar = { float }
+
 vector              = { !(aggregation | function) ~ metric_name? ~ (start_brace ~ label ~ (comma ~ label)* ~ end_brace)? ~ range? ~ offset_and_modifier? }
 label               = { label_name ~ condition ~ quote ~ label_value ~ quote }
 condition           = { equal_match | not_equal_match | regex_match | not_regex_match }
 offset              = { "offset" ~ duration }
 modifier            = { "@" ~ float }
-regex_match         = { "=~" }
-not_regex_match     = { "!~" }
+regex_match         = { ws ~ "=~" ~ ws }
+not_regex_match     = { ws ~ "!~" ~ ws }
 equal_match         = { equal }
 not_equal_match     = { not_equal }
 offset_and_modifier = { (offset ~ modifier?) | (modifier ~ offset?) }
