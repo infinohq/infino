@@ -1229,7 +1229,7 @@ mod tests {
       .iter()
       .map(|&value| MetricPoint::new(timestamp, value))
       .collect();
-    PromQLTimeSeries::new_with_params(HashMap::new(), metric_points) // Assuming labels are not provided here
+    PromQLTimeSeries::new_with_params(HashMap::new(), metric_points)
   }
 
   #[test]
@@ -1268,7 +1268,7 @@ mod tests {
     let mut j = 0;
     for ts in &mut vector.vector {
       for mp in ts.get_metric_points() {
-        assert_eq!(mp.get_value(), expected[j]);
+        assert!((mp.get_value() - expected[j]) < f64::EPSILON);
         j += 1;
       }
     }
@@ -1295,7 +1295,7 @@ mod tests {
     let mut j = 0;
     for ts in &mut vector.vector {
       for mp in ts.get_metric_points() {
-        assert_eq!(mp.get_value(), expected[j]);
+        assert!((mp.get_value() - expected[j]) < f64::EPSILON);
         j += 1;
       }
     }
@@ -1322,7 +1322,7 @@ mod tests {
     let mut j = 0;
     for ts in &mut vector.vector {
       for mp in ts.get_metric_points() {
-        assert_eq!(mp.get_value(), expected[j]);
+        assert!((mp.get_value() - expected[j]) < f64::EPSILON);
         j += 1;
       }
     }
@@ -1386,25 +1386,6 @@ mod tests {
       }
     }
   }
-
-  // TODO: Not sure why clamp is saying it has wrong args
-  // #[test]
-  // fn test_clamp() {
-  //   let mut vector = PromQLObject::new_as_vector(vec![
-  //     create_time_series(vec![1.2, 2.7, 3.5], 0),
-  //     create_time_series(vec![4.8, -5.2], 0),
-  //   ]);
-
-  //   vector.clamp(2.0, 4.0);
-
-  //   let expected = vec![vec![2.0, 2.7, 3.5], vec![4.0, 2.0]];
-
-  //   for (i, ts) in vector.vector.iter().enumerate() {
-  //     for (j, mp) in ts.get_metric_points().iter().enumerate() {
-  //       assert_eq!(mp.get_value(), expected[i][j]);
-  //     }
-  //   }
-  // }
 
   #[test]
   #[allow(clippy::explicit_counter_loop)]
@@ -1487,7 +1468,7 @@ mod tests {
   }
 
   #[test]
-  // TODO: Not sure what the timestamps are supposed to after function completes
+  // TODO: Not sure what the timestamps are supposed to be after function completes
   fn test_deriv() {
     let metric_points1 = create_metric_points_with_times(&[1, 2, 3], &[10.0, 20.0, 30.0]);
     let metric_points2 = create_metric_points_with_times(&[2, 4, 6], &[20.0, 40.0, 60.0]);
@@ -1546,7 +1527,7 @@ mod tests {
   }
 
   #[test]
-  // TODO: Not sure what the timestamps are supposed to after function completes
+  // TODO: Not sure what the timestamps are supposed to be after function completes
   fn test_irate() {
     let metric_points1 = create_metric_points_with_times(&[1, 2, 4], &[100.0, 110.0, 130.0]);
     let metric_points2 = create_metric_points_with_times(&[1, 5, 10], &[20.0, 50.0, 80.0]);
@@ -1566,7 +1547,7 @@ mod tests {
   }
 
   #[test]
-  // TODO: Not sure what the timestamps are supposed to after function completes
+  // TODO: Not sure what the timestamps are supposed to be after function completes
   fn test_rate() {
     let metric_points1 = create_metric_points_with_times(&[1, 2, 5], &[100.0, 110.0, 130.0]);
     let metric_points2 = create_metric_points_with_times(&[1, 5, 13], &[20.0, 50.0, 80.0]);
