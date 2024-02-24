@@ -1,7 +1,7 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-//! Execute an Infino query. Both Query DSL and Lucene Query Syntax are supported.
+//! Execute an Infino logs query. Both Query DSL and Lucene Query Syntax are supported.
 //!
 //! Uses the Pest parser with Pest-formatted PEG grammars: https://pest.rs/
 //! which validates syntax.
@@ -12,6 +12,7 @@
 
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::AstError;
+use crate::utils::error::SearchLogsError;
 use crate::utils::tokenize::tokenize;
 
 use futures::StreamExt;
@@ -30,8 +31,18 @@ use pest_derive::Parser;
 pub struct QueryDslParser;
 
 impl Segment {
+  pub fn parse_query(
+    json_query: &str,
+  ) -> Result<pest::iterators::Pairs<'_, Rule>, SearchLogsError> {
+    QueryDslParser::parse(Rule::start, json_query)
+      .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))
+  }
+
   /// Walk the AST using an iterator and process each node
-  pub async fn traverse_ast(&self, nodes: &Pairs<'_, Rule>) -> Result<HashSet<u32>, AstError> {
+  pub async fn traverse_query_dsl_ast(
+    &self,
+    nodes: &Pairs<'_, Rule>,
+  ) -> Result<HashSet<u32>, AstError> {
     let mut stack = VecDeque::new();
 
     // Push all nodes to the stack to start processing
@@ -137,7 +148,6 @@ impl Segment {
 
     let mut results = HashSet::new();
 
-    // To avoid recursion, we replicate query dispatching here.
     while let Some(node) = queue.pop_front() {
       let processing_result = match node.as_rule() {
         Rule::term_query => self.process_term_query(&node).await,

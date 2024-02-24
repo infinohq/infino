@@ -7,32 +7,22 @@ use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use log::error;
 use log::{debug, info};
-use pest::error::Error as PestError;
+use pest::iterators::Pairs;
 
 use crate::index_manager::metadata::Metadata;
+use crate::index_manager::promql;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
-use crate::metric::constants::MetricsQueryCondition;
-use crate::metric::metric_point::MetricPoint;
-use crate::segment_manager::query_dsl::QueryDslParser;
-use crate::segment_manager::query_dsl::Rule;
+use crate::segment_manager::query_dsl;
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
-use crate::utils::error::CoreDBError;
-use crate::utils::error::SearchLogsError;
+use crate::utils::error::{CoreDBError, SearchMetricsError};
 use crate::utils::io;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex, TokioRwLock};
 
-#[allow(unused_imports)]
-use pest::Parser;
-
-impl From<PestError<Rule>> for SearchLogsError {
-  fn from(error: PestError<Rule>) -> Self {
-    SearchLogsError::JsonParseError(error.to_string())
-  }
-}
+use super::promql_time_series::PromQLTimeSeries;
 
 /// File name where the information about all segements is stored.
 const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
@@ -175,6 +165,11 @@ impl Index {
     self.memory_segments_map.insert(segment_number, segment);
   }
 
+  /// Get the memory segments map.
+  pub fn get_memory_segments_map(&self) -> &DashMap<u32, Segment> {
+    &self.memory_segments_map
+  }
+
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
   /// within the search_memory_budget_bytes.
   fn shrink_to_fit(&self) {
@@ -299,52 +294,17 @@ impl Index {
   }
 
   /// Search for given query in the given time range.
-  ///
-  /// Infino log searches support Lucene Query Syntax: https://lucene.apache.org/core/2_9_4/queryparsersyntax.html
-  /// http://infino-endpoint?"my lucene query"&start_time=blah&end_time=blah
-  ///
-  /// but these can be overridden by a Query DSL in the
-  /// json body sent with the query: https://opensearch.org/docs/latest/query-dsl/.
-  ///
-  /// Note that while the query terms are not required in the URL, the query parameters
-  /// "start_time" and "end_time" are indeed required in the URL. They are always added by the
-  /// OpenSearch plugin that calls Infino.
   pub async fn search_logs(
     &self,
-    url_query: &str,
-    json_body: &str, // Assuming this should be json_query
+    ast: &Pairs<'_, query_dsl::Rule>,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<LogMessage>, CoreDBError> {
     debug!(
-      "Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
-      url_query, json_body, range_start_time, range_end_time
+      "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
+      ast, range_start_time, range_end_time
     );
 
-    let mut json_query = json_body.to_string();
-
-    // Check if URL or JSON query is empty
-    let is_url_empty = url_query.trim().is_empty();
-    let is_json_empty = json_query.trim().is_empty();
-
-    // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
-    if is_json_empty {
-      if is_url_empty {
-        return Err(SearchLogsError::NoQueryProvided.into());
-      } else {
-        // Update json_query with the constructed query from url_query
-        json_query = format!(
-          r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
-          url_query
-        );
-      }
-    }
-
-    // Build the query AST
-    let ast = QueryDslParser::parse(Rule::start, &json_query)
-      .map_err(|e| SearchLogsError::JsonParseError(e.to_string()))?;
-
-    // Now start the search
     let mut retval = Vec::new();
 
     // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
@@ -365,7 +325,7 @@ impl Index {
         None => {
           let segment = self.refresh_segment(segment_number).await?;
           segment
-            .search_logs(&ast, range_start_time, range_end_time)
+            .search_logs(ast, range_start_time, range_end_time)
             .await
             .unwrap_or_else(|_| Vec::new())
         }
@@ -377,6 +337,31 @@ impl Index {
     retval.sort();
 
     Ok(retval)
+  }
+
+  /// Get metric points corresponding to a promql query.
+  pub async fn search_metrics(
+    &self,
+    ast: &Pairs<'_, promql::Rule>,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<Vec<PromQLTimeSeries>, CoreDBError> {
+    debug!(
+      "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
+      ast, range_start_time, range_end_time
+    );
+
+    // Now start the search
+    let mut results = self
+      .traverse_promql_ast(&ast.clone(), range_start_time, range_end_time)
+      .await
+      .map_err(SearchMetricsError::AstError)?;
+
+    // Note that PromQL results are explicitly unsorted but we sort here
+    // to be consistent with search_logs.
+    results.sort();
+
+    Ok(results)
   }
 
   /// Helper function to commit a segment with given segment_number to disk.
@@ -546,7 +531,7 @@ impl Index {
   }
 
   /// Reads a segment from memory and insert it in memory_segments_map.
-  async fn refresh_segment(&self, segment_number: u32) -> Result<Segment, CoreDBError> {
+  pub async fn refresh_segment(&self, segment_number: u32) -> Result<Segment, CoreDBError> {
     let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
     debug!(
       "Loading segment with segment number {} and path {}",
@@ -647,44 +632,6 @@ impl Index {
     segment_numbers
   }
 
-  /// Get metric points corresponding to given label name and value, within the
-  /// given range (inclusive of both start and end time).
-  pub async fn get_metrics(
-    &self,
-    label_name: &str,
-    label_value: &str,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Result<Vec<MetricPoint>, CoreDBError> {
-    let mut retval = Vec::new();
-
-    // Get the segments overlapping with the given time range. This is in the reverse chronological order.
-    let segment_numbers = self
-      .get_overlapping_segments(range_start_time, range_end_time)
-      .await;
-
-    let conditions = [MetricsQueryCondition::Equals(
-      label_name.to_owned(),
-      label_value.to_owned(),
-    )];
-
-    // Get the metrics from each of the segments. If a segment isn't present is memory, it is loaded in memory temporarily.
-    for segment_number in segment_numbers {
-      let segment = self.memory_segments_map.get(&segment_number);
-      let mut metric_points = match segment {
-        Some(segment) => segment.search_metrics(&conditions, range_start_time, range_end_time),
-        None => {
-          let segment = self.refresh_segment(segment_number).await?;
-          segment.search_metrics(&conditions, range_start_time, range_end_time)
-        }
-      };
-
-      retval.append(&mut metric_points);
-    }
-
-    Ok(retval)
-  }
-
   pub fn get_index_dir(&self) -> String {
     self.index_dir_path.to_owned()
   }
@@ -726,12 +673,39 @@ mod tests {
   use std::time::Duration;
 
   use chrono::Utc;
+  use pest::Parser;
   use tempdir::TempDir;
   use test_case::test_case;
+  use tests::promql::PromQLParser;
 
   use super::*;
+  use crate::metric::metric_point::MetricPoint;
+  use crate::segment_manager::query_dsl::QueryDslParser;
   use crate::utils::io::get_joined_path;
   use crate::utils::sync::is_sync_send;
+
+  // Helper function to create index
+  async fn create_index<'a>(name: &'a str, storage_type: &'a StorageType) -> (Index, String) {
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
+    let index = Index::new(storage_type, &index_dir_path).await.unwrap();
+    (index, index_dir_path)
+  }
+
+  async fn create_index_with_thresholds<'a>(
+    name: &'a str,
+    storage_type: &'a StorageType,
+    segment_size: u64,
+    memory_budget: u64,
+  ) -> (Index, String) {
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
+    let index =
+      Index::new_with_threshold_params(storage_type, &index_dir_path, segment_size, memory_budget)
+        .await
+        .unwrap();
+    (index, index_dir_path)
+  }
 
   #[tokio::test]
   async fn test_empty_index() {
@@ -777,15 +751,8 @@ mod tests {
 
   #[tokio::test]
   async fn test_commit_refresh() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_commit_refresh"
-    );
     let storage_type = StorageType::Local;
-
-    let expected = Index::new(&storage_type, &index_dir_path).await.unwrap();
+    let (expected, index_dir_path) = create_index("test_commit_refresh", &storage_type).await;
     let num_log_messages = 5;
     let message_prefix = "content#";
     let num_metric_points = 5;
@@ -840,15 +807,8 @@ mod tests {
 
   #[tokio::test]
   async fn test_basic_search_logs() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_basic_search"
-    );
     let storage_type = StorageType::Local;
-
-    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
+    let (index, _index_dir_path) = create_index("test_basic_search", &storage_type).await;
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -869,13 +829,24 @@ mod tests {
       "thisisunique",
     );
 
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "message", "operator" : "AND" } } }
+          ]
+        }
+      }
+    }
+    "#;
+
     // For the query "message", handle errors from search_logs
-    let results = if let Ok(results) = index.search_logs("message", "", 0, u64::MAX).await {
-      results
-    } else {
-      eprintln!("Error in search_logs");
-      Vec::new()
-    };
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
+    let results = index
+      .search_logs(&ast, 0, u64::MAX)
+      .await
+      .expect("Error in search_logs");
 
     // Continue with assertions
     assert_eq!(results.len(), num_log_messages - 1);
@@ -887,44 +858,51 @@ mod tests {
     received_log_messages.sort();
     assert_eq!(expected_log_messages, received_log_messages);
 
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "thisisunique", "operator" : "AND" } } }
+          ]
+        }
+      }
+    }
+    "#;
+
     // For the query "thisisunique", we should expect only 1 result.
-    let results = if let Ok(results) = index.search_logs("thisisunique", "", 0, u64::MAX).await {
-      results
-    } else {
-      eprintln!("Error in search_logs");
-      Vec::new()
-    };
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
+    let results = index
+      .search_logs(&ast, 0, u64::MAX)
+      .await
+      .expect("Error in search_logs");
+
     assert_eq!(results.len(), 1);
     assert_eq!(results.first().unwrap().get_text(), "thisisunique");
   }
 
   #[tokio::test]
   async fn test_basic_time_series() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_basic_time_series"
-    );
     let storage_type = StorageType::Local;
-
-    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
+    let (index, _index_dir_path) = create_index("test_basic_time_series", &storage_type).await;
     let num_metric_points = 1000;
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
     for i in 1..num_metric_points {
-      index.append_metric_point("some_name", &HashMap::new(), i, i as f64);
+      index.append_metric_point("metric", &HashMap::new(), i, i as f64);
       let dp = MetricPoint::new(i, i as f64);
       expected_metric_points.push(dp);
     }
 
-    let metric_name_label = "__name__";
-    let received_metric_points = index
-      .get_metrics(metric_name_label, "some_name", 0, u64::MAX)
+    // The number of metric points in the index should be equal to the number of metric points we indexed.
+    let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
+      .expect("Failed to parse query");
+    let mut results = index
+      .search_metrics(&ast, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 
-    assert_eq!(expected_metric_points, received_metric_points);
+    assert_eq!(&mut expected_metric_points, results[0].get_metric_points())
   }
 
   #[test_case(true, false; "when only logs are appended")]
@@ -939,19 +917,8 @@ mod tests {
     for _ in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
-
-      let index_dir = TempDir::new("index_test").unwrap();
-      let index_dir_path = format!(
-        "{}/{}",
-        index_dir.path().to_str().unwrap(),
-        "test_two_segments"
-      );
-
-      // Create an index with a small segment size threshold.
-      let index =
-        Index::new_with_threshold_params(&storage_type, &index_dir_path, 1500, 1024 * 1024)
-          .await
-          .unwrap();
+      let (index, index_dir_path) =
+        create_index_with_thresholds("test_two_segments", &storage_type, 1500, 1024 * 1024).await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
@@ -1168,20 +1135,17 @@ mod tests {
 
   #[tokio::test]
   async fn test_multiple_segments_logs() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_multiple_segments_logs"
-    );
     let storage_type = StorageType::Local;
     let start_time = Utc::now().timestamp_millis() as u64;
 
     // Create a new index with a low threshold for the segment size.
-    let mut index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
-        .await
-        .unwrap();
+    let (mut index, index_dir_path) = create_index_with_thresholds(
+      "test_multiple_segments_logs",
+      &storage_type,
+      1024,
+      1024 * 1024,
+    )
+    .await;
 
     let message_prefix = "message";
     let num_log_messages = 10000;
@@ -1216,7 +1180,7 @@ mod tests {
     index = match Index::refresh(&storage_type, &index_dir_path, 1024 * 1024).await {
       Ok(index) => index,
       Err(err) => {
-        eprintln!("Error refreshing index: {:?}", err);
+        error!("Error refreshing index: {:?}", err);
         return;
       }
     };
@@ -1237,59 +1201,59 @@ mod tests {
       }
     }
 
+    let query_message = &format!(
+      r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+      message_prefix
+    );
+
     // Ensure the prefix is in every log message.
-    let results = match index
-      .search_logs(message_prefix, "", start_time, end_time)
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
+    let results = index
+      .search_logs(&ast, start_time, end_time)
       .await
-    {
-      Ok(results) => results,
-      Err(err) => {
-        eprintln!("Error searching logs: {:?}", err);
-        return;
-      }
-    };
+      .expect("Error in search_logs");
     assert_eq!(results.len(), num_log_messages);
 
     // Ensure the suffix is in exactly one log message.
     for i in 1..=num_log_messages {
-      let suffix = &format!("{}", i);
-      let results = match index.search_logs(suffix, "", start_time, end_time).await {
-        Ok(results) => results,
-        Err(err) => {
-          eprintln!("Error searching logs: {:?}", err);
-          return;
-        }
-      };
+      let suffix = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+        i
+      );
+      let ast =
+        QueryDslParser::parse(query_dsl::Rule::start, suffix).expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, start_time, end_time)
+        .await
+        .expect("Error in search_logs");
       assert_eq!(results.len(), 1);
     }
 
     // Ensure the prefix+suffix is in exactly one log message.
     for i in 1..=num_log_messages {
-      let message = &format!("{} {}", message_prefix, i);
-      let results = match index.search_logs(message, "", start_time, end_time).await {
-        Ok(results) => results,
-        Err(err) => {
-          eprintln!("Error searching logs: {:?}", err);
-          return;
-        }
-      };
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{} {}", "operator" : "AND" }} }} }} }}"#,
+        message_prefix, i
+      );
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
+        .expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, start_time, end_time)
+        .await
+        .expect("Error in search_logs");
+
       assert_eq!(results.len(), 1);
     }
   }
 
   #[tokio::test]
   async fn test_search_logs_count() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_search_logs_count"
-    );
     let storage_type = StorageType::Local;
+    let (index, _index_dir_path) =
+      create_index_with_thresholds("test_search_logs_count", &storage_type, 1024, 1024 * 1024)
+        .await;
 
-    let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
-      .await
-      .unwrap();
     let message_prefix = "message";
     let num_message_suffixes = 20;
 
@@ -1308,38 +1272,34 @@ mod tests {
     }
 
     for i in 1..num_message_suffixes {
-      let message = &format!("{}{}", message_prefix, i);
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}{}", "operator" : "AND" }} }} }} }}"#,
+        message_prefix, i
+      );
       let expected_count = 2u32.pow(i);
-      let results = index
-        .search_logs(message, "", 0, Utc::now().timestamp_millis() as u64)
-        .await;
 
-      match results {
-        Ok(logs) => {
-          assert_eq!(expected_count, logs.len() as u32);
-        }
-        Err(err) => {
-          eprintln!("Error in search_logs for '{}': {:?}", message, err);
-        }
-      }
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
+        .expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, 0, Utc::now().timestamp_millis() as u64)
+        .await
+        .expect("Error in search_logs");
+
+      assert_eq!(expected_count, results.len() as u32);
     }
   }
 
   #[tokio::test]
   async fn test_multiple_segments_metric_points() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_multiple_segments_metric_points"
-    );
     let storage_type = StorageType::Local;
+    let (mut index, index_dir_path) = create_index_with_thresholds(
+      "test_multiple_segments_metric_points",
+      &storage_type,
+      1024,
+      1024 * 1024,
+    )
+    .await;
 
-    // Create an index with a low threshold for segment size.
-    let mut index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
-        .await
-        .unwrap();
     let num_metric_points = 10000;
     let mut num_metric_points_from_last_commit = 0;
     let commit_after = 1000;
@@ -1349,12 +1309,7 @@ mod tests {
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     for _ in 1..=num_metric_points {
-      index.append_metric_point(
-        "some_name",
-        &label_map,
-        Utc::now().timestamp_millis() as u64,
-        100.0,
-      );
+      index.append_metric_point("metric", &label_map, start_time, 100.0);
       num_metric_points_from_last_commit += 1;
 
       // Commit after we have indexed more than commit_after messages.
@@ -1366,8 +1321,6 @@ mod tests {
     // Commit and sleep to make sure the index is written to disk.
     index.commit().await.expect("Could not commit index");
     sleep(Duration::from_millis(10000));
-
-    let end_time = Utc::now().timestamp_millis() as u64;
 
     // Refresh the segment from disk.
     index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
@@ -1390,16 +1343,17 @@ mod tests {
     }
 
     // The number of metric points in the index should be equal to the number of metric points we indexed.
-    let ts = index
-      .get_metrics(
-        "label_name_1",
-        "label_value_1",
-        start_time - 100,
-        end_time + 100,
-      )
+    let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
+      .expect("Failed to parse query");
+    let mut results = index
+      .search_metrics(&ast, 0, u64::MAX)
       .await
-      .expect("Error in calling get_metrics");
-    assert_eq!(num_metric_points, ts.len() as u32)
+      .expect("Error in get_metrics");
+
+    assert_eq!(
+      num_metric_points,
+      results[0].get_metric_points().len() as u32
+    )
   }
 
   #[tokio::test]
@@ -1409,6 +1363,7 @@ mod tests {
 
     // Create a path within index_dir that does not exist.
     let temp_path_buf = index_dir.path().join("doesnotexist");
+
     let index = Index::new(&storage_type, temp_path_buf.to_str().unwrap())
       .await
       .unwrap();
@@ -1441,15 +1396,9 @@ mod tests {
 
   #[tokio::test]
   async fn test_overlap_one_segment() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_overlap_one_segment"
-    );
     let storage_type = StorageType::Local;
+    let (index, _index_dir_path) = create_index("test_overlap_one_segment", &storage_type).await;
 
-    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
     index.append_log_message(1000, &HashMap::new(), "message_1");
     index.append_log_message(2000, &HashMap::new(), "message_2");
 
@@ -1522,24 +1471,18 @@ mod tests {
   #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
   #[tokio::test]
   async fn test_concurrent_append(num_segments_in_memory: u64) {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_concurrent_append"
-    );
     let storage_type = StorageType::Local;
-
     let segment_size_threshold_bytes = 1024;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
-    let index = Index::new_with_threshold_params(
+
+    // Create a new index with a low threshold for the segment size.
+    let (index, index_dir_path) = create_index_with_thresholds(
+      "test_concurrent_append",
       &storage_type,
-      &index_dir_path,
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
     )
-    .await
-    .unwrap();
+    .await;
 
     let arc_index = Arc::new(index);
     let num_threads = 20;
@@ -1576,7 +1519,7 @@ mod tests {
         for j in 0..num_appends_per_thread {
           let time = start + j;
           arc_index_clone.append_log_message(time as u64, &HashMap::new(), "message");
-          arc_index_clone.append_metric_point("some_name", &label_map, time as u64, 1.0);
+          arc_index_clone.append_metric_point("metric", &label_map, time as u64, 1.0);
         }
       });
       append_handles.push(handle);
@@ -1598,44 +1541,48 @@ mod tests {
       .expect("Could not refresh index");
     let expected_len = num_threads * num_appends_per_thread;
 
-    let results = index
-      .search_logs("message", "", 0, expected_len as u64)
-      .await;
-    match results {
-      Ok(logs) => {
-        let received_logs_len = logs.len();
-        assert_eq!(expected_len, received_logs_len);
-      }
-      Err(err) => {
-        eprintln!("Error in search_logs: {:?}", err);
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "message", "operator" : "AND" } } }
+          ]
+        }
       }
     }
+    "#;
 
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .get_metrics("label1", "value1", 0, expected_len as u64)
+      .search_logs(&ast, 0, expected_len as u64)
+      .await
+      .expect("Error in search_logs");
+    assert_eq!(expected_len, results.len());
+
+    let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
+      .expect("Failed to parse query");
+    let mut results = index
+      .search_metrics(&ast, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
-    let received_metric_points_len = results.len();
 
-    assert_eq!(expected_len, results.len());
-    assert_eq!(expected_len, received_metric_points_len);
+    assert_eq!(expected_len, results[0].get_metric_points().len());
   }
 
   #[tokio::test]
   async fn test_reusing_index_when_available() {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_reusing_index_when_available"
-    );
     let storage_type = StorageType::Local;
+    let (index, index_dir_path) = create_index_with_thresholds(
+      "test_reusing_index_when_available",
+      &storage_type,
+      1024,
+      1024 * 1024,
+    )
+    .await;
 
     let start_time = Utc::now().timestamp_millis();
-    // Create a new index
-    let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
-      .await
-      .unwrap();
+
     index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
     index.commit().await.expect("Could not commit index");
 
@@ -1644,23 +1591,30 @@ mod tests {
       .await
       .unwrap();
 
+    let query_message = r#"{
+        "query": {
+          "bool": {
+            "must": [
+              { "match": { "_all" : { "query": "some_message_1", "operator" : "AND" } } }
+            ]
+          }
+        }
+      }
+      "#;
+
     // Call search_logs and handle errors
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let search_result = index
       .search_logs(
-        "some_message_1",
-        "",
+        &ast,
         start_time as u64,
         Utc::now().timestamp_millis() as u64,
       )
-      .await;
+      .await
+      .expect("Error in search_logs");
 
-    // Check if there was an error calling search_logs.
-    if let Err(err) = search_result {
-      eprintln!("Error in search_logs: {:?}", err);
-    } else {
-      // Assert the results when there's no error.
-      assert_eq!(search_result.unwrap().len(), 1);
-    }
+    assert_eq!(search_result.len(), 1);
   }
 
   #[tokio::test]
@@ -1682,25 +1636,17 @@ mod tests {
   #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
   #[tokio::test]
   async fn test_limited_memory(num_segments_in_memory: u64) {
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_limited_memory"
-    );
     let storage_type = StorageType::Local;
-
     let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
-    let index = Index::new_with_threshold_params(
+    let (index, _index_dir_path) = create_index_with_thresholds(
+      "test_limited_memory",
       &storage_type,
-      &index_dir_path,
       // This size depends on the number of log messages added in each segment in the for loop below.
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
     )
-    .await
-    .unwrap();
+    .await;
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -1734,56 +1680,40 @@ mod tests {
       let message_start = &format!("message_{}", start);
       let message_end = &format!("message_{}", end);
 
-      // Check that the queries for unique messages across the entire time range returns exactly one result.
-      assert_eq!(
-        index
-          .search_logs(message_start, "", 0, u64::MAX)
-          .await
-          .unwrap()
-          .len(),
-        1
-      );
-      assert_eq!(
-        index
-          .search_logs(message_end, "", 0, u64::MAX)
-          .await
-          .unwrap()
-          .len(),
-        1
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+        message_start
       );
 
-      // Check that the queries for unique messages across the specific time range returns exactly one result.
-      assert_eq!(
-        index
-          .search_logs(message_start, "", start, end)
-          .await
-          .unwrap()
-          .len(),
-        1
+      // Check that the queries for unique messages across the entire time range returns exactly one result.
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
+        .expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, 0, u64::MAX)
+        .await
+        .expect("Error in search_logs");
+      assert_eq!(results.len(), 1);
+
+      let query_message = &format!(
+        r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+        message_end
       );
-      assert_eq!(
-        index
-          .search_logs(message_end, "", start, end)
-          .await
-          .unwrap()
-          .len(),
-        1
-      );
+
+      let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
+        .expect("Failed to parse query");
+      let results = index
+        .search_logs(&ast, 0, u64::MAX)
+        .await
+        .expect("Error in search_logs");
+      assert_eq!(results.len(), 1);
     }
   }
 
   #[tokio::test]
   async fn test_delete_segment_in_memory() {
-    // Arrange
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_delete_segment"
-    );
-
     let storage_type = StorageType::Local;
-    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
+    let (index, _index_dir_path) =
+      create_index("test_delete_segment_in_memory", &storage_type).await;
     let message = "test_message";
     index.append_log_message(
       Utc::now().timestamp_millis() as u64,
@@ -1805,24 +1735,17 @@ mod tests {
   async fn test_delete_multiple_segments() {
     // Create 20 segments and keep 4 segments only in memory
     let num_segments_in_memory = 4;
-    let index_dir = TempDir::new("index_test").unwrap();
-    let index_dir_path = format!(
-      "{}/{}",
-      index_dir.path().to_str().unwrap(),
-      "test_limited_memory"
-    );
     let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
     let storage_type = StorageType::Local;
-    let index = Index::new_with_threshold_params(
+    let (index, _index_dir_path) = create_index_with_thresholds(
+      "test_delete_multiple_segments",
       &storage_type,
-      &index_dir_path,
       // This size depends on the number of log messages added in each segment in the for loop below.
       segment_size_threshold_bytes,
       search_memory_budget_bytes,
     )
-    .await
-    .unwrap();
+    .await;
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test

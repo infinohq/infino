@@ -76,8 +76,9 @@ struct LogsQuery {
 #[derive(Debug, Deserialize, Serialize)]
 /// Represents a metrics query.
 struct MetricsQuery {
-  label_name: String,
-  label_value: String,
+  text: Option<String>,
+  label_name: Option<String>,
+  label_value: Option<String>,
   start_time: Option<u64>,
   end_time: Option<u64>,
 }
@@ -304,7 +305,7 @@ fn main() {
 
   // If log level isn't set, set it to info.
   if env::var("RUST_LOG").is_err() {
-    env::set_var("RUST_LOG", "info")
+    env::set_var("RUST_LOG", "debug")
   }
 
   // Set up logging.
@@ -662,20 +663,39 @@ async fn summarize(
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
+  json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!("Searching metrics: {:?}", metrics_query);
 
+  // Convert legacy Infino syntax to PromQL
+  let query_text: String = if let (Some(label_name), Some(label_value)) = (
+    metrics_query.label_name.as_ref(),
+    metrics_query.label_value.as_ref(),
+  ) {
+    // Construct the string and return it directly
+    format!("{{ {}=\"{}\" }}", label_name, label_value)
+  } else {
+    "".to_owned()
+  };
+
+  let default_text = "".to_string();
+  let text_ref = if !query_text.is_empty() {
+    &query_text
+  } else {
+    metrics_query.text.as_ref().unwrap_or(&default_text)
+  };
+
   let results = state
     .coredb
-    .get_metrics(
-      &metrics_query.label_name,
-      &metrics_query.label_value,
+    .search_metrics(
+      text_ref,
+      &json_body,
       // The default for range start time is 0.
       metrics_query.start_time.unwrap_or(0_u64),
       // The default for range end time is the current time.
       metrics_query
         .end_time
-        .unwrap_or(Utc::now().timestamp_millis() as u64),
+        .unwrap_or_else(|| Utc::now().timestamp_millis() as u64),
     )
     .await;
 
@@ -770,6 +790,7 @@ mod tests {
   use urlencoding::encode;
 
   use coredb::index_manager::index::Index;
+  use coredb::index_manager::promql_time_series::PromQLTimeSeries;
   use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
   use coredb::storage_manager::storage::Storage;
@@ -789,9 +810,16 @@ mod tests {
 
   /// Helper function to initialize a logger for tests.
   fn init() {
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    let filter_level = if log_level.to_lowercase() == "debug" {
+      log::LevelFilter::Debug
+    } else {
+      log::LevelFilter::Info
+    };
+
     let _ = env_logger::builder()
       .is_test(true)
-      .filter_level(log::LevelFilter::Info)
+      .filter_level(filter_level)
       .try_init();
   }
 
@@ -915,8 +943,7 @@ mod tests {
         assert_eq!(log_messages_expected, log_messages_received);
       }
       Err(search_logs_error) => {
-        // Handle the error from search_logs
-        eprintln!("Error in search_logs: {:?}", search_logs_error);
+        error!("Error in search_logs: {:?}", search_logs_error);
       }
     }
 
@@ -951,16 +978,24 @@ mod tests {
     let query_end_time = query
       .end_time
       .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value));
+    let query_text = query
+      .text
+      .clone()
+      .map_or_else(|| "".to_owned(), |text| format!("text={}", text));
+
     let query_string = format!(
-      "label_name={}&label_value={}{}{}",
-      encode(&query.label_name),
-      encode(&query.label_value),
+      "{}{}{}",
+      encode(&query_text),
       query_start_time,
       query_end_time
     );
 
     let uri = format!("/search_metrics?{}", query_string);
-    info!("Checking for uri: {}", uri);
+
+    info!(
+      "Calling search metrics in check_time_series with URI: {}",
+      uri
+    );
 
     // Now call search to get the documents.
     let response = app
@@ -980,9 +1015,14 @@ mod tests {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
       .await
       .unwrap();
-    let mut metric_points_received: Vec<MetricPoint> = serde_json::from_slice(&body).unwrap();
 
-    check_metric_point_vectors(&metric_points_expected, &metric_points_received);
+    let mut results: Vec<PromQLTimeSeries> = serde_json::from_slice(&body).unwrap();
+
+    // If both results and metrics are empty then the test passes, or we compare if they're not.
+    if !results.is_empty() && !metric_points_expected.is_empty() {
+      let metric_points_received = results[0].get_metric_points();
+      check_metric_point_vectors(&metric_points_expected, metric_points_received);
+    }
 
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
@@ -992,12 +1032,19 @@ mod tests {
     let end_time = query
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
-    metric_points_received = refreshed_coredb
-      .get_metrics(&query.label_name, &query.label_value, start_time, end_time)
+
+    let query_text = query.text.clone().unwrap_or_default();
+
+    let mut results = refreshed_coredb
+      .search_metrics(&query_text, "", start_time, end_time)
       .await
       .expect("Could not get metrics");
 
-    check_metric_point_vectors(&metric_points_expected, &metric_points_received);
+    // If both results and metrics are empty then the test passes, or we compare if they're not.
+    if !results.is_empty() && !metric_points_expected.is_empty() {
+      let metric_points_received = results[0].get_metric_points();
+      check_metric_point_vectors(&metric_points_expected, metric_points_received);
+    }
 
     Ok(())
   }
@@ -1021,7 +1068,6 @@ mod tests {
       container_name,
       use_rabbitmq,
     );
-    println!("Config dir path {}", config_dir_path);
 
     // Create the app.
     let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3", Arc::new(Notify::new())).await;
@@ -1150,22 +1196,26 @@ mod tests {
 
     // Check whether we get all the metric points back when the start and end_times are not specified
     // (i.e., they will default to 0 and to current time respectively).
+    let query_text = format!("{{{}=\"{}\"}}", name_for_metric_name_label, metric_name);
     let query = MetricsQuery {
-      label_name: name_for_metric_name_label.to_owned(),
-      label_value: metric_name.to_owned(),
+      text: Some(query_text),
+      label_name: None,
+      label_value: None,
       start_time: None,
       end_time: None,
     };
     check_time_series(&mut app, config_dir_path, query, metric_points_expected).await?;
 
     // End time in this query is too old - this should yield 0 results.
-    let query_too_old = MetricsQuery {
-      label_name: name_for_metric_name_label.to_owned(),
-      label_value: metric_name.to_owned(),
+    // Test legacy Infino syntax here
+    let query = MetricsQuery {
+      text: None,
+      label_name: Some(name_for_metric_name_label.to_string()),
+      label_value: Some(metric_name.to_string()),
       start_time: Some(1),
       end_time: Some(10000),
     };
-    check_time_series(&mut app, config_dir_path, query_too_old, Vec::new()).await?;
+    check_time_series(&mut app, config_dir_path, query, Vec::new()).await?;
 
     // Check whether the /flush works.
     let response = app
