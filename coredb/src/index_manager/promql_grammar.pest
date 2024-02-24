@@ -17,14 +17,7 @@
 // 
 // 5. See Prometheus docs here:
 // https://prometheus.io/docs/prometheus/latest/querying/basics/
-// 
-// 6. We define expressions as a series of operations or terms that can be combined with binary operators
-// - Compound expressions handle binary operations to avoid direct left recursion
-// - Unary expressions apply a unary operator to any non-operation expression
-// - Non-operation expressions are expressions that do not immediately involve binary or unary operations
-// - Expressions can also have an offset modifier
 
-// We support a simple label for Infino backwards compatibility
 start = { expression }
 
 // Define an expression as a series of operations with increasing precedence

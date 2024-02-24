@@ -167,6 +167,7 @@ impl PromQLObject {
   }
 
   /// Getter for scalar type
+  #[allow(dead_code)]
   pub fn is_scalar(&self) -> bool {
     matches!(self.object_type, PromQLObjectType::Scalar)
   }
@@ -204,6 +205,7 @@ impl PromQLObject {
   }
 
   /// Getter for scalar
+  #[allow(dead_code)]
   pub fn get_scalar(&self) -> f64 {
     self.scalar
   }
@@ -307,18 +309,12 @@ impl PromQLObject {
   pub fn subtract(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a - b);
   }
-
-  #[allow(dead_code)]
   pub fn multiply(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a * b);
   }
-
-  #[allow(dead_code)]
   pub fn divide(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if b != 0.0 { a / b } else { f64::NAN });
   }
-
-  #[allow(dead_code)]
   pub fn modulo(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a % b);
   }
@@ -329,6 +325,7 @@ impl PromQLObject {
   // **** Aggregations: https://prometheus.io/docs/prometheus/latest/querying/operators/
   // apply only to vectors
 
+  /// Helper function for aggregations
   pub fn apply_aggregation_operator(&mut self, operator: AggregationOperator) {
     match operator {
       AggregationOperator::Sum => self.sum(),

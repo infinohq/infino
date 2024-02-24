@@ -1033,7 +1033,6 @@ mod tests {
       .end_time
       .unwrap_or(Utc::now().timestamp_millis() as u64);
 
-    // Use unwrap_or_default to avoid panic if query.text is None, which defaults to an empty string
     let query_text = query.text.clone().unwrap_or_default();
 
     let mut results = refreshed_coredb
