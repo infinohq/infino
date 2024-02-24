@@ -1268,7 +1268,7 @@ mod tests {
     let mut j = 0;
     for ts in &mut vector.vector {
       for mp in ts.get_metric_points() {
-        assert!((mp.get_value() - expected[j]) < f64::EPSILON);
+        assert!((mp.get_value() - expected[j]).abs() < f64::EPSILON);
         j += 1;
       }
     }
@@ -1295,7 +1295,7 @@ mod tests {
     let mut j = 0;
     for ts in &mut vector.vector {
       for mp in ts.get_metric_points() {
-        assert!((mp.get_value() - expected[j]) < f64::EPSILON);
+        assert!((mp.get_value() - expected[j]).abs() < f64::EPSILON);
         j += 1;
       }
     }
@@ -1322,7 +1322,7 @@ mod tests {
     let mut j = 0;
     for ts in &mut vector.vector {
       for mp in ts.get_metric_points() {
-        assert!((mp.get_value() - expected[j]) < f64::EPSILON);
+        assert!((mp.get_value() - expected[j]).abs() < f64::EPSILON);
         j += 1;
       }
     }
