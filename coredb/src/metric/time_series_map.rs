@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
 use serde::de::{MapAccess, Visitor};
@@ -8,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::metric::time_series::TimeSeries;
 use crate::utils::error::CoreDBError;
+use crate::utils::sync::{Arc, RwLock};
 
 #[derive(Debug)]
 /// Represents an time series map - a map of label-id to TimeSeries.

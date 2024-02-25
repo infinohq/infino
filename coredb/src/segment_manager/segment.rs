@@ -517,7 +517,7 @@ impl Default for Segment {
 
 #[cfg(test)]
 mod tests {
-  use std::sync::{Arc, RwLock};
+  use crate::utils::sync::{Arc, RwLock};
 
   use chrono::Utc;
   use log::error;
