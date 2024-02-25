@@ -667,12 +667,12 @@ mod tests {
       .unwrap();
     {
       let ts = ts.clone();
-      let ts = &*ts.read().unwrap();
+      let ts = &*ts.read();
       let other_label_ts = from_disk_segment
         .time_series_map
         .get_time_series(other_label_id)
         .unwrap();
-      let other_label_ts = other_label_ts.read().unwrap();
+      let other_label_ts = other_label_ts.read();
       assert!(ts.eq(&other_label_ts));
       assert_eq!(ts.get_compressed_blocks().len(), 0);
       assert_eq!(ts.get_initial_times().len(), 1);
@@ -814,7 +814,7 @@ mod tests {
           segment_arc
             .append_metric_point("metric_name", &label_map, dp.get_time(), dp.get_value())
             .unwrap();
-          expected_arc.write().unwrap().push(dp);
+          expected_arc.write().push(dp);
         }
       });
       handles.push(handle);
@@ -829,7 +829,7 @@ mod tests {
     assert!(segment.metadata.get_start_time() >= start_time);
     assert!(segment.metadata.get_end_time() <= end_time);
 
-    let mut expected = (*expected.read().unwrap()).clone();
+    let mut expected = (*expected.read()).clone();
 
     let mut labels = HashMap::new();
     labels.insert("label1".to_owned(), "value1".to_owned());

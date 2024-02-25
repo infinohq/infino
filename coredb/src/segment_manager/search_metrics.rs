@@ -68,7 +68,7 @@ impl Segment {
           .get_time_series(*label_id)
           .unwrap()
           .clone();
-        let ts = &*arc_ts.read().unwrap();
+        let ts = &*arc_ts.read();
         ts.get_metrics(range_start_time, range_end_time)
       }
       None => Vec::new(),

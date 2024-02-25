@@ -340,8 +340,8 @@ mod tests {
         for _ in 0..num_metric_points_per_thread {
           let time = rng.gen_range(0..10000);
           let dp = MetricPoint::new(time, 1.0);
-          ts_arc.write().unwrap().append(time, 1.0);
-          expected_arc.write().unwrap().push(dp);
+          ts_arc.write().append(time, 1.0);
+          expected_arc.write().push(dp);
         }
       });
       handles.push(handle);
@@ -351,7 +351,7 @@ mod tests {
       handle.join().unwrap();
     }
 
-    let ts = &*ts.read().unwrap();
+    let ts = &*ts.read();
     let compressed_blocks = ts.get_compressed_blocks();
     let last_block = ts.get_last_block();
     let initial_times = ts.get_initial_times();
@@ -361,7 +361,7 @@ mod tests {
     assert_eq!(initial_times.len(), num_blocks);
 
     let received = ts.get_metrics(0, u64::MAX);
-    (*expected.write().unwrap()).sort();
-    assert_eq!(*expected.read().unwrap(), received);
+    (*expected.write()).sort();
+    assert_eq!(*expected.read(), received);
   }
 }
