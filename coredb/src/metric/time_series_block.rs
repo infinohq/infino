@@ -201,8 +201,8 @@ mod tests {
         for _ in 0..num_metric_points_per_thread {
           let time = rng.gen_range(0..10000);
           let dp = MetricPoint::new(time, 1.0);
-          tsb_arc.write().unwrap().append(time, 1.0).unwrap();
-          (*(expected_arc.write().unwrap())).push(dp);
+          tsb_arc.write().append(time, 1.0).unwrap();
+          (*(expected_arc.write())).push(dp);
         }
       });
       handles.push(handle);
@@ -213,15 +213,12 @@ mod tests {
     }
 
     // Sort the expected values, as the metric points should be appended in sorted order.
-    (*expected.write().unwrap()).sort();
+    (*expected.write()).sort();
 
-    assert_eq!(
-      *expected.read().unwrap(),
-      *tsb.read().unwrap().metric_points
-    );
+    assert_eq!(*expected.read(), *tsb.read().metric_points);
 
     // If we append more than BLOCK_SIZE, it should result in an error.
-    let retval = tsb.write().unwrap().append(1000, 1000.0);
+    let retval = tsb.write().append(1000, 1000.0);
     assert!(retval.is_err());
   }
 }
