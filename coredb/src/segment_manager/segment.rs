@@ -259,8 +259,84 @@ impl Segment {
     Ok(())
   }
 
-  /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
   pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
+    // Acquire a lock - so that only one thread can commit at a time.
+    let mut lock = self.commit_lock.lock().await;
+    *lock = thread::current().id();
+
+    // Function to serialize a component to a given path.
+    async fn serialize_component<T: serde::Serialize>(
+      component: &T,
+      path: String,
+      storage: &Storage,
+    ) -> (u64, u64) {
+      // TODO: handle the error gracefully.
+      storage
+        .write(component, &path)
+        .await
+        .unwrap_or_else(|_| panic!("Could not write to file {}", path))
+    }
+
+    // Serialize each of the components of a segment. Run these concurrently in the same task using tokio::join.
+    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = tokio::join!(
+      serialize_component(&self.terms, get_joined_path(dir, TERMS_FILE_NAME), storage),
+      serialize_component(
+        &self.inverted_map,
+        get_joined_path(dir, INVERTED_MAP_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.forward_map,
+        get_joined_path(dir, FORWARD_MAP_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.labels,
+        get_joined_path(dir, LABELS_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.time_series_map,
+        get_joined_path(dir, TIME_SERIES_FILE_NAME),
+        storage
+      ),
+    );
+
+    // Calculate uncompressed and compressed segment size.
+    let (uncompressed_segment_size, compressed_segment_size) = (
+      terms_result.0
+        + inverted_map_result.0
+        + forward_map_result.0
+        + labels_result.0
+        + time_series_result.0,
+      terms_result.1
+        + inverted_map_result.1
+        + forward_map_result.1
+        + labels_result.1
+        + time_series_result.1,
+    );
+
+    // Update the metadata with segment size.
+    let (uncompressed_metadata_size, compressed_metadata_size) = self.metadata.get_metadata_size();
+    let uncompressed_segment_size = uncompressed_segment_size + uncompressed_metadata_size;
+    let compressed_segment_size = compressed_segment_size + compressed_metadata_size;
+    self
+      .metadata
+      .update_segment_size(uncompressed_segment_size, compressed_segment_size);
+    storage
+      .write(&self.metadata, &get_joined_path(dir, METADATA_FILE_NAME))
+      .await?;
+
+    debug!(
+      "Serialized segment to {} bytes uncompressed, {} bytes compressed",
+      uncompressed_segment_size, compressed_segment_size
+    );
+
+    Ok((uncompressed_segment_size, compressed_segment_size))
+  }
+
+  /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
+  /*pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
     let mut lock = self.commit_lock.lock().await;
     *lock = thread::current().id();
 
@@ -336,7 +412,7 @@ impl Segment {
     );
 
     Ok((uncompressed_segment_size, compressed_segment_size))
-  }
+  }*/
 
   /// Read the segment from the specified directory.
   pub async fn refresh(storage: &Storage, dir: &str) -> Result<(Segment, u64), CoreDBError> {
