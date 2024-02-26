@@ -790,9 +790,9 @@ mod tests {
   use urlencoding::encode;
 
   use coredb::index_manager::index::Index;
-  use coredb::index_manager::promql_time_series::PromQLTimeSeries;
   use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
+  use coredb::request_manager::promql_time_series::PromQLTimeSeries;
   use coredb::storage_manager::storage::Storage;
   use coredb::storage_manager::storage::StorageType;
   use coredb::utils::io::get_joined_path;

@@ -8,7 +8,7 @@ use crate::log::constants::BLOCK_SIZE_FOR_LOG_MESSAGES;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_block::PostingsBlock;
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
-use crate::segment_manager::query_dsl::Rule;
+use crate::request_manager::query_dsl::Rule;
 
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::{AstError, SegmentSearchError};

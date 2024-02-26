@@ -451,7 +451,7 @@ mod tests {
   use super::*;
   use crate::metric::constants::MetricsQueryCondition;
   use crate::metric::metric_point::MetricPoint;
-  use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
+  use crate::request_manager::query_dsl::{QueryDslParser, Rule};
   use crate::storage_manager::storage::StorageType;
   use crate::utils::sync::{is_sync_send, thread};
   use pest::iterators::Pairs;

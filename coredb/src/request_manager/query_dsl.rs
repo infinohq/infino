@@ -26,7 +26,7 @@ use pest::Parser;
 use pest_derive::Parser;
 
 #[derive(Parser)]
-#[grammar = "src/segment_manager/query_dsl_grammar.pest"]
+#[grammar = "src/request_manager/query_dsl_grammar.pest"]
 
 pub struct QueryDslParser;
 

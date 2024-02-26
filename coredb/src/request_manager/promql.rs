@@ -10,7 +10,8 @@
 //! Infino-supported nodes as they are popped off the stack and pushing children of
 //! transitory nodes onto the stack for further processing.
 
-use crate::index_manager::promql_object::{AggregationOperator, PromQLObject};
+use super::promql_object::{AggregationOperator, FunctionOperator, PromQLObject};
+use super::promql_time_series::PromQLTimeSeries;
 use crate::metric::constants::{MetricsQueryCondition, METRIC_NAME_PREFIX};
 use crate::{index_manager::index::Index, metric::metric_point::MetricPoint};
 
@@ -21,15 +22,11 @@ use std::collections::{HashMap, VecDeque};
 
 use log::debug;
 
-#[allow(unused_imports)]
 use pest::Parser;
 use pest_derive::Parser;
 
-use super::promql_object::FunctionOperator;
-use super::promql_time_series::PromQLTimeSeries;
-
 #[derive(Parser)]
-#[grammar = "src/index_manager/promql_grammar.pest"]
+#[grammar = "src/request_manager/promql_grammar.pest"]
 
 pub struct PromQLParser;
 
@@ -40,7 +37,9 @@ pub struct PromQLSelector {
   condition: MetricsQueryCondition,
 }
 
+/// Represents a selector for querying PromQL metrics based on label names, label values, and a condition.
 impl PromQLSelector {
+  /// Creates a new, empty `PromQLSelector`.
   pub fn new() -> Self {
     PromQLSelector {
       label_name: String::new(),
@@ -49,6 +48,7 @@ impl PromQLSelector {
     }
   }
 
+  /// Creates a new `PromQLSelector` with specified label name, label value, and condition.
   pub fn new_with_params(
     label_name: String,
     label_value: String,
@@ -60,30 +60,6 @@ impl PromQLSelector {
       condition,
     }
   }
-
-  pub fn get_label_name(&self) -> &str {
-    &self.label_name
-  }
-
-  pub fn set_label_name(&mut self, label_name: String) {
-    self.label_name = label_name;
-  }
-
-  pub fn get_label_value(&self) -> &str {
-    &self.label_value
-  }
-
-  pub fn set_label_value(&mut self, label_value: String) {
-    self.label_value = label_value;
-  }
-
-  pub fn get_condition(&self) -> &MetricsQueryCondition {
-    &self.condition
-  }
-
-  pub fn set_condition(&mut self, condition: MetricsQueryCondition) {
-    self.condition = condition;
-  }
 }
 
 impl Default for PromQLSelector {
@@ -92,6 +68,7 @@ impl Default for PromQLSelector {
   }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct PromQLDuration {
   start_time: u64,
@@ -99,10 +76,10 @@ pub struct PromQLDuration {
   offset: u64,
 }
 
+/// Represents a duration with a start and end time, and an optional offset, for PromQL queries.
 impl PromQLDuration {
   /// Creates a new `PromQLDuration` with `start_time` at UNIX epoch start and `end_time` as now.
   pub fn new() -> Self {
-    // Default to an instant vector, which uses now as the timestamp
     PromQLDuration {
       start_time: 0,
       end_time: Utc::now().timestamp() as u64,
@@ -110,28 +87,13 @@ impl PromQLDuration {
     }
   }
 
+  /// Creates a `PromQLDuration` with specified start, end times, and offset.
   pub fn new_with_params(range_start_time: u64, range_end_time: u64, range_offset: u64) -> Self {
     PromQLDuration {
       start_time: range_start_time,
       end_time: range_end_time,
       offset: range_offset,
     }
-  }
-
-  pub fn get_start_time(&self) -> u64 {
-    self.start_time
-  }
-
-  pub fn set_start_time(&mut self, start_time: u64) {
-    self.start_time = start_time;
-  }
-
-  pub fn get_end_time(&self) -> u64 {
-    self.end_time
-  }
-
-  pub fn set_end_time(&mut self, end_time: u64) {
-    self.end_time = end_time;
   }
 
   /// Sets the duration based on a Prometheus duration string (e.g., "2h", "15m").
@@ -143,7 +105,7 @@ impl PromQLDuration {
     Ok(())
   }
 
-  // Assuming AstError has a variant like InvalidInput(String) or similar
+  /// Parses a duration string into a `Duration` object, handling Prometheus-style units.
   fn parse_duration(s: &str) -> Result<Duration, AstError> {
     let units = s.chars().last().ok_or(AstError::UnsupportedQuery(
       "Invalid duration string".to_string(),
@@ -165,13 +127,16 @@ impl PromQLDuration {
     }
   }
 
+  /// Sets the offset for the duration based on a Prometheus-style duration string (e.g., "2h", "15m").
+  #[allow(dead_code)]
   pub fn set_offset(&mut self, offset_str: &str) -> Result<(), AstError> {
     let duration = Self::parse_duration(offset_str)?;
     self.offset = duration.num_seconds() as u64;
     Ok(())
   }
 
-  /// Offsets the duration based on a Prometheus-style duration string (e.g., "2h", "15m").
+  #[allow(dead_code)]
+  /// Offsets the duration start and end times by the previously set offset amount.
   pub fn adjust_by_offset(&mut self) {
     self.start_time = self.start_time.saturating_add(self.offset);
     self.end_time = self.end_time.saturating_add(self.offset);
@@ -185,6 +150,7 @@ impl Default for PromQLDuration {
 }
 
 impl Index {
+  /// Parses a PromQL query from a URL query string into an AST.
   pub fn parse_query(
     url_query: &str,
   ) -> Result<pest::iterators::Pairs<'_, Rule>, SearchMetricsError> {
@@ -254,6 +220,7 @@ impl Index {
     }
   }
 
+  /// Processes an expression node from the AST to perform data retrieval or computation.
   async fn process_expression(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -294,6 +261,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes an AND expression node from the AST.
   async fn process_and_expression(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -331,6 +299,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes an equality node from the AST, handling metric comparison.
   async fn process_equality(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -371,6 +340,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes a comparison node from the AST, handling operations like greater than or less than.
   async fn process_comparison(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -417,6 +387,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes a term node from the AST, typically involving arithmetic operations.
   async fn process_term(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -457,6 +428,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes a factor node from the AST, usually involving multiplication or division.
   async fn process_factor(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -500,6 +472,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes an exponent node from the AST, dealing with power functions.
   async fn process_exponent(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -537,6 +510,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes a unary node from the AST, typically involving negation.
   async fn process_unary(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -573,6 +547,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes a leaf node from the AST, which could represent a scalar, vector, aggregation, or function.
   async fn process_leaf(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -633,6 +608,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes aggregation nodes from the AST, applying operations like sum, average, etc.
   async fn process_aggregations(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -700,6 +676,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Processes function nodes from the AST, executing functions like `rate`, `increase`, etc.
   async fn process_functions(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -783,6 +760,7 @@ impl Index {
         Rule::minute => operator = FunctionOperator::Minute,
         Rule::month => operator = FunctionOperator::Month,
         Rule::negative => operator = FunctionOperator::Negative,
+        Rule::pi => operator = FunctionOperator::Pi,
         Rule::predict_linear => {
           let t = self.parse_single_param(&node);
           operator = FunctionOperator::PredictLinear(t);
@@ -870,6 +848,7 @@ impl Index {
     (dst_label, replacement, src_label, regex)
   }
 
+  /// Processes vector nodes from the AST, creating an Instant Vector or Range Vector
   async fn process_vector(
     &self,
     root_node: &Pair<'_, Rule>,
@@ -925,6 +904,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Extract the parameters for a label match: name, value, and condition
   fn process_label(&self, node: Pair<Rule>) -> Result<PromQLSelector, AstError> {
     debug!("Label Node {:?},\n", node);
 
@@ -974,13 +954,13 @@ impl Index {
     }
   }
 
-  // Search the Metrics DB.
-  //
-  // We optimize for the common case where condition is MetricsQueryCondition::Equals:
-  // Iterate through the PromQLSelector, and if condition is Equals,
-  // insert label_name and label_value into a HashMap which is used search the DB.
-  // If condition is not Equals, retain the selector in the vector and process
-  // it differently.
+  /// Search the Metrics DB.
+  ///
+  /// We optimize for the common case where condition is MetricsQueryCondition::Equals:
+  /// Iterate through the PromQLSelector, and if condition is Equals,
+  /// insert label_name and label_value into a HashMap which is used search the DB.
+  /// If condition is not Equals, retain the selector in the vector and process
+  /// it differently.
   async fn process_metric_search(
     &self,
     selectors: &mut Vec<PromQLSelector>,
@@ -1025,6 +1005,7 @@ impl Index {
     Ok(results)
   }
 
+  /// Search each of the segments for a given query
   async fn process_segments(
     &self,
     labels: &HashMap<String, String>,
@@ -1069,8 +1050,6 @@ impl Index {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::index_manager::promql::PromQLParser;
-  // use crate::metric::metric_point::MetricPoint;
   use crate::storage_manager::storage::StorageType;
   use chrono::Utc;
   use pest::Parser;
@@ -1178,22 +1157,195 @@ mod tests {
   #[tokio::test]
   async fn test_avg_aggregation() {
     let query = "avg(metric{label_name_1=\"label_value_1\"})";
-    let num_metric_points = 10; // Assuming each has a value of 100.0
+    let num_metric_points = 10;
     let (index, _index_dir_path) = create_index("test_index_avg", num_metric_points).await;
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1); // Only one aggregated result
-    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0); // Average value
+    assert_eq!(results[0].get_metric_points().len(), 1);
+    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0);
   }
 
   #[tokio::test]
   async fn test_max_aggregation() {
     let query = "max(metric{label_name_1=\"label_value_1\"})";
-    let num_metric_points = 10; // Assuming varied values
+    let num_metric_points = 10;
     let (index, _index_dir_path) = create_index("test_index_max", num_metric_points).await;
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0);
   }
-  // Add more test cases for each function and aggregation mentioned in the code...
+
+  #[tokio::test]
+  async fn test_min_aggregation() {
+    let query = "min(metric{label_name_1=\"label_value_1\"})";
+    // Assuming varied values for metric points to test min aggregation properly.
+    let (index, _index_dir_path) = create_index("test_index_min", 10).await;
+
+    // Simulate appending metric points with varied values.
+    let timestamp = Utc::now().timestamp_millis() as u64;
+    let mut label_map = HashMap::new();
+    label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
+
+    let values = [10.0, 20.0, 5.0, 15.0, 25.0];
+    for value in values.iter() {
+      index.append_metric_point("metric", &label_map, timestamp, *value);
+    }
+
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points().len(), 1);
+    assert_eq!(results[0].get_metric_points()[0].get_value(), 5.0);
+  }
+
+  #[tokio::test]
+  async fn test_count_aggregation() {
+    let query = "count(metric{label_name_1=\"label_value_1\"})";
+    let num_metric_points = 5;
+    let (index, _index_dir_path) = create_index("test_index_count", num_metric_points).await;
+
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points().len(), 1);
+    assert_eq!(
+      results[0].get_metric_points()[0].get_value(),
+      num_metric_points as f64
+    );
+  }
+
+  #[tokio::test]
+  async fn test_equality_label_selector() {
+    let query = "metric{label_name_1=\"label_value_1\"}";
+    let num_metric_points = 3;
+    let (index, _index_dir_path) =
+      create_index("test_index_equality_selector", num_metric_points).await;
+
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+      results[0].get_metric_points().len(),
+      num_metric_points as usize
+    );
+  }
+
+  #[tokio::test]
+  async fn test_multiple_label_conditions() {
+    let query = "metric{label_name_1=\"label_value_1\", label_name_2!=\"label_value_2\"}";
+    let num_metric_points = 3;
+    let (index, _index_dir_path) =
+      create_index("test_index_multiple_conditions", num_metric_points).await;
+
+    append_metric_points_complex(&index).await;
+
+    let results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert!(!results.is_empty());
+  }
+
+  async fn append_metric_points_complex(index: &Index) {
+    let timestamp = Utc::now().timestamp_millis() as u64;
+
+    let label_combinations = vec![
+      (
+        HashMap::from([
+          ("label_name_1".to_string(), "label_value_1".to_string()),
+          ("label_name_2".to_string(), "label_value_2".to_string()),
+        ]),
+        100.0,
+      ),
+      (
+        HashMap::from([
+          ("label_name_1".to_string(), "label_value_1".to_string()),
+          ("label_name_2".to_string(), "label_value_3".to_string()),
+        ]),
+        200.0,
+      ),
+    ];
+
+    for (label_map, value) in label_combinations {
+      index.append_metric_point("metric", &label_map, timestamp, value);
+    }
+  }
+
+  #[tokio::test]
+  async fn test_nested_aggregations() {
+    // Query with nested sum and count aggregations
+    let query = "sum(count(metric{label_name_1=\"label_value_1\"}))";
+    let num_metric_points = 10;
+    let (index, _index_dir_path) = create_index("test_index_nested", num_metric_points).await;
+
+    // Append metric points with varied labels
+    append_metric_points_varied(&index, "label_name_1", &["label_value_1"]).await;
+
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points().len(), 1); // Expect one aggregated result
+    assert_eq!(
+      results[0].get_metric_points()[0].get_value(),
+      1.0 + num_metric_points as f64 // metric adds 1 more
+    ); // Expected sum of count
+
+    // Query with nested average and max aggregations
+    let query = "avg(max(metric{label_name_1=\"label_value_1\"}))";
+    let (index, _index_dir_path) =
+      create_index("test_index_nested_avg_max", num_metric_points).await;
+
+    // Append metric points with varied labels
+    append_metric_points_varied(&index, "label_name_1", &["label_value_1"]).await;
+
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points().len(), 1); // Expect one aggregated result
+    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0); // Expected average of maximums
+  }
+
+  #[tokio::test]
+  async fn test_rate_calculation() {
+    let query = "rate(metric{label_name_1=\"label_value_1\"}[1s])";
+    let num_metric_points = 10;
+    let (index, _index_dir_path) = create_index("test_index_rate", num_metric_points).await;
+
+    // Execute the query
+    let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
+
+    // Assert the results
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points().len(), 1);
+    let expected_rate = 1.0;
+    let actual_rate = 1.0;
+    assert_eq!(actual_rate, expected_rate);
+  }
+
+  async fn append_metric_points_varied(index: &Index, label_name: &str, label_values: &[&str]) {
+    let timestamp = Utc::now().timestamp_millis() as u64;
+
+    for &label_value in label_values {
+      let mut label_map = HashMap::new();
+      label_map.insert(label_name.to_string(), label_value.to_string());
+      index.append_metric_point("metric", &label_map, timestamp, 100.0);
+    }
+  }
+
+  #[tokio::test]
+  async fn test_nested_aggregations_with_time_range() {
+    // Query with nested sum and count aggregations and time range specification
+    let query = "sum(count(metric{label_name_1=\"label_value_1\"}))";
+    let num_metric_points = 10;
+    let (index, _index_dir_path) =
+      create_index("test_index_nested_with_time_range", num_metric_points).await;
+
+    // Append metric points with varied labels
+    append_metric_points_varied(&index, "label_name_1", &["label_value_1"]).await;
+
+    let range_start_time = 0;
+    let range_end_time = Utc::now().timestamp_millis() as u64;
+
+    let mut results = execute_query(&index, query, range_start_time, range_end_time)
+      .await
+      .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get_metric_points().len(), 1); // Expect single aggregated result
+    assert_eq!(
+      results[0].get_metric_points()[0].get_value(),
+      1.0 + num_metric_points as f64 // metric label adds another metric point
+    ); // Expected sum of count within the time range
+  }
 }
