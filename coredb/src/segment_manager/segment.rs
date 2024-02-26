@@ -1,7 +1,7 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::vec::Vec;
 
 use dashmap::DashMap;
@@ -431,6 +431,41 @@ impl Segment {
     Ok(log_messages)
   }
 
+  /// Match the exact phrase in log messages from the given log IDs in parallel.
+  /// If the field name is provided, match the phrase in that field; otherwise, match in the text.
+  pub fn find_exact_phrase_matches(
+    &self,
+    log_message_ids: &[u32],
+    field_name: Option<&str>,
+    phrase_text: &str,
+  ) -> HashSet<u32> {
+    let matching_document_ids: HashSet<_> = log_message_ids
+      .iter()
+      .filter_map(|log_id| {
+        if let Some(log_message) = self.forward_map.get(log_id) {
+          let log_message = log_message.value();
+          let text_to_search = match field_name {
+            Some(field) => log_message
+              .get_fields()
+              .get(field)
+              .map_or("", String::as_str),
+            None => log_message.get_text(),
+          };
+
+          if text_to_search.contains(phrase_text) {
+            Some(*log_id)
+          } else {
+            None
+          }
+        } else {
+          None
+        }
+      })
+      .collect();
+
+    matching_document_ids
+  }
+
   /// Returns true if this segment overlaps with the given range.
   pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
     is_overlap(
@@ -783,6 +818,49 @@ mod tests {
 
     expected.sort();
     assert_eq!(expected, received);
+  }
+
+  #[test]
+  fn test_match_exact_phrase() {
+    let segment = Segment::new();
+
+    segment
+      .append_log_message(1001, &HashMap::new(), "log 1")
+      .unwrap();
+    segment
+      .append_log_message(1002, &HashMap::new(), "log 2")
+      .unwrap();
+    segment
+      .append_log_message(1003, &HashMap::new(), "log 3")
+      .unwrap();
+
+    // Get all log message IDs from the forward map.
+    let all_log_ids: Vec<u32> = segment
+      .get_forward_map()
+      .iter()
+      .map(|entry| *entry.key())
+      .collect();
+
+    // Test matching exact phrase in text.
+    let log_ids_text = segment.find_exact_phrase_matches(&all_log_ids, None, "log 2");
+    assert_eq!(log_ids_text, HashSet::from_iter(vec![1]));
+
+    // Test matching exact phrase in a specific field.
+    let mut fields = HashMap::new();
+    fields.insert("field_name".to_string(), "log 3".to_string());
+    segment
+      .append_log_message(1004, &fields, "some message")
+      .unwrap();
+
+    let all_log_ids_with_fields: Vec<u32> = segment
+      .get_forward_map()
+      .iter()
+      .map(|entry| *entry.key())
+      .collect();
+
+    let log_ids_field =
+      segment.find_exact_phrase_matches(&all_log_ids_with_fields, Some("field_name"), "log 3");
+    assert_eq!(log_ids_field, HashSet::from_iter(vec![3]));
   }
 
   #[test]
