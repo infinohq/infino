@@ -7,7 +7,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::f64::consts::PI;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromQLTimeSeries {
@@ -18,6 +17,7 @@ pub struct PromQLTimeSeries {
 // For implementing PromQL functions on time series
 
 impl PromQLTimeSeries {
+  /// Creates a new empty `PromQLTimeSeries`.
   pub fn new() -> Self {
     PromQLTimeSeries {
       labels: HashMap::new(),
@@ -25,6 +25,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Creates a new `PromQLTimeSeries` with the given labels and metric points.
   pub fn new_with_params(labels: HashMap<String, String>, metric_points: Vec<MetricPoint>) -> Self {
     PromQLTimeSeries {
       labels,
@@ -32,52 +33,59 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Gets a reference to the labels associated with the time series.
   pub fn get_labels(&self) -> &HashMap<String, String> {
     &self.labels
   }
 
+  /// Gets a mutable reference to the metric points of the time series.
   pub fn get_metric_points(&mut self) -> &mut Vec<MetricPoint> {
     &mut self.metric_points
   }
 
-  /// Take for vector - getter to allow the vector to be
-  /// transferred out of the object and comply with Rust's ownership rules
+  /// Takes ownership of the metric points, returning them and leaving the time series empty.
+  /// This complies with Rust's ownership rules.
   pub fn take_metric_points(&mut self) -> Vec<MetricPoint> {
     std::mem::take(&mut self.metric_points)
   }
 
+  /// Sets the labels associated with the time series.
   pub fn set_labels(&mut self, labels: HashMap<String, String>) {
     self.labels = labels;
   }
 
+  /// Sets the metric points of the time series.
   pub fn set_metric_points(&mut self, metric_points: Vec<MetricPoint>) {
     self.metric_points = metric_points;
   }
 
+  /// Checks if the time series is empty.
   pub fn is_empty(&self) -> bool {
     self.labels.is_empty() && self.metric_points.is_empty()
   }
 
+  /// Returns the most recent timestamp among the metric points, if any.
   fn most_recent_timestamp(&self) -> Option<u64> {
     self.metric_points.iter().map(|mp| mp.get_time()).max()
   }
 
   // **** Functions: https://prometheus.io/docs/prometheus/latest/querying/functions
 
-  // Applies the absolute value operation to every metric point's value
+  /// Applies the absolute value operation to every metric point's value.
   pub fn abs(&mut self) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().abs());
     }
   }
 
-  // Applies the ceiling operation to every metric point's value
+  /// Applies the ceiling operation to every metric point's value.
   pub fn ceil(&mut self) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().ceil());
     }
   }
 
+  /// Computes the changes between consecutive metric points.
   pub fn changes(&mut self) {
     let count = self
       .metric_points
@@ -91,27 +99,28 @@ impl PromQLTimeSeries {
     self.set_metric_points(vec![MetricPoint::new(last_time, count as f64)]);
   }
 
-  // Applies clamping to every metric point's value
+  /// Applies clamping to every metric point's value.
   pub fn clamp(&mut self, min: f64, max: f64) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().min(max).max(min));
     }
   }
 
-  // Clamps the maximum value of metric points
+  /// Clamps the maximum value of metric points.
   pub fn clamp_max(&mut self, max: f64) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().min(max));
     }
   }
 
-  // Clamps the minimum value of metric points
+  /// Clamps the minimum value of metric points.
   pub fn clamp_min(&mut self, min: f64) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().max(min));
     }
   }
 
+  /// Extracts the day of the month from each metric point's timestamp.
   pub fn day_of_month(&mut self) {
     for mp in &mut self.metric_points {
       if let Some(datetime) = Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
@@ -120,6 +129,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Extracts the day of the week from each metric point's timestamp.
   pub fn day_of_week(&mut self) {
     for mp in &mut self.metric_points {
       if let Some(datetime) = Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
@@ -128,6 +138,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Extracts the day of the year from each metric point's timestamp.
   pub fn day_of_year(&mut self) {
     for mp in &mut self.metric_points {
       if let Some(datetime) = Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
@@ -136,6 +147,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Extracts the number of days in the month from each metric point's timestamp.
   pub fn days_in_month(&mut self) {
     for mp in &mut self.metric_points {
       if let Some(datetime) = Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
@@ -157,7 +169,7 @@ impl PromQLTimeSeries {
     }
   }
 
-  // Computes the difference between the first and last value of the metric points in the time series
+  /// Computes the difference between the first and last value of the metric points.
   pub fn delta(&mut self) {
     if let Some(first_point) = self.metric_points.first() {
       if let Some(last_point) = self.metric_points.last() {
@@ -167,7 +179,7 @@ impl PromQLTimeSeries {
     }
   }
 
-  // Computes the derivative using simple linear regression
+  /// Computes the derivative of metric points using simple linear regression.
   pub fn deriv(&mut self) {
     if let Some(deriv) = self.calculate_derivative(&self.metric_points) {
       // Replace the metric points with a single MetricPoint containing the derivative
@@ -180,6 +192,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Calculates the slope of the linear regression line through the metric points.
   fn calculate_derivative(&self, metric_points: &[MetricPoint]) -> Option<f64> {
     if metric_points.len() < 2 {
       return None; // Not enough points
@@ -205,14 +218,14 @@ impl PromQLTimeSeries {
     Some(slope / (metric_points.last()?.get_time() as f64 - first_time))
   }
 
-  // Converts radians to degrees for each metric point's value
+  /// Converts the value of each metric point from radians to degrees.
   pub fn deg(&mut self) {
     for mp in &mut self.metric_points {
-      mp.set_value(mp.get_value() * (180.0 / PI));
+      mp.set_value(mp.get_value() * (180.0 / std::f64::consts::PI));
     }
   }
 
-  // Computes the exponential function for each metric point's value
+  /// Applies the exponential function to the value of each metric point.
   pub fn exp(&mut self) {
     for mp in &mut self.metric_points {
       let exponential = mp.get_value().exp();
@@ -220,23 +233,23 @@ impl PromQLTimeSeries {
     }
   }
 
-  // Applies the floor function to each metric point's value
+  /// Applies the floor function to the value of each metric point.
   pub fn floor(&mut self) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().floor());
     }
   }
 
+  /// Applies the Holt-Winters forecasting method to the metric points.
   pub fn holt_winters(&mut self, alpha: f64, beta: f64) {
     if self.metric_points.is_empty() {
       return;
     }
 
-    let mut level: f64 = self.metric_points[0].get_value(); // Initial level
-    let mut trend: f64 = 0.0; // Initial trend
+    let mut level = self.metric_points[0].get_value(); // Initial level
+    let mut trend = 0.0; // Initial trend
     if self.metric_points.len() > 1 {
       trend = self.metric_points[1].get_value() - self.metric_points[0].get_value();
-      // Initial trend
     }
 
     for i in 0..self.metric_points.len() {
@@ -263,19 +276,21 @@ impl PromQLTimeSeries {
       .set_value(last_value + trend);
   }
 
-  // Extracts the hour from each metric point's timestamp
+  /// Extracts the hour from each metric point's timestamp and sets it as the value.
   pub fn hour(&mut self) {
     for mp in &mut self.metric_points {
-      if let Some(datetime) = Utc.timestamp_opt(mp.get_time() as i64, 0).earliest() {
+      if let Some(datetime) = chrono::Utc
+        .timestamp_opt(mp.get_time() as i64, 0)
+        .earliest()
+      {
         mp.set_value(datetime.hour() as f64);
       }
     }
   }
 
-  // Assuming MetricPoint.get_time() is in seconds and MetricPoint.get_value() is the metric value.
+  /// Computes the instantaneous delta between the last two metric points.
   pub fn idelta(&mut self) {
     if self.metric_points.len() < 2 {
-      // Not enough points to compute a delta
       return;
     }
 
@@ -283,59 +298,50 @@ impl PromQLTimeSeries {
     let second_last_value = self.metric_points[self.metric_points.len() - 2].get_value();
     let delta = last_value - second_last_value;
 
-    // Replace the metric points with a single MetricPoint containing the delta
     let last_time = self.metric_points.last().unwrap().get_time();
     self.metric_points = vec![MetricPoint::new(last_time, delta)];
   }
 
+  /// Computes the total increase across all metric points, adjusting for counter resets.
   pub fn increase(&mut self) {
     if self.metric_points.len() < 2 {
-      // Not enough points to compute an increase
       return;
     }
 
     let first_value = self.metric_points.first().unwrap().get_value();
     let last_value = self.metric_points.last().unwrap().get_value();
 
-    // Adjust for counter resets
     let mut increase = last_value - first_value;
     if increase < 0.0 {
-      // Counter reset, adjust for overflow
       increase += f64::MAX - first_value;
     }
 
-    // Replace the metric points with a single MetricPoint containing the increase
     let last_time = self.metric_points.last().unwrap().get_time();
     self.metric_points = vec![MetricPoint::new(last_time, increase)];
   }
 
+  /// Computes the instantaneous rate of increase per second between the last two metric points.
   pub fn irate(&mut self) {
     let points_len = self.metric_points.len();
-    // Ensure there are at least two points to compute an irate
     if points_len < 2 {
       return;
     }
 
-    // Use the last two points
     let penultimate_point = &self.metric_points[points_len - 2];
     let last_point = &self.metric_points[points_len - 1];
 
     let time_diff = (last_point.get_time() as f64) - (penultimate_point.get_time() as f64);
     let value_diff = last_point.get_value() - penultimate_point.get_value();
 
-    // Ensure time_diff is not zero to avoid division by zero
     if time_diff == 0.0 {
       return;
     }
 
-    // Compute per-second rate of increase
     let rate = value_diff / time_diff;
-
-    // Replace the metric points with a single MetricPoint containing the rate
-    // Use the time of the last point for the new single metric point
     self.metric_points = vec![MetricPoint::new(last_point.get_time(), rate)];
   }
 
+  /// Joins labels for each metric point using a specified separator.
   pub fn label_join(&mut self, dst_label: &str, separator: &str, src_labels: &[String]) {
     for _mp in &mut self.metric_points {
       let joined_value = src_labels
@@ -347,6 +353,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Replaces a label's value with a new value if it matches a regex pattern.
   pub fn label_replace(
     &mut self,
     dst_label: &str,
@@ -367,6 +374,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Applies the natural logarithm to the value of each metric point, with special handling for non-positive values.
   pub fn ln(&mut self) {
     for mp in &mut self.metric_points {
       let value = mp.get_value();
@@ -380,6 +388,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Applies the base-2 logarithm to the value of each metric point, with special handling for non-positive values.
   pub fn log2(&mut self) {
     for mp in &mut self.metric_points {
       let value = mp.get_value();
@@ -393,6 +402,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Applies the base-10 logarithm to the value of each metric point, with special handling for non-positive values.
   pub fn log10(&mut self) {
     for mp in &mut self.metric_points {
       let value = mp.get_value();
@@ -406,9 +416,10 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Sets the value of each metric point to the minute of the hour extracted from its timestamp, handling invalid timestamps by setting value to NaN.
   pub fn minute(&mut self) {
     for mp in &mut self.metric_points {
-      if let Some(datetime) = Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
+      if let Some(datetime) = chrono::Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
         mp.set_value(datetime.minute() as f64);
       } else {
         mp.set_value(f64::NAN);
@@ -416,9 +427,10 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Sets the value of each metric point to the month extracted from its timestamp, handling invalid timestamps by setting value to NaN.
   pub fn month(&mut self) {
     for mp in &mut self.metric_points {
-      if let Some(datetime) = Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
+      if let Some(datetime) = chrono::Utc.timestamp_opt(mp.get_time() as i64, 0).latest() {
         mp.set_value(datetime.month() as f64);
       } else {
         mp.set_value(f64::NAN);
@@ -426,14 +438,14 @@ impl PromQLTimeSeries {
     }
   }
 
-  // Converts metric points in a time series to negative
+  /// Converts the value of each metric point to its negative equivalent.
   pub fn negative(&mut self) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value() * -1.0);
     }
   }
 
-  // Forecasts future values based on linear regression.
+  /// Forecasts future metric values based on a linear regression of existing points, clearing existing points and storing the forecasted value.
   pub fn predict_linear(&mut self, t: f64) {
     if self.metric_points.len() < 2 {
       return; // Not enough points to perform linear regression
@@ -444,7 +456,6 @@ impl PromQLTimeSeries {
     let mut sum_x_squared = 0.0;
     let mut sum_xy = 0.0;
     let n = self.metric_points.len() as f64;
-
     let first_time = self.metric_points.first().unwrap().get_time() as f64;
 
     for point in &self.metric_points {
@@ -458,7 +469,6 @@ impl PromQLTimeSeries {
 
     let slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x_squared - sum_x * sum_x);
     let offset = (sum_y - slope * sum_x) / n;
-
     let prediction = slope * (t - first_time) + offset;
     self.metric_points.clear(); // Remove existing points
     self
@@ -466,6 +476,7 @@ impl PromQLTimeSeries {
       .push(MetricPoint::new((t * 1000.0) as u64, prediction)); // Assuming t is in seconds
   }
 
+  /// Calculates and stores the rate of change between the first and last metric points over their duration.
   pub fn rate(&mut self) {
     if self.metric_points.len() < 2 {
       return; // Not enough points to calculate rate
@@ -479,14 +490,13 @@ impl PromQLTimeSeries {
     let last_value = self.metric_points.last().unwrap().get_value();
 
     let rate = (last_value - first_value) / duration_seconds;
-
-    // Replace the metric points with a single MetricPoint containing the rate
     self.metric_points.clear();
     self
       .metric_points
       .push(MetricPoint::new(last_time as u64, rate));
   }
 
+  /// Counts the number of resets (when the current value is less than the previous value) in the time series.
   pub fn resets(&mut self) {
     if self.metric_points.len() < 2 {
       return; // Not enough points to calculate resets
@@ -512,6 +522,7 @@ impl PromQLTimeSeries {
       .push(MetricPoint::new(0, resets_count as f64));
   }
 
+  /// Rounds each metric point's value to the nearest multiple of a given number.
   pub fn round(&mut self, to_nearest: f64) {
     for mp in &mut self.metric_points {
       let value = mp.get_value();
@@ -520,6 +531,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Sets each metric point's value to its sign: 1.0 for positive, -1.0 for negative, 0.0 for zero.
   pub fn sgn(&mut self) {
     for mp in &mut self.metric_points {
       let value = mp.get_value();
@@ -534,6 +546,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Sorts the metric points in ascending order based on their values.
   pub fn sort(&mut self) {
     self.metric_points.sort_by(|a, b| {
       let a_value = a.get_value();
@@ -542,6 +555,7 @@ impl PromQLTimeSeries {
     });
   }
 
+  /// Sorts the metric points in descending order based on their values.
   pub fn sort_desc(&mut self) {
     self.metric_points.sort_by(|a, b| {
       let a_value = a.get_value();
@@ -550,20 +564,23 @@ impl PromQLTimeSeries {
     });
   }
 
+  /// Applies the square root function to the value of each metric point.
   pub fn sqrt(&mut self) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().sqrt());
     }
   }
 
+  /// Sets each metric point's value to its timestamp.
   pub fn timestamp(&mut self) {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_time() as f64);
     }
   }
 
+  /// Sets each metric point's value to the current year.
   pub fn year(&mut self) {
-    let current_year = Utc::now().year();
+    let current_year = chrono::Utc::now().year();
     for mp in &mut self.metric_points {
       mp.set_value(current_year as f64);
     }
@@ -571,13 +588,15 @@ impl PromQLTimeSeries {
 
   // *** Aggregations over time: https://prometheus.io/docs/prometheus/latest/querying/functions ****
 
+  /// Calculates the average value over all metric points in the time series.
   pub fn avg_over_time(&mut self) {
     let sum: f64 = self.metric_points.iter().map(|mp| mp.get_value()).sum();
     let count = self.metric_points.len() as f64;
     let avg = if count > 0.0 { sum / count } else { f64::NAN };
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, avg)];
+    self.metric_points = vec![MetricPoint::new(chrono::Utc::now().timestamp() as u64, avg)];
   }
 
+  /// Finds the minimum value over all metric points in the time series.
   pub fn min_over_time(&mut self) {
     let min = self
       .metric_points
@@ -585,9 +604,10 @@ impl PromQLTimeSeries {
       .map(|mp| mp.get_value())
       .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
       .unwrap_or(f64::NAN);
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, min)];
+    self.metric_points = vec![MetricPoint::new(chrono::Utc::now().timestamp() as u64, min)];
   }
 
+  /// Finds the maximum value over all metric points in the time series.
   pub fn max_over_time(&mut self) {
     let max = self
       .metric_points
@@ -595,30 +615,37 @@ impl PromQLTimeSeries {
       .map(|mp| mp.get_value())
       .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
       .unwrap_or(f64::NAN);
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, max)];
+    self.metric_points = vec![MetricPoint::new(chrono::Utc::now().timestamp() as u64, max)];
   }
 
+  /// Calculates the sum of all values over all metric points in the time series.
   pub fn sum_over_time(&mut self) {
     let sum: f64 = self.metric_points.iter().map(|mp| mp.get_value()).sum();
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, sum)];
+    self.metric_points = vec![MetricPoint::new(chrono::Utc::now().timestamp() as u64, sum)];
   }
 
+  /// Counts the number of metric points in the time series.
   pub fn count_over_time(&mut self) {
     let count = self.metric_points.len() as f64;
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, count)];
+    self.metric_points = vec![MetricPoint::new(
+      chrono::Utc::now().timestamp() as u64,
+      count,
+    )];
   }
 
+  /// Calculates the specified quantile value over all metric points in the time series.
   pub fn quantile_over_time(&mut self, quantile: f64) {
     let mut values: Vec<f64> = self.metric_points.iter().map(|mp| mp.get_value()).collect();
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     let index = ((quantile * values.len() as f64).round() as usize).saturating_sub(1);
     let quantile_value = values.get(index).copied().unwrap_or(f64::NAN);
     self.metric_points = vec![MetricPoint::new(
-      Utc::now().timestamp() as u64,
+      chrono::Utc::now().timestamp() as u64,
       quantile_value,
     )];
   }
 
+  /// Calculates the standard deviation of metric point values over time.
   pub fn stddev_over_time(&mut self) {
     let mean: f64 = self
       .metric_points
@@ -633,9 +660,13 @@ impl PromQLTimeSeries {
       .sum::<f64>()
       / self.metric_points.len() as f64;
     let stddev = variance.sqrt();
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, stddev)];
+    self.metric_points = vec![MetricPoint::new(
+      chrono::Utc::now().timestamp() as u64,
+      stddev,
+    )];
   }
 
+  /// Calculates the variance of metric point values over time.
   pub fn stdvar_over_time(&mut self) {
     let mean: f64 = self
       .metric_points
@@ -649,10 +680,13 @@ impl PromQLTimeSeries {
       .map(|mp| (mp.get_value() - mean).powi(2))
       .sum::<f64>()
       / self.metric_points.len() as f64;
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, variance)];
+    self.metric_points = vec![MetricPoint::new(
+      chrono::Utc::now().timestamp() as u64,
+      variance,
+    )];
   }
 
-  // Add this as a helper function
+  /// Calculates the median of a given data set.
   fn median(&self, data: &[f64]) -> f64 {
     let mut sorted_data = data.to_vec();
     sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -664,6 +698,7 @@ impl PromQLTimeSeries {
     }
   }
 
+  /// Calculates the median absolute deviation (MAD) of metric point values over time.
   pub fn mad_over_time(&mut self) {
     let median = self.median(
       &self
@@ -679,117 +714,117 @@ impl PromQLTimeSeries {
         .map(|mp| (mp.get_value() - median).abs())
         .collect::<Vec<_>>(),
     );
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, mad)];
+    self.metric_points = vec![MetricPoint::new(chrono::Utc::now().timestamp() as u64, mad)];
   }
 
+  /// Retains only the last metric point in the time series.
   pub fn last_over_time(&mut self) {
     if let Some(last_point) = self.metric_points.last() {
       self.metric_points = vec![last_point.clone()];
     }
   }
 
+  /// Sets a single metric point with the value 1.0 to indicate presence over time.
   pub fn present_over_time(&mut self) {
-    self.metric_points = vec![MetricPoint::new(Utc::now().timestamp() as u64, 1.0)];
+    self.metric_points = vec![MetricPoint::new(chrono::Utc::now().timestamp() as u64, 1.0)];
   }
 
-  // Converts each metric point's value from degrees to radians.
+  /// Converts each metric point's value from degrees to radians.
   pub fn rad(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().to_radians());
     }
   }
 
-  // Converts the first metric point's value to a scalar, if it's the only point.
+  /// Converts the first metric point's value to a scalar if it's the only point in the series.
   pub fn scalar(&mut self) -> Option<f64> {
-    if self.get_metric_points().len() == 1 {
-      Some(self.get_metric_points()[0].get_value())
+    if self.metric_points.len() == 1 {
+      Some(self.metric_points[0].get_value())
     } else {
       None
     }
   }
 
-  // **** Trigonometric Functions: https://prometheus.io/docs/prometheus/latest/querying/functions/
-
-  // Applies the arccosine function to each metric point's value.
+  /// Applies the arccosine function to each metric point's value.
   pub fn acos(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().acos());
     }
   }
 
-  // Applies the inverse hyperbolic cosine function to each metric point's value.
+  /// Applies the inverse hyperbolic cosine function to each metric point's value.
   pub fn acosh(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().acosh());
     }
   }
 
-  // Applies the arcsine function to each metric point's value.
+  /// Applies the arcsine function to each metric point's value.
   pub fn asin(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().asin());
     }
   }
 
-  // Applies the inverse hyperbolic sine function to each metric point's value.
+  /// Applies the inverse hyperbolic sine function to each metric point's value.
   pub fn asinh(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().asinh());
     }
   }
 
-  // Applies the arctangent function to each metric point's value.
+  /// Applies the arctangent function to each metric point's value.
   pub fn atan(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().atan());
     }
   }
 
-  // Applies the inverse hyperbolic tangent function to each metric point's value.
+  /// Applies the inverse hyperbolic tangent function to each metric point's value.
   pub fn atanh(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().atanh());
     }
   }
 
-  // Applies the cosine function to each metric point's value.
+  /// Applies the cosine function to each metric point's value.
   pub fn cos(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().cos());
     }
   }
 
-  // Applies the hyperbolic cosine function to each metric point's value.
+  /// Applies the hyperbolic cosine function to each metric point's value.
   pub fn cosh(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().cosh());
     }
   }
 
-  // Applies the sine function to each metric point's value.
+  /// Applies the sine function to each metric point's value.
   pub fn sin(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().sin());
     }
   }
 
-  // Applies the hyperbolic sine function to each metric point's value.
+  /// Applies the hyperbolic sine function to each metric point's value.
   pub fn sinh(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().sinh());
     }
   }
 
-  // Applies the tangent function to each metric point's value.
+  /// Applies the tangent function to each metric point's value.
   pub fn tan(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().tan());
     }
   }
 
-  // Applies the hyperbolic tangent function to each metric point's value.
+  /// Applies the hyperbolic tangent function to each metric point's value.
   pub fn tanh(&mut self) {
-    for mp in self.get_metric_points() {
+    for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().tanh());
     }
   }
@@ -907,6 +942,43 @@ mod tests {
   }
 
   #[test]
+  fn test_sqrt_negative() {
+    let metric_points = create_metric_points(&[1], &[-1.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.sqrt();
+    assert!(
+      ts.get_metric_points()[0].get_value().is_nan(),
+      "sqrt of negative number should be NaN"
+    );
+  }
+
+  #[test]
+  fn test_sqrt_zero() {
+    let metric_points = create_metric_points(&[1], &[0.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.sqrt();
+    assert_eq!(
+      ts.get_metric_points()[0].get_value(),
+      0.0,
+      "sqrt of 0 should be 0"
+    );
+  }
+
+  #[test]
+  fn test_sqrt_large_number() {
+    let large_number = 1e10;
+    let metric_points = create_metric_points(&[1], &[large_number]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.sqrt();
+    let expected_value = large_number.sqrt();
+    assert_eq!(
+      round_to_3(ts.get_metric_points()[0].get_value()),
+      round_to_3(expected_value),
+      "sqrt of a large number should be close to its mathematical sqrt"
+    );
+  }
+
+  #[test]
   fn test_label_replace() {
     let labels = create_labels();
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
@@ -997,6 +1069,43 @@ mod tests {
   }
 
   #[test]
+  fn test_ln_negative() {
+    let metric_points = create_metric_points(&[1], &[-1.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.ln();
+    assert!(
+      ts.get_metric_points()[0].get_value().is_nan(),
+      "ln of negative number should be NaN"
+    );
+  }
+
+  #[test]
+  fn test_ln_zero() {
+    let metric_points = create_metric_points(&[1], &[0.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.ln();
+    assert_eq!(
+      ts.get_metric_points()[0].get_value(),
+      f64::NEG_INFINITY,
+      "ln of 0 should be -Infinity"
+    );
+  }
+
+  #[test]
+  fn test_ln_large_number() {
+    let large_number = 1e10;
+    let metric_points = create_metric_points(&[1], &[large_number]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.ln();
+    let expected_value = large_number.ln();
+    assert_eq!(
+      round_to_3(ts.get_metric_points()[0].get_value()),
+      round_to_3(expected_value),
+      "ln of a large number should be close to its mathematical ln"
+    );
+  }
+
+  #[test]
   fn test_log10() {
     let metric_points = create_metric_points(&[1, 2], &[10.0, 100.0]);
     let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
@@ -1005,6 +1114,43 @@ mod tests {
     // Validate that log10 was applied correctly
     assert_eq!(ts.get_metric_points()[0].get_value(), 1.0);
     assert_eq!(ts.get_metric_points()[1].get_value(), 2.0);
+  }
+
+  #[test]
+  fn test_log10_negative() {
+    let metric_points = create_metric_points(&[1], &[-1.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.log10();
+    assert!(
+      ts.get_metric_points()[0].get_value().is_nan(),
+      "log10 of negative number should be NaN"
+    );
+  }
+
+  #[test]
+  fn test_log10_zero() {
+    let metric_points = create_metric_points(&[1], &[0.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.log10();
+    assert_eq!(
+      ts.get_metric_points()[0].get_value(),
+      f64::NEG_INFINITY,
+      "log10 of 0 should be -Infinity"
+    );
+  }
+
+  #[test]
+  fn test_log10_large_number() {
+    let large_number = 1e10;
+    let metric_points = create_metric_points(&[1], &[large_number]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    ts.log10();
+    let expected_value = large_number.log10();
+    assert_eq!(
+      round_to_3(ts.get_metric_points()[0].get_value()),
+      round_to_3(expected_value),
+      "log10 of a large number should be close to its mathematical log10"
+    );
   }
 
   #[test]
@@ -1389,5 +1535,332 @@ mod tests {
       .map(|mp| mp.get_value())
       .unwrap_or(f64::NAN);
     assert_eq!(quantile_value_100, 5.0);
+  }
+
+  #[test]
+  fn test_function_with_nan_input() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[f64::NAN, 1.0, 2.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.exp(); // Function that behave unpredictably with NaN
+    assert!(
+      ts.get_metric_points()[0].get_value().is_nan(),
+      "Function output should be NaN when input is NaN"
+    );
+  }
+
+  #[test]
+  fn test_aggregate_function_with_nan_values() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[10.0, f64::NAN, 20.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.avg_over_time();
+    assert!(
+      ts.get_metric_points()[0].get_value().is_nan(),
+      "Average should return NaN if NaN encountered",
+    );
+  }
+
+  #[test]
+  fn test_handling_nan_in_comparisons() {
+    let metric_points = create_metric_points(&[1, 2], &[f64::NAN, 1.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.max_over_time();
+    assert_eq!(
+      ts.get_metric_points()[0].get_value(),
+      1.0,
+      "Max should ignore NaN and return the max of other values"
+    );
+  }
+
+  #[test]
+  fn test_function_with_infinity() {
+    let metric_points = create_metric_points(&[1, 2], &[f64::INFINITY, 1.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.log10(); // Applying a function that might be influenced by Infinity
+    assert_eq!(
+      ts.get_metric_points()[0].get_value(),
+      f64::INFINITY,
+      "Log10 of Infinity should be Infinity"
+    );
+  }
+
+  #[test]
+  fn test_aggregate_function_with_infinity() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[10.0, f64::INFINITY, 20.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.sum_over_time(); // Summing values including Infinity
+    assert_eq!(
+      ts.get_metric_points()[0].get_value(),
+      f64::INFINITY,
+      "Sum should be Infinity when any component is Infinity"
+    );
+  }
+
+  #[test]
+  fn test_handling_infinity_in_comparisons() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[f64::INFINITY, 1.0, 2.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.min_over_time(); // Comparing values including Infinity
+    assert_eq!(
+      ts.get_metric_points()[0].get_value(),
+      1.0,
+      "Min should ignore Infinity and return the min of other values"
+    );
+  }
+
+  #[test]
+  fn test_avg_over_time_empty_series() {
+    let metric_points = Vec::new(); // Empty series
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.avg_over_time();
+    assert!(
+      ts.get_metric_points().first().unwrap().get_value().is_nan(),
+      "Average of an empty series should be NaN"
+    );
+  }
+
+  #[test]
+  fn test_sum_over_time_empty_series() {
+    let metric_points = Vec::new(); // Empty series
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.sum_over_time();
+    // Sum of an empty series could be considered 0
+    assert_eq!(
+      ts.get_metric_points().first().unwrap().get_value(),
+      0.0,
+      "Sum of an empty series should be 0"
+    );
+  }
+
+  #[test]
+  fn test_min_over_time_empty_series() {
+    let metric_points = Vec::new(); // Empty series
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.min_over_time();
+    assert!(
+      ts.get_metric_points().first().unwrap().get_value().is_nan(),
+      "Min of an empty series should be NaN"
+    );
+  }
+
+  #[test]
+  fn test_max_over_time_empty_series() {
+    let metric_points = Vec::new(); // Empty series
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.max_over_time();
+    assert!(
+      ts.get_metric_points().first().unwrap().get_value().is_nan(),
+      "Max of an empty series should be NaN"
+    );
+  }
+
+  #[test]
+  fn test_count_over_time_empty_series() {
+    let metric_points = Vec::new(); // Empty series
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.count_over_time();
+    // Count of an empty series should logically be 0
+    assert_eq!(
+      ts.get_metric_points().first().unwrap().get_value(),
+      0.0,
+      "Count of an empty series should be 0"
+    );
+  }
+
+  #[test]
+  fn test_predict_linear_future() {
+    // Time series data: linear increase by 10 every step
+    let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    // Predict the value at a future time, t=5 (two steps ahead of the last point, t=3)
+    ts.predict_linear(5.0);
+    // Expect the value at t=5 to continue the trend: 10 units increase per step
+    let expected_prediction = 50.0; // 30 + 2*10
+    let actual_prediction = ts.get_metric_points().last().unwrap().get_value();
+    assert_eq!(
+      actual_prediction, expected_prediction,
+      "Future prediction should accurately extrapolate the linear trend"
+    );
+  }
+
+  #[test]
+  fn test_predict_linear_past() {
+    // Time series data: linear increase by 10 every step
+    let metric_points = create_metric_points(&[2, 3, 4], &[20.0, 30.0, 40.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    // Predict the value at a past time, t=1 (one step before the first point, t=2)
+    ts.predict_linear(1.0);
+    // Expect the value at t=1 to follow the trend backwards: 10 units decrease per step
+    let expected_prediction = 10.0; // 20 - 1*10
+    let actual_prediction = ts.get_metric_points().last().unwrap().get_value();
+    assert_eq!(
+      actual_prediction, expected_prediction,
+      "Past prediction should accurately extrapolate the linear trend backwards"
+    );
+  }
+
+  #[test]
+  fn test_predict_linear_non_linear_data() {
+    // Time series data: exponential growth
+    let metric_points = create_metric_points(&[1, 2, 3], &[2.0, 4.0, 8.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    // Attempt to predict the future value at t=4
+    ts.predict_linear(4.0);
+    // The expected value if the trend were linear might not match due to the exponential growth
+    // This test checks how the function handles non-linear trends
+    let actual_prediction = ts.get_metric_points().last().unwrap().get_value();
+    // Note: Asserting specific values might not be meaningful without a clear expectation for handling non-linear data
+    // This test could instead document or verify the behavior or limitations of predict_linear with non-linear data
+    assert!(actual_prediction != 12.0, "Prediction for non-linear data should consider the limitations of linear extrapolation models");
+  }
+
+  #[test]
+  fn test_quantile_over_time_zero_quantile() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 5.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.quantile_over_time(0.0); // Quantile of 0 should return the minimum value
+    let min_value = ts.get_metric_points()[0].get_value();
+    assert_eq!(
+      min_value, 5.0,
+      "Quantile of 0 should return the minimum value in the series"
+    );
+  }
+
+  #[test]
+  fn test_quantile_over_time_one_quantile() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 5.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.quantile_over_time(1.0); // Quantile of 1 should return the maximum value
+    let max_value = ts.get_metric_points()[0].get_value();
+    assert_eq!(
+      max_value, 20.0,
+      "Quantile of 1 should return the maximum value in the series"
+    );
+  }
+
+  #[test]
+  fn test_quantile_over_time_negative_quantile() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.quantile_over_time(-0.5); // Testing with a negative quantile
+                                 // Default to the minimum value
+    let value = ts.get_metric_points()[0].get_value();
+    assert_eq!(
+      value, 10.0,
+      "Negative quantile should result in the minimum"
+    );
+  }
+
+  #[test]
+  fn test_quantile_over_time_greater_than_one_quantile() {
+    let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.quantile_over_time(1.5); // Testing with a quantile greater than 1
+    let value = ts.get_metric_points()[0].get_value();
+    assert!(
+      value.is_nan(),
+      "Quantile greater than 1 should result in NaN"
+    );
+  }
+
+  #[test]
+  fn test_irate_irregular_intervals() {
+    // Creating a time series with irregular intervals: [1 to 3] then [3 to 6]
+    let metric_points = create_metric_points(&[1, 3, 6], &[10.0, 30.0, 70.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    ts.irate();
+    // Expectation: The rate calculation between 3 and 6 should consider the interval length
+    // Rate calculation: (70 - 30) / (6 - 3) = 40 / 3 = 13.33...
+    let expected_rate = 13.333333333333334;
+    let actual_rate = ts.get_metric_points().last().unwrap().get_value();
+    assert!(
+      (actual_rate - expected_rate).abs() < 10.0 * f64::EPSILON,
+      "irate should accurately calculate the instant rate over irregular intervals"
+    );
+  }
+
+  #[test]
+  fn test_predict_linear_irregular_intervals() {
+    // Series with irregular intervals
+    let metric_points = create_metric_points(&[1, 3, 8], &[20.0, 40.0, 80.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+
+    // Predicting value at t=10, based on irregular historical intervals
+    ts.predict_linear(10.0);
+    // Expectation: The linear model should consider the actual intervals in its prediction
+    let expected_prediction = 97.43589743589745;
+    let actual_prediction = ts.get_metric_points().last().unwrap().get_value();
+    assert_eq!(actual_prediction, expected_prediction, "predict_linear should accurately forecast future values considering irregular intervals in the data");
+  }
+
+  #[test]
+  fn test_label_replace_empty_replacement() {
+    let labels = HashMap::from([("team".to_string(), "devops".to_string())]);
+    let metric_points = create_metric_points(&[1], &[10.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(labels.clone(), metric_points);
+
+    ts.label_replace("team", "", "team", ".*");
+    // Expectation: The label value should be replaced with an empty string
+    assert_eq!(
+      ts.labels.get("team").unwrap(),
+      &"",
+      "Label value should be replaced with an empty string"
+    );
+  }
+
+  #[test]
+  fn test_label_join_non_existent_labels() {
+    let labels = HashMap::from([("service".to_string(), "web".to_string())]);
+    let metric_points = create_metric_points(&[1], &[10.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
+
+    ts.label_join(
+      "new_label",
+      "",
+      &["nonexistent1".to_owned(), "nonexistent2".to_owned()],
+    );
+
+    // Expectation: The new label should be created but with an empty value
+    assert_eq!(
+      ts.labels.get("new_label").unwrap(),
+      &"",
+      "Joined label value should be empty or default when source labels do not exist"
+    );
+  }
+
+  #[test]
+  fn test_label_join_special_characters_separator() {
+    let labels = HashMap::from([
+      ("region".to_string(), "us-east".to_string()),
+      ("env".to_string(), "prod".to_string()),
+    ]);
+    let metric_points = create_metric_points(&[1], &[10.0]);
+    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
+
+    ts.label_join("new_label", "🚀", &["region".to_owned(), "env".to_owned()]);
+    // Expectation: The new label should correctly use the special character as a separator
+    assert_eq!(
+      ts.labels.get("new_label").unwrap(),
+      &"us-east🚀prod",
+      "Label values should be joined using the special character separator"
+    );
   }
 }

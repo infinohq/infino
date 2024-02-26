@@ -10,10 +10,10 @@ use log::{debug, info};
 use pest::iterators::Pairs;
 
 use crate::index_manager::metadata::Metadata;
-use crate::index_manager::promql;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
-use crate::segment_manager::query_dsl;
+use crate::request_manager::promql;
+use crate::request_manager::query_dsl;
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
@@ -22,7 +22,7 @@ use crate::utils::io;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex, TokioRwLock};
 
-use super::promql_time_series::PromQLTimeSeries;
+use crate::request_manager::promql_time_series::PromQLTimeSeries;
 
 /// File name where the information about all segements is stored.
 const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
@@ -680,7 +680,7 @@ mod tests {
 
   use super::*;
   use crate::metric::metric_point::MetricPoint;
-  use crate::segment_manager::query_dsl::QueryDslParser;
+  use crate::request_manager::query_dsl::QueryDslParser;
   use crate::utils::io::get_joined_path;
   use crate::utils::sync::is_sync_send;
 

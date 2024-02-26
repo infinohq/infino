@@ -3,7 +3,7 @@
 
 // TODO: Add error checking
 // TODO: Histograms are not yet supported
-use crate::index_manager::promql_time_series::PromQLTimeSeries;
+use super::promql_time_series::PromQLTimeSeries;
 use crate::metric::metric_point::MetricPoint;
 use chrono::Utc;
 use std::collections::HashMap;
@@ -18,9 +18,9 @@ pub enum AggregationOperator<'a> {
   Stdvar,
   Count,
   CountValues(&'a str),
-  Bottomk(usize), // TODO: Check k is of type usize
-  Topk(usize),    // TODO: Check k is of type usize
-  Quantile(f64),  // TODO: Check phi is of type f64
+  Bottomk(usize),
+  Topk(usize),
+  Quantile(f64),
   Undefined,
 }
 
@@ -71,6 +71,7 @@ pub enum FunctionOperator {
   Minute,
   Month,
   Negative,
+  Pi,
   PredictLinear(f64),
   Rad,
   Rate,
@@ -218,6 +219,7 @@ impl PromQLObject {
 
   // ******** Logical Operators: https://prometheus.io/docs/prometheus/latest/querying/operators/
 
+  /// Retains elements in the vector that have matching labels with the other `PromQLObject`.
   pub fn and(&mut self, other: &PromQLObject) {
     self.vector.retain(|self_ts| {
       other
@@ -227,6 +229,7 @@ impl PromQLObject {
     });
   }
 
+  /// Merges elements from the other `PromQLObject` into the vector if they do not already exist based on matching labels.
   pub fn or(&mut self, other: &PromQLObject) {
     for other_ts in &other.vector {
       if !self
@@ -239,6 +242,7 @@ impl PromQLObject {
     }
   }
 
+  /// Retains elements in the vector unless they have matching labels with the other `PromQLObject`.
   pub fn unless(&mut self, other: &PromQLObject) {
     self.vector.retain(|self_ts| {
       !other
@@ -249,8 +253,8 @@ impl PromQLObject {
   }
 
   // **** Binary Operators: https://prometheus.io/docs/prometheus/latest/querying/operators/
-  // apply to both scalars and vectors.
 
+  /// Applies a binary operation between two `PromQLObject`s, supporting scalar and vector operations.
   pub fn apply_binary_operation<F: Fn(f64, f64) -> f64>(
     &mut self,
     other: &mut PromQLObject,
@@ -275,7 +279,7 @@ impl PromQLObject {
           .iter_mut()
           .find(|x| x.get_labels() == self_ts.get_labels())
         {
-          for (i, self_mp) in &mut self_ts.get_metric_points().iter_mut().enumerate() {
+          for (i, self_mp) in self_ts.get_metric_points().iter_mut().enumerate() {
             if let Some(other_mp) = other_ts.get_metric_points().get(i) {
               self_mp.set_value(op(self_mp.get_value(), other_mp.get_value()));
             }
@@ -285,39 +289,62 @@ impl PromQLObject {
     }
   }
 
+  /// Sets value to 1.0 if two `PromQLObject`s are equal, else 0.0.
   pub fn equal(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if a == b { 1.0 } else { 0.0 });
   }
+
+  /// Sets value to 1.0 if two `PromQLObject`s are not equal, else 0.0.
   pub fn not_equal(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if a != b { 1.0 } else { 0.0 });
   }
+
+  /// Sets value to 1.0 if the first `PromQLObject` is greater than the second, else 0.0.
   pub fn greater_than(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if a > b { 1.0 } else { 0.0 });
   }
+
+  /// Sets value to 1.0 if the first `PromQLObject` is less than the second, else 0.0.
   pub fn less_than(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if a < b { 1.0 } else { 0.0 });
   }
+
+  /// Sets value to 1.0 if the first `PromQLObject` is greater than or equal to the second, else 0.0.
   pub fn greater_than_or_equal(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if a >= b { 1.0 } else { 0.0 });
   }
+
+  /// Sets value to 1.0 if the first `PromQLObject` is less than or equal to the second, else 0.0.
   pub fn less_than_or_equal(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if a <= b { 1.0 } else { 0.0 });
   }
+
+  /// Performs addition between matching metric points or scalars from two PromQLObjects.
   pub fn add(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a + b);
   }
+
+  /// Performs subtraction between matching metric points or scalars from two PromQLObjects.
   pub fn subtract(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a - b);
   }
+
+  /// Performs multiplication between matching metric points or scalars from two PromQLObjects.
   pub fn multiply(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a * b);
   }
+
+  /// Performs division between matching metric points or scalars from two PromQLObjects, returning NaN for division by zero.
   pub fn divide(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| if b != 0.0 { a / b } else { f64::NAN });
   }
+
+  /// Performs modulo operation between matching metric points or scalars from two PromQLObjects.
   pub fn modulo(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a % b);
   }
+
+  /// Raises matching metric points or scalars from one PromQLObject to the power of values from another PromQLObject.
   pub fn power(&mut self, other: &mut PromQLObject) {
     self.apply_binary_operation(other, |a, b| a.powf(b));
   }
@@ -339,11 +366,11 @@ impl PromQLObject {
       AggregationOperator::Bottomk(k) => self.bottomk(k),
       AggregationOperator::Topk(k) => self.topk(k),
       AggregationOperator::Quantile(phi) => self.quantile(phi),
-      AggregationOperator::Undefined => {} // TODO: throw an error here
+      AggregationOperator::Undefined => {} // TODO: throw an error here?
     }
   }
 
-  #[allow(dead_code)]
+  /// Aggregates metric points by summing their values within each time series.
   pub fn sum(&mut self) {
     for ts in &mut self.vector {
       let sum = ts
@@ -357,7 +384,7 @@ impl PromQLObject {
     }
   }
 
-  #[allow(dead_code)]
+  /// Aggregates metric points by finding the minimum value within each time series.
   pub fn minimum(&mut self) {
     for ts in &mut self.vector {
       let min = ts
@@ -373,7 +400,7 @@ impl PromQLObject {
     }
   }
 
-  #[allow(dead_code)]
+  /// Aggregates metric points by finding the maximum value within each time series.
   pub fn maximum(&mut self) {
     for ts in &mut self.vector {
       let max = ts
@@ -389,7 +416,7 @@ impl PromQLObject {
     }
   }
 
-  #[allow(dead_code)]
+  /// Aggregates metric points by computing the average of their values within each time series.
   pub fn avg(&mut self) {
     for ts in &mut self.vector {
       let sum: f64 = ts.get_metric_points().iter().map(|mp| mp.get_value()).sum();
@@ -401,7 +428,7 @@ impl PromQLObject {
     }
   }
 
-  #[allow(dead_code)]
+  /// Groups metric points, setting a single value of 1.0 for each time series.
   pub fn group(&mut self) {
     for ts in &mut self.vector {
       ts.set_metric_points(vec![MetricPoint::new(
@@ -411,7 +438,7 @@ impl PromQLObject {
     }
   }
 
-  #[allow(dead_code)]
+  /// Computes the standard deviation of metric point values within each time series.
   pub fn stddev(&mut self) {
     for ts in &mut self.vector {
       let mean: f64 = ts
@@ -433,7 +460,7 @@ impl PromQLObject {
     }
   }
 
-  #[allow(dead_code)]
+  /// Computes the variance of metric point values within each time series.
   pub fn stdvar(&mut self) {
     for ts in &mut self.vector {
       let mean: f64 = ts
@@ -455,6 +482,7 @@ impl PromQLObject {
     }
   }
 
+  /// Counts the number of metric points within each time series.
   pub fn count(&mut self) {
     for ts in &mut self.vector {
       let len = ts.get_metric_points().len();
@@ -466,6 +494,7 @@ impl PromQLObject {
     self.update_object_type(); // Set to instant vector.
   }
 
+  /// Counts unique values for a specified label across all metric points and groups them.
   pub fn count_values(&mut self, label_key: &str) {
     // Initialize a HashMap to store label values and their counts
     let mut value_counts: HashMap<String, usize> = HashMap::new();
@@ -501,10 +530,11 @@ impl PromQLObject {
     self.update_object_type(); // Set to instant vector.
   }
 
+  /// Selects the bottom k metric points based on their value within each time series.
   pub fn bottomk(&mut self, k: usize) {
     for ts in &mut self.vector {
       let points = ts.get_metric_points();
-      let mut points_clone = points.clone(); // Clone the vector to get Vec<MetricPoint>
+      let mut points_clone = points.clone();
       points_clone
         .select_nth_unstable_by(k, |a, b| a.get_value().partial_cmp(&b.get_value()).unwrap());
 
@@ -516,15 +546,14 @@ impl PromQLObject {
     }
   }
 
+  /// Selects the top k metric points based on their value within each time series.
   pub fn topk(&mut self, k: usize) {
     for ts in &mut self.vector {
       let points = ts.get_metric_points();
       let mut points_clone = points.clone();
-
       points_clone
         .select_nth_unstable_by(k, |a, b| b.get_value().partial_cmp(&a.get_value()).unwrap());
 
-      // Reverse, take k, and clone each MetricPoint
       let top_k = points_clone
         .into_iter()
         .take(k)
@@ -533,6 +562,7 @@ impl PromQLObject {
     }
   }
 
+  /// Computes the quantile of metric point values within each time series.
   pub fn quantile(&mut self, phi: f64) {
     for ts in &mut self.vector {
       let points = ts.get_metric_points();
@@ -551,6 +581,7 @@ impl PromQLObject {
   // **** Trigonometric Functions: https://prometheus.io/docs/prometheus/latest/querying/functions/
   // apply only to vectors
 
+  /// Helper function for promql functions
   pub fn apply_function_operator(&mut self, operator: FunctionOperator) {
     match operator {
       FunctionOperator::Acos => self.acos(),
@@ -599,6 +630,9 @@ impl PromQLObject {
       FunctionOperator::Minute => self.minute(),
       FunctionOperator::Month => self.month(),
       FunctionOperator::Negative => self.negative(),
+      FunctionOperator::Pi => {
+        let _ = self.pi();
+      }
       FunctionOperator::PredictLinear(t) => self.predict_linear(t),
       FunctionOperator::Rad => self.rad(),
       FunctionOperator::Rate => self.rate(),
@@ -630,95 +664,84 @@ impl PromQLObject {
     }
   }
 
-  // Calculates the arccosine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the arccosine of all metric point values within each time series.
   pub fn acos(&mut self) {
     for ts in &mut self.vector {
       ts.acos();
     }
   }
 
-  // Calculates the inverse hyperbolic cosine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the inverse hyperbolic cosine of all metric point values within each time series.
   pub fn acosh(&mut self) {
     for ts in &mut self.vector {
       ts.acosh();
     }
   }
 
-  // Calculates the arcsine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the arcsine of all metric point values within each time series.
   pub fn asin(&mut self) {
     for ts in &mut self.vector {
       ts.asin();
     }
   }
 
-  // Calculates the inverse hyperbolic sine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the inverse hyperbolic sine of all metric point values within each time series.
   pub fn asinh(&mut self) {
     for ts in &mut self.vector {
       ts.asinh();
     }
   }
 
-  // Calculates the arctangent of all elements in v (special cases).
+  /// Calculates the arctangent of all metric point values within each time series.
   pub fn atan(&mut self) {
     for ts in &mut self.vector {
       ts.atan();
     }
   }
 
-  // Calculates the inverse hyperbolic tangent of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the inverse hyperbolic tangent of all metric point values within each time series.
   pub fn atanh(&mut self) {
     for ts in &mut self.vector {
       ts.atanh();
     }
   }
 
-  // Calculates the cosine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the cosine of all metric point values within each time series.
   pub fn cos(&mut self) {
     for ts in &mut self.vector {
       ts.cos();
     }
   }
 
-  // Calculates the hyperbolic cosine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the hyperbolic cosine of all metric point values within each time series.
   pub fn cosh(&mut self) {
     for ts in &mut self.vector {
       ts.cosh();
     }
   }
 
-  // Calculates the sine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the sine of all metric point values within each time series.
   pub fn sin(&mut self) {
     for ts in &mut self.vector {
       ts.sin();
     }
   }
 
-  // Calculates the hyperbolic sine of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the hyperbolic sine of all metric point values within each time series.
   pub fn sinh(&mut self) {
     for ts in &mut self.vector {
       ts.sinh();
     }
   }
 
-  // Calculates the tangent of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the tangent of all metric point values within each time series.
   pub fn tan(&mut self) {
     for ts in &mut self.vector {
       ts.tan();
     }
   }
 
-  // Calculates the hyperbolic tangent of all elements in v (special cases).
-  #[allow(dead_code)]
+  /// Calculates the hyperbolic tangent of all metric point values within each time series.
   pub fn tanh(&mut self) {
     for ts in &mut self.vector {
       ts.tanh();
@@ -728,17 +751,14 @@ impl PromQLObject {
   // **** Functions: https://prometheus.io/docs/prometheus/latest/querying/functions/
   // apply only to vectors
 
-  // Applies the absolute value operation to every metric point in every time series
-  #[allow(dead_code)]
+  /// Applies the absolute value operation to every metric point in every time series.
   pub fn abs(&mut self) {
     for ts in &mut self.vector {
       ts.abs();
     }
   }
 
-  /// Returns an empty vector if the vector has any elements, and 1 with the current time
-  /// and a manufactured label if it doesn't.
-  /// #[allow(dead_code)]
+  /// Marks time series as absent if the vector is empty by adding a special series, otherwise clears the vector.
   pub fn absent(&mut self) {
     if self.vector.is_empty() {
       let mut labels = HashMap::new();
@@ -751,22 +771,12 @@ impl PromQLObject {
     }
   }
 
-  /// Returns an empty vector if the vector has any elements, and 1 with the current time
-  /// and a manufactured label if it doesn't.
+  /// Similar to `absent`, marks time series as absent over time if the vector is empty.
   pub fn absent_over_time(&mut self) {
-    if self.vector.is_empty() {
-      let mut labels = HashMap::new();
-      labels.insert("absent".to_string(), "true".to_string());
-      let absent_metric_point = MetricPoint::new(chrono::Utc::now().timestamp() as u64, 1.0);
-      let absent_series = PromQLTimeSeries::new_with_params(labels, vec![absent_metric_point]);
-      self.vector.push(absent_series);
-    } else {
-      self.vector.clear();
-    }
+    self.absent(); // Reuses the logic from `absent` as the functionality is described to be the same.
   }
 
-  // Applies the ceiling operation to every metric point in every time series
-  #[allow(dead_code)]
+  /// Applies the ceiling operation to every metric point in every time series.
   pub fn ceil(&mut self) {
     for ts in &mut self.vector {
       ts.ceil();
@@ -774,21 +784,15 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Clamps the min and max value of metric points for each time series
-  #[allow(dead_code)]
+  /// Clamps the value of metric points within each time series to a specified minimum and maximum.
   pub fn clamp(&mut self, min: f64, max: f64) {
-    if min > max || min.is_nan() || max.is_nan() {
-      self.vector.clear();
-    } else {
-      for ts in &mut self.vector {
-        ts.clamp(min, max);
-      }
+    for ts in &mut self.vector {
+      ts.clamp(min, max);
     }
     self.update_object_type();
   }
 
-  // Clamps the maximum value of metric points for each time series
-  #[allow(dead_code)]
+  /// Clamps the maximum value of metric points for each time series to a specified maximum.
   pub fn clamp_max(&mut self, max: f64) {
     for ts in &mut self.vector {
       ts.clamp_max(max);
@@ -796,8 +800,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Clamps the minimum value of metric points for each time series
-  #[allow(dead_code)]
+  /// Clamps the minimum value of metric points for each time series to a specified minimum.
   pub fn clamp_min(&mut self, min: f64) {
     for ts in &mut self.vector {
       ts.clamp_min(min);
@@ -805,8 +808,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Calculates changes in metric points for each time series
-  #[allow(dead_code)]
+  /// Calculates the number of value changes in each time series.
   pub fn changes(&mut self) {
     for ts in &mut self.vector {
       ts.changes();
@@ -814,48 +816,42 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Calculates the day of the month for the metric points in each time series
-  #[allow(dead_code)]
+  /// Calculates the day of the month for each metric point in each time series.
   pub fn day_of_month(&mut self) {
     for ts in &mut self.vector {
       ts.day_of_month();
     }
   }
 
-  // Calculates the day of the week for the metric points in each time series
-  #[allow(dead_code)]
+  /// Calculates the day of the week for each metric point in each time series.
   pub fn day_of_week(&mut self) {
     for ts in &mut self.vector {
       ts.day_of_week();
     }
   }
 
-  // Calculates the day of the year for the metric points in each time series
-  #[allow(dead_code)]
+  /// Calculates the day of the year for each metric point in each time series.
   pub fn day_of_year(&mut self) {
     for ts in &mut self.vector {
       ts.day_of_year();
     }
   }
 
-  // Calculates the days in the month for the metric points in each time series
-  #[allow(dead_code)]
+  /// Calculates the number of days in the month for each metric point in each time series.
   pub fn days_in_month(&mut self) {
     for ts in &mut self.vector {
       ts.days_in_month();
     }
   }
 
-  // Converts degrees to radians for each time series element in the vector
-  #[allow(dead_code)]
+  /// Converts each metric point's value from degrees to radians in every time series.
   pub fn deg(&mut self) {
     for ts in &mut self.vector {
       ts.deg();
     }
   }
 
-  // Computes the difference between the first and last value of each time series element in the vector
-  #[allow(dead_code)]
+  /// Computes the difference between the first and last value of each time series.
   pub fn delta(&mut self) {
     for ts in &mut self.vector {
       ts.delta();
@@ -863,8 +859,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Computes the derivative of each time series element in the vector
-  #[allow(dead_code)]
+  /// Computes the derivative of each time series element in the vector.
   pub fn deriv(&mut self) {
     for ts in &mut self.vector {
       ts.deriv();
@@ -872,39 +867,35 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Computes the exponential function for each time series element in the vector
-  #[allow(dead_code)]
+  /// Computes the exponential function for each time series element in the vector.
   pub fn exp(&mut self) {
     for ts in &mut self.vector {
       ts.exp();
     }
   }
 
-  // Applies the floor function to each time series element in the vector in place
-  #[allow(dead_code)]
+  /// Applies the floor function to each time series element in the vector in place.
   pub fn floor(&mut self) {
     for ts in &mut self.vector {
       ts.floor();
     }
   }
 
-  // Produces a smoothed value for time series based on the range
-  #[allow(dead_code)]
+  /// Produces a smoothed value for time series based on the range using the Holt-Winters method.
   pub fn holt_winters(&mut self, alpha: f64, beta: f64) {
     for ts in &mut self.vector {
       ts.holt_winters(alpha, beta);
     }
   }
 
-  // Returns the hour of the day for each of the given times in the metric points
-  #[allow(dead_code)]
+  /// Returns the hour of the day for each of the given times in the metric points.
   pub fn hour(&mut self) {
     for ts in &mut self.vector {
       ts.hour();
     }
   }
 
-  #[allow(dead_code)]
+  /// Computes the difference between the last two values in each time series.
   pub fn idelta(&mut self) {
     for ts in &mut self.vector {
       ts.idelta();
@@ -912,8 +903,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Computes the total increase over time for each time series
-  #[allow(dead_code)]
+  /// Computes the total increase over time for each time series.
   pub fn increase(&mut self) {
     for ts in &mut self.vector {
       ts.increase();
@@ -921,8 +911,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  // Computes the instantaneous rate of change for each time series
-  #[allow(dead_code)]
+  /// Computes the instantaneous rate of change for each time series.
   pub fn irate(&mut self) {
     for ts in &mut self.vector {
       ts.irate();
@@ -930,7 +919,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Joins labels with a specified separator for each time series.
   pub fn label_join(&mut self, dst_label: &str, separator: &str, src_labels: Vec<String>) {
     for ts in &mut self.vector {
       ts.label_join(dst_label, separator, &src_labels);
@@ -938,7 +927,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Replaces a label value based on a regex match for each time series.
   pub fn label_replace(
     &mut self,
     dst_label: &str,
@@ -952,7 +941,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Applies the natural logarithm to each time series element in the vector.
   pub fn ln(&mut self) {
     for ts in &mut self.vector {
       ts.ln();
@@ -960,42 +949,47 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Applies the base-2 logarithm to each time series element in the vector.
   pub fn log2(&mut self) {
     for ts in &mut self.vector {
       ts.log2();
     }
   }
 
-  #[allow(dead_code)]
+  /// Applies the base-10 logarithm to each time series element in the vector.
   pub fn log10(&mut self) {
     for ts in &mut self.vector {
       ts.log10();
     }
   }
 
-  #[allow(dead_code)]
+  /// Calculates the minute of the hour from the timestamp of each metric point in each time series.
   pub fn minute(&mut self) {
     for ts in &mut self.vector {
       ts.minute();
     }
   }
 
-  #[allow(dead_code)]
+  /// Extracts the month from the timestamp of each metric point in each time series.
   pub fn month(&mut self) {
     for ts in &mut self.vector {
       ts.month();
     }
   }
 
-  #[allow(dead_code)]
+  /// Applies negation to each time series element in the vector.
   pub fn negative(&mut self) {
     for ts in &mut self.vector {
       ts.negative();
     }
   }
 
-  #[allow(dead_code)]
+  /// Returns the mathematical constant Pi.
+  pub fn pi(&mut self) -> f64 {
+    std::f64::consts::PI
+  }
+
+  /// Predicts future values for each time series based on linear regression up to time `t`.
   pub fn predict_linear(&mut self, t: f64) {
     for ts in &mut self.vector {
       ts.predict_linear(t);
@@ -1003,14 +997,14 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Converts each time series element in the vector from degrees to radians.
   pub fn rad(&mut self) {
     for ts in &mut self.vector {
       ts.rad();
     }
   }
 
-  #[allow(dead_code)]
+  /// Calculates the rate of change per second for each time series over its full duration.
   pub fn rate(&mut self) {
     for ts in &mut self.vector {
       ts.rate();
@@ -1018,21 +1012,21 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Counts the number of resets (value drops) in each time series.
   pub fn resets(&mut self) {
     for ts in &mut self.vector {
       ts.resets();
     }
   }
 
-  #[allow(dead_code)]
+  /// Rounds each time series element in the vector to the nearest multiple of `to_nearest`.
   pub fn round(&mut self, to_nearest: f64) {
     for ts in &mut self.vector {
       ts.round(to_nearest);
     }
   }
 
-  #[allow(dead_code)]
+  /// Returns the value of a single metric point if the vector contains exactly one time series with one metric point.
   pub fn scalar(&mut self) -> f64 {
     if self.vector.len() == 1 {
       if let Some(metric_point) = self.vector[0].get_metric_points().first() {
@@ -1042,43 +1036,42 @@ impl PromQLObject {
     f64::NAN
   }
 
-  // Determines the sign of each metric point's value in every time series
-  #[allow(dead_code)]
+  /// Determines the sign of each metric point's value in every time series.
   pub fn sgn(&mut self) {
     for ts in &mut self.vector {
       ts.sgn();
     }
   }
 
-  #[allow(dead_code)]
+  /// Sorts each time series by metric point values in ascending order.
   pub fn sort(&mut self) {
     for ts in &mut self.vector {
       ts.sort();
     }
   }
 
-  #[allow(dead_code)]
+  /// Sorts each time series by metric point values in descending order.
   pub fn sort_desc(&mut self) {
     for ts in &mut self.vector {
       ts.sort_desc();
     }
   }
 
-  #[allow(dead_code)]
+  /// Applies the square root operation to each metric point in every time series.
   pub fn sqrt(&mut self) {
     for ts in &mut self.vector {
       ts.sqrt();
     }
   }
 
-  #[allow(dead_code)]
+  /// Replaces the value of each metric point in every time series with its timestamp.
   pub fn timestamp(&mut self) {
     for ts in &mut self.vector {
       ts.timestamp();
     }
   }
 
-  #[allow(dead_code)]
+  /// Creates a new PromQLObject as a vector from a scalar value.
   pub fn convert_to_vector(&self, s: f64) -> PromQLObject {
     let current_time = Utc::now().timestamp();
     PromQLObject::new_as_vector(vec![PromQLTimeSeries::new_with_params(
@@ -1087,7 +1080,7 @@ impl PromQLObject {
     )])
   }
 
-  #[allow(dead_code)]
+  /// Extracts the year from each metric point's timestamp in every time series.
   pub fn year(&mut self) {
     for ts in &mut self.vector {
       ts.year();
@@ -1096,7 +1089,7 @@ impl PromQLObject {
 
   // **** Aggregations over time ****
 
-  #[allow(dead_code)]
+  /// Computes the average value of metric points over time for each time series.
   pub fn avg_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.avg_over_time();
@@ -1104,7 +1097,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Finds the minimum value of metric points over time for each time series.
   pub fn min_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.min_over_time();
@@ -1112,7 +1105,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Finds the maximum value of metric points over time for each time series.
   pub fn max_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.max_over_time();
@@ -1120,7 +1113,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Computes the sum of metric points over time for each time series.
   pub fn sum_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.sum_over_time();
@@ -1128,7 +1121,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Counts the number of metric points over time for each time series.
   pub fn count_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.count_over_time();
@@ -1136,7 +1129,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Calculates the specified quantile of metric points over time for each time series.
   pub fn quantile_over_time(&mut self, quantile: f64) {
     for ts in &mut self.vector {
       ts.quantile_over_time(quantile);
@@ -1144,7 +1137,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Calculates the standard deviation of metric points over time for each time series.
   pub fn stddev_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.stddev_over_time();
@@ -1152,7 +1145,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Calculates the variance of metric points over time for each time series.
   pub fn stdvar_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.stdvar_over_time();
@@ -1160,7 +1153,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Calculates the median absolute deviation of metric points over time for each time series.
   pub fn mad_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.mad_over_time();
@@ -1168,7 +1161,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Captures the last metric point over time for each time series.
   pub fn last_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.last_over_time();
@@ -1176,7 +1169,7 @@ impl PromQLObject {
     self.update_object_type();
   }
 
-  #[allow(dead_code)]
+  /// Indicates presence of data over time for each time series.
   pub fn present_over_time(&mut self) {
     for ts in &mut self.vector {
       ts.present_over_time();
@@ -1186,6 +1179,12 @@ impl PromQLObject {
 }
 
 use std::cmp::Ordering;
+
+impl Default for PromQLObject {
+  fn default() -> Self {
+    Self::new()
+  }
+}
 
 impl PartialEq for PromQLObject {
   fn eq(&self, other: &Self) -> bool {
