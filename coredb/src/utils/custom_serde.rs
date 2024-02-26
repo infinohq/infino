@@ -16,7 +16,7 @@ pub mod arc_rwlock_serde {
     T: Serialize,
   {
     let cloned = val.clone();
-    let inner = &cloned.read().unwrap();
+    let inner = &cloned.read();
     T::serialize(inner, s)
   }
 

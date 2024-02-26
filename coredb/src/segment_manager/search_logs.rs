@@ -5,12 +5,16 @@
 use std::collections::HashSet;
 
 use crate::log::constants::BLOCK_SIZE_FOR_LOG_MESSAGES;
+use crate::log::log_message::LogMessage;
 use crate::log::postings_block::PostingsBlock;
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
+use crate::segment_manager::query_dsl::Rule;
+
 use crate::segment_manager::segment::Segment;
-use crate::utils::error::AstError;
+use crate::utils::error::{AstError, SegmentSearchError};
 
 use log::debug;
+use pest::iterators::Pairs;
 
 impl Segment {
   /// Get the posting lists belonging to a set of matching terms in the query
@@ -44,7 +48,7 @@ impl Segment {
         }
       };
 
-      let postings_list = postings_list.read().unwrap();
+      let postings_list = postings_list.read();
 
       let initial_values = postings_list.get_initial_values().clone();
       initial_values_list.push(initial_values);
@@ -272,6 +276,29 @@ impl Segment {
     result_set.extend(accumulator.iter().cloned());
 
     Ok(())
+  }
+
+  /// Search the segment for the given query.
+  pub async fn search_logs(
+    &self,
+    ast: &Pairs<'_, Rule>,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<Vec<LogMessage>, SegmentSearchError> {
+    let matching_document_ids = self
+      .traverse_query_dsl_ast(&ast.clone())
+      .await
+      .map_err(SegmentSearchError::AstError)?;
+
+    // Since matching_document_ids is a HashSet, no need to dedup
+    let matching_document_ids_vec: Vec<u32> = matching_document_ids.into_iter().collect();
+
+    // Get the log messages and return with the query results
+    let log_messages = self
+      .get_log_messages_from_ids(&matching_document_ids_vec, range_start_time, range_end_time)
+      .map_err(SegmentSearchError::LogError)?;
+
+    Ok(log_messages)
   }
 }
 

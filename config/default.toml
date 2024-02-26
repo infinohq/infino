@@ -14,7 +14,6 @@ retention_days = 30
 [server]
 port = 3000
 host = "0.0.0.0"
-commit_interval_in_seconds = 30
 timestamp_key = "date"
 labels_key = "labels"
 use_rabbitmq = "no"             # specifies whether to write incoming messages to rabbitmq

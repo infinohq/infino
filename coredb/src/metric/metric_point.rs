@@ -1,10 +1,11 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-use std::cmp::Ordering;
-
 use approx::abs_diff_eq;
+use chrono::{DateTime, Datelike, LocalResult, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::hash::{Hash, Hasher};
 
 /// Represents a metric point in time series.
 #[derive(Debug, Deserialize, Serialize)]
@@ -40,9 +41,52 @@ impl MetricPoint {
     self.value
   }
 
+  /// Set time.
+  pub fn set_time(&mut self, time: u64) {
+    self.time = time;
+  }
+
+  /// Set value.
+  pub fn set_value(&mut self, value: f64) {
+    self.value = value;
+  }
+
   /// Get tsz::DataPoint corresponding to this MetricPoint.
   pub fn get_tsz_metric_point(&self) -> tsz::DataPoint {
     tsz::DataPoint::new(self.get_time(), self.get_value())
+  }
+
+  // Converts the epoch timestamp to a DateTime<Utc> object
+  pub fn datetime(&self) -> DateTime<Utc> {
+    match Utc.timestamp_opt(self.time as i64, 0) {
+      LocalResult::Single(datetime) => datetime,
+      _ => panic!("Failed to convert timestamp to DateTime<Utc>"),
+    }
+  }
+
+  // Extracts the year from the timestamp
+  pub fn year(&self) -> i32 {
+    self.datetime().year()
+  }
+
+  // Extracts the month from the timestamp
+  pub fn month(&self) -> u32 {
+    self.datetime().month()
+  }
+
+  // Extracts the day of the month from the timestamp
+  pub fn day(&self) -> u32 {
+    self.datetime().day()
+  }
+
+  // Extracts the day of the week from the timestamp
+  pub fn weekday(&self) -> chrono::Weekday {
+    self.datetime().weekday()
+  }
+
+  // Extracts the hour from the timestamp
+  pub fn hour(&self) -> u32 {
+    self.datetime().hour()
   }
 }
 
@@ -82,6 +126,13 @@ impl Ord for MetricPoint {
 impl PartialOrd for MetricPoint {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     Some(self.cmp(other))
+  }
+}
+
+impl Hash for MetricPoint {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.time.hash(state);
+    self.value.to_bits().hash(state); // Converts f64 to its IEEE754 bit representation and hashes it
   }
 }
 

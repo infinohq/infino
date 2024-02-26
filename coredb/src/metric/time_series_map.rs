@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
 use serde::de::{MapAccess, Visitor};
@@ -8,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::metric::time_series::TimeSeries;
 use crate::utils::error::CoreDBError;
+use crate::utils::sync::{Arc, RwLock};
 
 #[derive(Debug)]
 /// Represents an time series map - a map of label-id to TimeSeries.
@@ -46,7 +46,7 @@ impl TimeSeriesMap {
     // Acquire a write lock on the time series and append the metric point.
     // The scope of the write lock is minimized to the append operation only.
     {
-      let mut ts = arc_rwlock_ts.write().unwrap(); // Lock is acquired here.
+      let mut ts = arc_rwlock_ts.write(); // Lock is acquired here.
       ts.append(time, value);
     } // Lock is automatically released here as pl goes out of scope.
 
@@ -70,7 +70,7 @@ impl Serialize for TimeSeriesMap {
     let mut map_ser = serializer.serialize_map(Some(map.len()))?;
     for entry in map.iter() {
       let key = entry.key();
-      let value_lock = entry.value().read().unwrap();
+      let value_lock = entry.value().read();
       map_ser.serialize_entry(&key, &*value_lock)?;
     }
     map_ser.end()
@@ -145,7 +145,7 @@ mod tests {
 
     // Retrieve and check the TimeSeries.
     let time_series_arc = time_series_map.get_time_series(label_id).unwrap();
-    let time_series = time_series_arc.read().unwrap();
+    let time_series = time_series_arc.read();
 
     let time_series_vec = time_series.flatten();
 
@@ -190,7 +190,7 @@ mod tests {
 
     // Verify that deserialized data matches original
     let deserialized_time_series = deserialized.time_series_map.get(&1).unwrap();
-    let deserialized_time_series = &*deserialized_time_series.read().unwrap();
+    let deserialized_time_series = &*deserialized_time_series.read();
 
     let deserialized_time_series_vec = deserialized_time_series.flatten();
     assert_eq!(deserialized_time_series_vec.first().unwrap().get_time(), 1);

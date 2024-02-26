@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
 use serde::de::{MapAccess, Visitor};
@@ -8,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::log::postings_list::PostingsList;
 use crate::utils::error::CoreDBError;
+use crate::utils::sync::{Arc, RwLock};
 
 #[derive(Debug)]
 /// Represents an inverted index - a map of term-id to PostingsList.
@@ -46,7 +46,7 @@ impl InvertedMap {
     // Acquire a write lock on the postings list and append the log message id.
     // The scope of the write lock is minimized to the append operation only.
     {
-      let mut pl = arc_rwlock_pl.write().unwrap(); // Lock is acquired here.
+      let mut pl = arc_rwlock_pl.write(); // Lock is acquired here.
       pl.append(log_message_id)?;
     } // Lock is automatically released here as pl goes out of scope.
 
@@ -76,7 +76,7 @@ impl Serialize for InvertedMap {
     let mut map_ser = serializer.serialize_map(Some(map.len()))?;
     for entry in map.iter() {
       let key = entry.key();
-      let value_lock = entry.value().read().unwrap();
+      let value_lock = entry.value().read();
       map_ser.serialize_entry(&key, &*value_lock)?;
     }
     map_ser.end()
@@ -151,7 +151,7 @@ mod tests {
 
     // Retrieve and check the PostingsList.
     let postings_list_arc = inverted_map.get_postings_list(term_id).unwrap();
-    let postings_list = postings_list_arc.read().unwrap();
+    let postings_list = postings_list_arc.read();
 
     let postings_list_vec = postings_list.flatten();
 
@@ -200,7 +200,7 @@ mod tests {
 
     // Verify that deserialized data matches original
     let deserialized_postings_list = deserialized.inverted_map.get(&1).unwrap();
-    let deserialized_postings_list = &*deserialized_postings_list.read().unwrap();
+    let deserialized_postings_list = &*deserialized_postings_list.read();
 
     let deserialized_postings_list_vec = deserialized_postings_list.flatten();
     assert_eq!(deserialized_postings_list_vec, vec![1, 2, 3]);

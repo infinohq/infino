@@ -6,7 +6,6 @@ use std::vec::Vec;
 
 use dashmap::DashMap;
 use log::debug;
-use pest::iterators::Pairs;
 
 use super::metadata::Metadata;
 use crate::log::inverted_map::InvertedMap;
@@ -14,11 +13,9 @@ use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
-use crate::segment_manager::query_dsl::Rule;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::LogError;
-use crate::utils::error::SegmentSearchError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::thread;
@@ -262,76 +259,73 @@ impl Segment {
     Ok(())
   }
 
-  /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
   pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
+    // Acquire a lock - so that only one thread can commit at a time.
     let mut lock = self.commit_lock.lock().await;
     *lock = thread::current().id();
 
-    let metadata_path = get_joined_path(dir, METADATA_FILE_NAME);
-    let terms_path = get_joined_path(dir, TERMS_FILE_NAME);
-    let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
-    let forward_map_path = get_joined_path(dir, FORWARD_MAP_FILE_NAME);
-    let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
-    let time_series_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
+    // Function to serialize a component to a given path.
+    async fn serialize_component<T: serde::Serialize>(
+      component: &T,
+      path: String,
+      storage: &Storage,
+    ) -> (u64, u64) {
+      // TODO: handle the error gracefully.
+      storage
+        .write(component, &path)
+        .await
+        .unwrap_or_else(|_| panic!("Could not write to file {}", path))
+    }
 
-    let (uncompressed_terms_size, compressed_terms_size) =
-      storage.write(&self.terms, &terms_path).await?;
-    debug!(
-      "Serialized terms to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_terms_size, compressed_terms_size
+    // Serialize each of the components of a segment. Run these concurrently in the same task using tokio::join.
+    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = tokio::join!(
+      serialize_component(&self.terms, get_joined_path(dir, TERMS_FILE_NAME), storage),
+      serialize_component(
+        &self.inverted_map,
+        get_joined_path(dir, INVERTED_MAP_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.forward_map,
+        get_joined_path(dir, FORWARD_MAP_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.labels,
+        get_joined_path(dir, LABELS_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.time_series_map,
+        get_joined_path(dir, TIME_SERIES_FILE_NAME),
+        storage
+      ),
     );
 
-    let (uncompressed_inverted_map_size, compressed_inverted_map_size) = storage
-      .write(&self.inverted_map, &inverted_map_path)
-      .await?;
-    debug!(
-      "Serialized inverted map to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_inverted_map_size, compressed_inverted_map_size
+    // Calculate uncompressed and compressed segment size.
+    let (uncompressed_segment_size, compressed_segment_size) = (
+      terms_result.0
+        + inverted_map_result.0
+        + forward_map_result.0
+        + labels_result.0
+        + time_series_result.0,
+      terms_result.1
+        + inverted_map_result.1
+        + forward_map_result.1
+        + labels_result.1
+        + time_series_result.1,
     );
 
-    let (uncompressed_forward_map_size, compressed_forward_map_size) =
-      storage.write(&self.forward_map, &forward_map_path).await?;
-    debug!(
-      "Serialized forward map to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_forward_map_size, compressed_forward_map_size
-    );
-
-    let (uncompressed_labels_size, compressed_labels_size) =
-      storage.write(&self.labels, &labels_path).await?;
-    debug!(
-      "Serialized labels to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_labels_size, compressed_labels_size
-    );
-
-    let (uncompressed_time_series_size, compressed_time_series_size) = storage
-      .write(&self.time_series_map, &time_series_path)
-      .await?;
-    debug!(
-      "Serialized time series to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_time_series_size, compressed_time_series_size
-    );
-
+    // Update the metadata with segment size.
     let (uncompressed_metadata_size, compressed_metadata_size) = self.metadata.get_metadata_size();
-
-    let uncompressed_segment_size = uncompressed_metadata_size
-      + uncompressed_terms_size
-      + uncompressed_inverted_map_size
-      + uncompressed_forward_map_size
-      + uncompressed_labels_size
-      + uncompressed_time_series_size;
-    let compressed_segment_size = compressed_metadata_size
-      + compressed_terms_size
-      + compressed_inverted_map_size
-      + compressed_forward_map_size
-      + compressed_labels_size
-      + compressed_time_series_size;
-
+    let uncompressed_segment_size = uncompressed_segment_size + uncompressed_metadata_size;
+    let compressed_segment_size = compressed_segment_size + compressed_metadata_size;
     self
       .metadata
       .update_segment_size(uncompressed_segment_size, compressed_segment_size);
-
-    // Write the metadata at the end - so that its segment size is updated
-    storage.write(&self.metadata, &metadata_path).await?;
+    storage
+      .write(&self.metadata, &get_joined_path(dir, METADATA_FILE_NAME))
+      .await?;
 
     debug!(
       "Serialized segment to {} bytes uncompressed, {} bytes compressed",
@@ -381,31 +375,8 @@ impl Segment {
     Ok((segment, total_size))
   }
 
-  /// Search the segment for the given query.
-  pub async fn search_logs(
-    &self,
-    ast: &Pairs<'_, Rule>,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, SegmentSearchError> {
-    let matching_document_ids = self
-      .traverse_ast(&ast.clone())
-      .await
-      .map_err(SegmentSearchError::AstError)?;
-
-    // Since matching_document_ids is a HashSet, no need to dedup
-    let matching_document_ids_vec: Vec<u32> = matching_document_ids.into_iter().collect();
-
-    // Get the log messages and return with the query results
-    let log_messages = self
-      .get_log_messages_from_ids(&matching_document_ids_vec, range_start_time, range_end_time)
-      .map_err(SegmentSearchError::LogError)?;
-
-    Ok(log_messages)
-  }
-
   /// Return the log messages within the given time range corresponding to the given log message ids.
-  fn get_log_messages_from_ids(
+  pub fn get_log_messages_from_ids(
     &self,
     log_message_ids: &[u32],
     range_start_time: u64,
@@ -502,9 +473,10 @@ impl Default for Segment {
 
 #[cfg(test)]
 mod tests {
-  use std::sync::{Arc, RwLock};
+  use crate::utils::sync::{Arc, RwLock};
 
   use chrono::Utc;
+  use log::error;
   use pest::Parser;
   use tempdir::TempDir;
 
@@ -514,6 +486,7 @@ mod tests {
   use crate::segment_manager::query_dsl::{QueryDslParser, Rule};
   use crate::storage_manager::storage::StorageType;
   use crate::utils::sync::{is_sync_send, thread};
+  use pest::iterators::Pairs;
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, Box<pest::error::Error<Rule>>> {
     let test_string = term;
@@ -538,13 +511,13 @@ mod tests {
 
     if let Ok(query_node) = query_node_result {
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
-        eprintln!("Error in search_logs: {:?}", err);
+        error!("Error in search_logs: {:?}", err);
       } else {
         let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         assert!(results.is_empty());
       }
     } else {
-      eprintln!("Error parsing the query.");
+      error!("Error parsing the query.");
     }
   }
 
@@ -557,13 +530,13 @@ mod tests {
 
     if let Ok(query_node) = query_node_result {
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
-        eprintln!("Error in search_logs: {:?}", err);
+        error!("Error in search_logs: {:?}", err);
       } else {
         let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         assert!(results.is_empty());
       }
     } else {
-      eprintln!("Error parsing the query.");
+      error!("Error parsing the query.");
     }
   }
 
@@ -650,12 +623,12 @@ mod tests {
       .unwrap();
     {
       let ts = ts.clone();
-      let ts = &*ts.read().unwrap();
+      let ts = &*ts.read();
       let other_label_ts = from_disk_segment
         .time_series_map
         .get_time_series(other_label_id)
         .unwrap();
-      let other_label_ts = other_label_ts.read().unwrap();
+      let other_label_ts = other_label_ts.read();
       assert!(ts.eq(&other_label_ts));
       assert_eq!(ts.get_compressed_blocks().len(), 0);
       assert_eq!(ts.get_initial_times().len(), 1);
@@ -685,11 +658,11 @@ mod tests {
           );
         }
         Err(err) => {
-          eprintln!("Error in search_logs for 'this': {:?}", err);
+          error!("Error in search_logs for 'this': {:?}", err);
         }
       }
     } else {
-      eprintln!("Error parsing the query for 'this'.");
+      error!("Error parsing the query for 'this'.");
     }
 
     // Test search for "blah".
@@ -704,11 +677,11 @@ mod tests {
           assert!(logs.is_empty());
         }
         Err(err) => {
-          eprintln!("Error in search_logs for 'blah': {:?}", err);
+          error!("Error in search_logs for 'blah': {:?}", err);
         }
       }
     } else {
-      eprintln!("Error parsing the query for 'blah'.");
+      error!("Error parsing the query for 'blah'.");
     }
 
     // Test metadata for labels.
@@ -728,8 +701,8 @@ mod tests {
     assert_eq!(segment.metadata.get_end_time(), time);
   }
 
-  #[test]
-  fn test_one_metric_point() {
+  #[tokio::test]
+  async fn test_one_metric_point() {
     let segment = Segment::new();
     let time = Utc::now().timestamp_millis() as u64;
     let mut label_map = HashMap::new();
@@ -741,16 +714,19 @@ mod tests {
     assert_eq!(segment.metadata.get_start_time(), time);
     assert_eq!(segment.metadata.get_end_time(), time);
 
-    let conditions = [MetricsQueryCondition::Equals(
-      "label_name_1".to_owned(),
-      "label_value_1".to_owned(),
-    )];
-    assert_eq!(
-      segment
-        .search_metrics(&conditions, time - 100, time + 100)
-        .len(),
-      1
-    )
+    let mut labels = HashMap::new();
+    labels.insert("label_name_1".to_owned(), "label_value_1".to_owned());
+    let results = segment
+      .search_metrics(
+        &labels,
+        &MetricsQueryCondition::Equals,
+        time - 100,
+        time + 100,
+      )
+      .await
+      .unwrap();
+
+    assert_eq!(results.len(), 1)
   }
 
   #[test]
@@ -774,8 +750,8 @@ mod tests {
     assert!(segment.metadata.get_end_time() <= end_time);
   }
 
-  #[test]
-  fn test_concurrent_append_metric_points() {
+  #[tokio::test]
+  async fn test_concurrent_append_metric_points() {
     let num_threads = 20;
     let num_metric_points_per_thread = 5000;
     let segment = Arc::new(Segment::new());
@@ -794,7 +770,7 @@ mod tests {
           segment_arc
             .append_metric_point("metric_name", &label_map, dp.get_time(), dp.get_value())
             .unwrap();
-          expected_arc.write().unwrap().push(dp);
+          expected_arc.write().push(dp);
         }
       });
       handles.push(handle);
@@ -809,12 +785,19 @@ mod tests {
     assert!(segment.metadata.get_start_time() >= start_time);
     assert!(segment.metadata.get_end_time() <= end_time);
 
-    let mut expected = (*expected.read().unwrap()).clone();
-    let conditions = [MetricsQueryCondition::Equals(
-      "label1".to_owned(),
-      "value1".to_owned(),
-    )];
-    let received = segment.search_metrics(&conditions, start_time - 100, end_time + 100);
+    let mut expected = (*expected.read()).clone();
+
+    let mut labels = HashMap::new();
+    labels.insert("label1".to_owned(), "value1".to_owned());
+    let received = segment
+      .search_metrics(
+        &labels,
+        &MetricsQueryCondition::Equals,
+        start_time - 100,
+        end_time + 100,
+      )
+      .await
+      .expect("Error search metrics");
 
     expected.sort();
     assert_eq!(expected, received);
@@ -922,7 +905,7 @@ mod tests {
 
     if let Ok(query_node) = query_node_result {
       if let Err(err) = segment.search_logs(&query_node, 0, u64::MAX).await {
-        eprintln!("Error in search_logs: {:?}", err);
+        error!("Error in search_logs: {:?}", err);
       } else {
         // Sort the expected results to match the sorted results from the function.
         let mut expected_results = vec!["hello world", "hello world hello world"];
@@ -940,7 +923,7 @@ mod tests {
         assert_eq!(actual_results, expected_results);
       }
     } else {
-      eprintln!("Error parsing the query for 'hello'.");
+      error!("Error parsing the query for 'hello'.");
     }
   }
 }

@@ -1,0 +1,184 @@
+//! PEG grammar for Query DSL
+//! This grammar is whitespace-permissive.
+
+// NOTES
+// 1. There are implicit dependencies on grammar verification, for example the order
+// of query rules or whether rules are AND'd or OR'd. The query code assumes this grammar
+// is correct and the Pest parser validates the input before query code is executed. This is thus
+// a brittle area of code since there we do not have unit tests for grammar verification.
+// 
+// 2. Parser error messages are not intuitive. If you have any problems parsing your input, copy
+// this grammar into the live parser at https://pest.rs/ and debug with your json input.
+// 
+// 3. This grammar focuses on query syntax verification and is rewritten to avoid recursion.
+// 
+// 4. This grammar is intended to be compatible with Prometheus v2.45.0
+// https://github.com/prometheus/prometheus/tree/v2.45.0
+// 
+// 5. See Prometheus docs here:
+// https://prometheus.io/docs/prometheus/latest/querying/basics/
+
+start = { expression }
+
+// Define an expression as a series of operations with increasing precedence
+expression     = { and_expression ~ ((or | unless) ~ and_expression)* ~ subquery? }
+and_expression = { equality ~ (and ~ equality)* }
+equality       = { comparison ~ ((equal | not_equal) ~ comparison)* }
+comparison     = { term ~ ((greater_than | less_than | greater_than_or_equal | less_than_or_equal) ~ term)* }
+term           = { factor ~ ((plus | minus) ~ factor)* }
+factor         = { exponent ~ ((multiply | divide | modulo) ~ exponent)* }
+exponent       = { unary ~ (power ~ unary)* }
+unary          = { negative? ~ leaf }
+leaf           = { aggregations | functions | vector | scalar }
+
+// *** Operations ***
+or                    = @{ ws ~ "or" ~ ws }
+and                   = @{ ws ~ "and" ~ ws }
+unless                = @{ ws ~ "unless" ~ ws }
+equal                 = @{ ws ~ "=" ~ ws }
+not_equal             = @{ ws ~ "!=" ~ ws }
+greater_than          = @{ ws ~ ">" ~ ws }
+less_than             = @{ ws ~ "<" ~ ws }
+greater_than_or_equal = @{ ws ~ ">=" ~ ws }
+less_than_or_equal    = @{ ws ~ ">=" ~ ws }
+plus                  = @{ ws ~ "+" ~ ws }
+minus                 = @{ ws ~ "-" ~ ws }
+multiply              = @{ ws ~ "*" ~ ws }
+divide                = @{ ws ~ "/" ~ ws }
+modulo                = @{ ws ~ "%" ~ ws }
+power                 = @{ ws ~ "^" ~ ws }
+negative              = @{ ws ~ "-" ~ ws }
+
+// Aggregations
+aggregations   = { aggregation ~ group_modifier? ~ start_paren ~ (parameter ~ comma)? ~ expression ~ end_paren }
+aggregation    = { sum | avg | max | min | count | count_values | quantile | stddev | stdvar | topk | bottomk | group }
+group_modifier = { start_paren ~ ("by" | "without") ~ start_brace ~ label_name ~ (comma ~ label_name)* ~ end_brace ~ end_paren }
+
+// Define individual rules for each aggregation type
+sum          = { "sum" }
+avg          = { "avg" }
+max          = { "max" }
+min          = { "min" }
+count        = { "count" }
+count_values = { "count_values" }
+quantile     = { "quantile" }
+stddev       = { "stddev" }
+stdvar       = { "stdvar" }
+topk         = { "topk" }
+bottomk      = { "bottomk" }
+group        = { "group" }
+
+// Note that for brevity, this doesn't fully validate the grammar (i.e. does not validate that a particular parameter is attached to particular aggregation).
+parameter = { (quote ~ label_name ~ quote) | ASCII_DIGIT | float }
+
+// **** Function calls ****
+functions = { function ~ start_paren ~ (expression ~ (comma ~ expression)*)? ~ end_paren }
+function  = { abs | absent | absent_over_time | acos | acosh | asin | asinh | atan | atanh | avg_over_time | ceil | changes | clamp | clamp_max | clamp_min | cos | cosh | count_over_time | days_in_month | day_of_month | day_of_week | day_of_year | deg | delta | deriv | exp | floor | holt_winters | hour | idelta | increase | irate | label_replace | label_join | last_over_time | ln | log10 | log2 | mad_over_time | max_over_time | min_over_time | minute | month | pi | predict_linear | present_over_time | quantile_over_time | rad | rate | resets | round | scalar_convert | sgn | sin | sinh | sort | sort_desc | sqrt | stddev_over_time | stdvar_over_time | sum_over_time | tan | tanh | time | timestamp | vector_convert | year }
+
+abs              = { "abs" }
+absent           = { "absent" }
+absent_over_time = { "absent_over_time" }
+acos             = { "acos" }
+acosh            = { "acosh" }
+asin             = { "asin" }
+asinh            = { "asinh" }
+atan             = { "atan" }
+atanh            = { "atanh" }
+avg_over_time    = { "avg_over_time" }
+ceil             = { "ceil" }
+changes          = { "changes" }
+clamp            = { "clamp" }
+clamp_max        = { "clamp_max" }
+clamp_min        = { "clamp_min" }
+cos              = { "cos" }
+cosh             = { "cosh" }
+count_over_time  = { "count_over_time" }
+days_in_month    = { "days_in_month" }
+day_of_month     = { "day_of_month" }
+day_of_week      = { "day_of_week" }
+day_of_year      = { "day_of_year" }
+deg              = { "deg" }
+delta            = { "delta" }
+deriv            = { "deriv" }
+exp              = { "exp" }
+floor            = { "floor" }
+// histogram_quantile = { "histogram_quantile" } - histograms not yet supported
+holt_winters       = { "holt_winters" }
+hour               = { "hour" }
+idelta             = { "idelta" }
+increase           = { "increase" }
+irate              = { "irate" }
+label_replace      = { "label_replace" }
+label_join         = { "label_join" }
+last_over_time     = { "last_over_time" }
+ln                 = { "ln" }
+log10              = { "log10" }
+log2               = { "log2" }
+mad_over_time      = { "mad_over_time" }
+max_over_time      = { "max_over_time" }
+min_over_time      = { "min_over_time" }
+minute             = { "minute" }
+month              = { "month" }
+pi                 = { "pi" }
+predict_linear     = { "predict_linear" }
+present_over_time  = { "present_over_time" }
+quantile_over_time = { "quantile_over_time" }
+rad                = { "rad" }
+rate               = { "rate" }
+resets             = { "resets" }
+round              = { "round" }
+scalar_convert     = { "scalar" }
+sgn                = { "sgn" }
+sin                = { "sin" }
+sinh               = { "sinh" }
+sort               = { "sort" }
+sort_desc          = { "sort_desc" }
+sqrt               = { "sqrt" }
+stddev_over_time   = { "stddev_over_time" }
+stdvar_over_time   = { "stdvar_over_time" }
+sum_over_time      = { "sum_over_time" }
+tan                = { "tan" }
+tanh               = { "tanh" }
+time               = { "time" }
+timestamp          = { "timestamp" }
+vector_convert     = { "vector" }
+year               = { "year" }
+
+// **** Vector creation ****
+scalar = { float }
+
+vector              = { !(aggregation | function) ~ metric_name? ~ (start_brace ~ label ~ (comma ~ label)* ~ end_brace)? ~ range? ~ offset_and_modifier? }
+label               = { label_name ~ condition ~ quote ~ label_value ~ quote }
+condition           = { equal_match | not_equal_match | regex_match | not_regex_match }
+offset              = { "offset" ~ duration }
+modifier            = { "@" ~ float }
+regex_match         = { ws ~ "=~" ~ ws }
+not_regex_match     = { ws ~ "!~" ~ ws }
+equal_match         = { equal }
+not_equal_match     = { not_equal }
+offset_and_modifier = { (offset ~ modifier?) | (modifier ~ offset?) }
+range               = { (start_bracket ~ duration ~ end_bracket)? }
+subquery            = { (start_bracket ~ duration ~ (colon ~ duration)? ~ end_bracket)? }
+
+// **** Low-level semantic definitions ****
+// _ prefix means silent; lets Pest know that these rules shouldn't create an AST node
+// @ prefix means atomic; lets Pest know to create a single token (i.e. a string or a number) instead
+metric_name    = @{ (ASCII_ALPHA | "_" | ":") ~ (ASCII_ALPHANUMERIC | "_" | ":")* }
+colon          = _{ ws ~ ":" ~ ws }
+comma          = _{ ws ~ "," ~ ws }
+digits         = @{ ASCII_DIGIT+ }
+duration       = @{ digits ~ ("s" | "m" | "h" | "d" | "w" | "y") }
+end_brace      = @{ ws ~ "}" ~ ws }
+end_bracket    = @{ ws ~ "]" ~ ws }
+end_paren      = @{ ws ~ ")" ~ ws }
+escaped_char   = _{ "\"\\\"" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | unicode_escape) }
+float          = @{ "-"? ~ (digits ~ "." ~ digits? | "." ~ digits) }
+label_name     = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+label_value    =  { (escaped_char | normal_char)+ }
+normal_char    = _{ !("\"" | "\\") ~ ANY }
+quote          = _{ "\"" }
+start_brace    = @{ ws ~ "{" ~ ws }
+start_bracket  = @{ ws ~ "[" ~ ws }
+start_paren    = @{ ws ~ "(" ~ ws }
+unicode_escape = @{ "\"u\"" ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT }
+ws             = _{ (" " | "\t" | NEWLINE)* }

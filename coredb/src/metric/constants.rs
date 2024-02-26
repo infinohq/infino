@@ -15,9 +15,11 @@ pub const LABEL_SEPARATOR: &str = "~";
 pub const METRIC_NAME_PREFIX: &str = "__name__";
 
 /// Represents a condition to be used in a metrics query.
+#[derive(PartialEq, Debug)]
 pub enum MetricsQueryCondition {
-  Equals(String, String),
-  NotEquals(String, String),
-  EqualsRegex(String, String),
-  NotEqualsRegex(String, String),
+  Equals,
+  NotEquals,
+  EqualsRegex,
+  NotEqualsRegex,
+  Undefined,
 }
