@@ -12,8 +12,9 @@
 
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::AstError;
+
 use crate::utils::error::SearchLogsError;
-use crate::utils::tokenize::tokenize;
+use crate::utils::tokenize::{tokenize, FIELD_DELIMITER};
 
 use futures::StreamExt;
 use log::debug;
@@ -81,6 +82,7 @@ impl Segment {
       Rule::match_query => self.process_match_query(node).await,
       Rule::bool_query => self.process_bool_query(node).await,
       Rule::terms_query => self.process_terms_query(node).await,
+      Rule::match_phrase_query => self.process_match_phrase_query(node).await,
       _ => Err(AstError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
@@ -350,7 +352,67 @@ impl Segment {
     }
   }
 
+  /// Match Phrase Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
+  async fn process_match_phrase_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+  ) -> Result<HashSet<u32>, AstError> {
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut fieldname: Option<&str> = None;
+    let mut query_text: Option<&str> = None;
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::fieldname => {
+          if let Some(field) = node.into_inner().next() {
+            fieldname = Some(field.as_str());
+          }
+        }
+        Rule::match_phrase_string | Rule::query => {
+          query_text = node.into_inner().next().map(|v| v.as_str());
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    match (fieldname, query_text) {
+      (Some(field), Some(query_str)) => {
+        let search_result = self
+          .process_search(
+            self.analyze_query_text(query_str, Some(field), false).await,
+            "AND",
+          )
+          .await?;
+
+        let search_result_vec: Vec<_> = search_result.into_iter().collect();
+
+        // From the given document IDs, filter document ids which contain the exact phrase (in the given field)
+        // and return the specific document ids
+        let matching_document_ids = self.find_exact_phrase_matches(
+          &search_result_vec,
+          Some(field),
+          query_str.trim_matches('"'),
+        );
+
+        Ok(matching_document_ids)
+      }
+      (None, _) => Err(AstError::UnsupportedQuery(
+        "Field name is missing".to_string(),
+      )),
+      (_, None) => Err(AstError::UnsupportedQuery(
+        "Query string is missing".to_string(),
+      )),
+    }
+  }
+
   /// Prep the query terms for the search
+
   async fn analyze_query_text(
     &self,
     query_text: &str,
@@ -368,16 +430,15 @@ impl Segment {
     tokenize(&query, &mut terms);
 
     // If fieldname is provided, concatenate it with each term; otherwise, use the term as is
-    let transformed_terms: Vec<String> = terms
-      .into_iter()
-      .map(|term| {
-        if let Some(field) = fieldname {
-          format!("{}~{}", field, term)
-        } else {
-          term.to_owned()
-        }
-      })
-      .collect();
+    let transformed_terms: Vec<String> = if let Some(field) = fieldname {
+      let prefix = format!("{}{}", field, FIELD_DELIMITER); // Prepare the prefix once
+      terms
+        .into_iter()
+        .map(|term| format!("{}{}", prefix, term))
+        .collect()
+    } else {
+      terms.into_iter().map(|term| term.to_owned()).collect() // No fieldname, just clone the term
+    };
 
     transformed_terms
   }
@@ -437,7 +498,7 @@ mod tests {
     let log_messages = [
       ("log 1", "this is a test log message"),
       ("log 2", "this is another log message field1value"),
-      ("log 3", "test log for different term"),
+      ("log 3 1", "test log for different term"),
       ("log 4", "field1~field1value testing field name and value"),
       ("log 5", "field1~field2value testing field name two value"),
     ];
@@ -625,11 +686,53 @@ mod tests {
         Ok(results) => {
           assert_eq!(
             results.len(),
-            1,
-            "There should be exactly 1 logs matching the query."
+            2,
+            "There should be exactly 2 logs matching the query."
           );
 
           assert!(results.iter().all(|log| log.get_text().contains("log")));
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_match_phrase_query() {
+    let segment = create_mock_segment();
+
+    let query_dsl_query = r#"{
+      "query": {
+        "match_phrase": {
+          "key": {
+            "query": "log 1"
+          }
+        }
+      }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert_eq!(
+            results.len(),
+            1,
+            "There should be exactly 1 log matching the query."
+          );
+
+          for log in results {
+            let key_field_value = log.get_fields().get("key");
+
+            assert!(
+              key_field_value.map_or(false, |value| value.contains("log 1")),
+              "Each log should have 'key' field containing 'log 1'."
+            );
+          }
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);

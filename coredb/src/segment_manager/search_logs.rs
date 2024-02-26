@@ -48,7 +48,7 @@ impl Segment {
         }
       };
 
-      let postings_list = postings_list.read().unwrap();
+      let postings_list = postings_list.read();
 
       let initial_values = postings_list.get_initial_values().clone();
       initial_values_list.push(initial_values);

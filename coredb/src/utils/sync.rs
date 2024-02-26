@@ -16,7 +16,7 @@ pub(crate) use loom::thread;
 // https://github.com/tokio-rs/loom/blob/16e5e9a0e562cf754ced04ac1a82802b8e492178/src/rt/notify.rs#L113
 // Once this is fixed, we can use loom::sync::RwLock when configuration is loom (and use std::sync::RwLock
 // when the configuration isn't loom).
-pub(crate) use std::sync::RwLock;
+pub(crate) use parking_lot::RwLock;
 
 // Tokio Mutex and RwLock - needed when we need lock to be Send + Sync.
 pub(crate) use tokio::sync::Mutex as TokioMutex;

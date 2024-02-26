@@ -305,7 +305,7 @@ fn main() {
 
   // If log level isn't set, set it to info.
   if env::var("RUST_LOG").is_err() {
-    env::set_var("RUST_LOG", "debug")
+    env::set_var("RUST_LOG", "info")
   }
 
   // Set up logging.

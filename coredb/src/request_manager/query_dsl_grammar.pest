@@ -134,9 +134,9 @@ match_bool_prefix        = { (analyzer | fuzziness | fuzzy_rewrite | fuzzy_trans
 
 // Match Phrase Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
 match_phrase_query  = { start_brace ~ quote ~ "match_phrase" ~ quote ~ colon ~ match_phrase_search ~ end_brace }
-match_phrase_search = { start_brace ~ fieldname ~ colon ~ match_phrase_array ~ end_brace }
-match_phrase_array  = { start_brace ~ query ~ (comma ~ match_phrase)* ~ end_brace }
-match_phrase        = { (analyzer | slop | zero_terms_query) }
+match_phrase_search = { start_brace ~ fieldname ~ colon ~ (match_phrase_string | match_phrase_array) ~ end_brace }
+match_phrase_array  = { start_brace ~ query ~ (comma ~ match_phrase_terms)* ~ end_brace }
+match_phrase_terms  = { (analyzer | slop | zero_terms_query) }
 
 // Match Phrase Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
 match_phrase_prefix_query  = { start_brace ~ quote ~ "match_phrase_prefix" ~ quote ~ colon ~ match_phrase_prefix_search ~ end_brace }
@@ -421,6 +421,7 @@ linear_ring                         = { start_bracket ~ (geo_coordinate ~ (comma
 lt                                  = { quote ~ "lt" ~ quote ~ colon ~ (number | date) }
 lte                                 = { quote ~ "lte" ~ quote ~ colon ~ (number | date) }
 map_script                          = { quote ~ "map_script" ~ quote ~ colon ~ script_clause }
+match_phrase_string                 = { string }
 match_string                        = { string }
 max_boost                           = { quote ~ "max_boost" ~ quote ~ colon ~ float }
 max_determinized_states             = { quote ~ "max_determinized_states" ~ quote ~ colon ~ integer }

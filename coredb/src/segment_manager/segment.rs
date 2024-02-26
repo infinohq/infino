@@ -1,7 +1,7 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::vec::Vec;
 
 use dashmap::DashMap;
@@ -259,76 +259,73 @@ impl Segment {
     Ok(())
   }
 
-  /// Serialize the segment to the specified directory. Returns the size of the serialized segment.
   pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
+    // Acquire a lock - so that only one thread can commit at a time.
     let mut lock = self.commit_lock.lock().await;
     *lock = thread::current().id();
 
-    let metadata_path = get_joined_path(dir, METADATA_FILE_NAME);
-    let terms_path = get_joined_path(dir, TERMS_FILE_NAME);
-    let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
-    let forward_map_path = get_joined_path(dir, FORWARD_MAP_FILE_NAME);
-    let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
-    let time_series_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
+    // Function to serialize a component to a given path.
+    async fn serialize_component<T: serde::Serialize>(
+      component: &T,
+      path: String,
+      storage: &Storage,
+    ) -> (u64, u64) {
+      // TODO: handle the error gracefully.
+      storage
+        .write(component, &path)
+        .await
+        .unwrap_or_else(|_| panic!("Could not write to file {}", path))
+    }
 
-    let (uncompressed_terms_size, compressed_terms_size) =
-      storage.write(&self.terms, &terms_path).await?;
-    debug!(
-      "Serialized terms to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_terms_size, compressed_terms_size
+    // Serialize each of the components of a segment. Run these concurrently in the same task using tokio::join.
+    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = tokio::join!(
+      serialize_component(&self.terms, get_joined_path(dir, TERMS_FILE_NAME), storage),
+      serialize_component(
+        &self.inverted_map,
+        get_joined_path(dir, INVERTED_MAP_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.forward_map,
+        get_joined_path(dir, FORWARD_MAP_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.labels,
+        get_joined_path(dir, LABELS_FILE_NAME),
+        storage
+      ),
+      serialize_component(
+        &self.time_series_map,
+        get_joined_path(dir, TIME_SERIES_FILE_NAME),
+        storage
+      ),
     );
 
-    let (uncompressed_inverted_map_size, compressed_inverted_map_size) = storage
-      .write(&self.inverted_map, &inverted_map_path)
-      .await?;
-    debug!(
-      "Serialized inverted map to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_inverted_map_size, compressed_inverted_map_size
+    // Calculate uncompressed and compressed segment size.
+    let (uncompressed_segment_size, compressed_segment_size) = (
+      terms_result.0
+        + inverted_map_result.0
+        + forward_map_result.0
+        + labels_result.0
+        + time_series_result.0,
+      terms_result.1
+        + inverted_map_result.1
+        + forward_map_result.1
+        + labels_result.1
+        + time_series_result.1,
     );
 
-    let (uncompressed_forward_map_size, compressed_forward_map_size) =
-      storage.write(&self.forward_map, &forward_map_path).await?;
-    debug!(
-      "Serialized forward map to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_forward_map_size, compressed_forward_map_size
-    );
-
-    let (uncompressed_labels_size, compressed_labels_size) =
-      storage.write(&self.labels, &labels_path).await?;
-    debug!(
-      "Serialized labels to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_labels_size, compressed_labels_size
-    );
-
-    let (uncompressed_time_series_size, compressed_time_series_size) = storage
-      .write(&self.time_series_map, &time_series_path)
-      .await?;
-    debug!(
-      "Serialized time series to {} bytes uncompressed, {} bytes compressed",
-      uncompressed_time_series_size, compressed_time_series_size
-    );
-
+    // Update the metadata with segment size.
     let (uncompressed_metadata_size, compressed_metadata_size) = self.metadata.get_metadata_size();
-
-    let uncompressed_segment_size = uncompressed_metadata_size
-      + uncompressed_terms_size
-      + uncompressed_inverted_map_size
-      + uncompressed_forward_map_size
-      + uncompressed_labels_size
-      + uncompressed_time_series_size;
-    let compressed_segment_size = compressed_metadata_size
-      + compressed_terms_size
-      + compressed_inverted_map_size
-      + compressed_forward_map_size
-      + compressed_labels_size
-      + compressed_time_series_size;
-
+    let uncompressed_segment_size = uncompressed_segment_size + uncompressed_metadata_size;
+    let compressed_segment_size = compressed_segment_size + compressed_metadata_size;
     self
       .metadata
       .update_segment_size(uncompressed_segment_size, compressed_segment_size);
-
-    // Write the metadata at the end - so that its segment size is updated
-    storage.write(&self.metadata, &metadata_path).await?;
+    storage
+      .write(&self.metadata, &get_joined_path(dir, METADATA_FILE_NAME))
+      .await?;
 
     debug!(
       "Serialized segment to {} bytes uncompressed, {} bytes compressed",
@@ -405,6 +402,41 @@ impl Segment {
     Ok(log_messages)
   }
 
+  /// Match the exact phrase in log messages from the given log IDs in parallel.
+  /// If the field name is provided, match the phrase in that field; otherwise, match in the text.
+  pub fn find_exact_phrase_matches(
+    &self,
+    log_message_ids: &[u32],
+    field_name: Option<&str>,
+    phrase_text: &str,
+  ) -> HashSet<u32> {
+    let matching_document_ids: HashSet<_> = log_message_ids
+      .iter()
+      .filter_map(|log_id| {
+        if let Some(log_message) = self.forward_map.get(log_id) {
+          let log_message = log_message.value();
+          let text_to_search = match field_name {
+            Some(field) => log_message
+              .get_fields()
+              .get(field)
+              .map_or("", String::as_str),
+            None => log_message.get_text(),
+          };
+
+          if text_to_search.contains(phrase_text) {
+            Some(*log_id)
+          } else {
+            None
+          }
+        } else {
+          None
+        }
+      })
+      .collect();
+
+    matching_document_ids
+  }
+
   /// Returns true if this segment overlaps with the given range.
   pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
     is_overlap(
@@ -441,7 +473,7 @@ impl Default for Segment {
 
 #[cfg(test)]
 mod tests {
-  use std::sync::{Arc, RwLock};
+  use crate::utils::sync::{Arc, RwLock};
 
   use chrono::Utc;
   use log::error;
@@ -591,12 +623,12 @@ mod tests {
       .unwrap();
     {
       let ts = ts.clone();
-      let ts = &*ts.read().unwrap();
+      let ts = &*ts.read();
       let other_label_ts = from_disk_segment
         .time_series_map
         .get_time_series(other_label_id)
         .unwrap();
-      let other_label_ts = other_label_ts.read().unwrap();
+      let other_label_ts = other_label_ts.read();
       assert!(ts.eq(&other_label_ts));
       assert_eq!(ts.get_compressed_blocks().len(), 0);
       assert_eq!(ts.get_initial_times().len(), 1);
@@ -738,7 +770,7 @@ mod tests {
           segment_arc
             .append_metric_point("metric_name", &label_map, dp.get_time(), dp.get_value())
             .unwrap();
-          expected_arc.write().unwrap().push(dp);
+          expected_arc.write().push(dp);
         }
       });
       handles.push(handle);
@@ -753,7 +785,7 @@ mod tests {
     assert!(segment.metadata.get_start_time() >= start_time);
     assert!(segment.metadata.get_end_time() <= end_time);
 
-    let mut expected = (*expected.read().unwrap()).clone();
+    let mut expected = (*expected.read()).clone();
 
     let mut labels = HashMap::new();
     labels.insert("label1".to_owned(), "value1".to_owned());
@@ -769,6 +801,49 @@ mod tests {
 
     expected.sort();
     assert_eq!(expected, received);
+  }
+
+  #[test]
+  fn test_match_exact_phrase() {
+    let segment = Segment::new();
+
+    segment
+      .append_log_message(1001, &HashMap::new(), "log 1")
+      .unwrap();
+    segment
+      .append_log_message(1002, &HashMap::new(), "log 2")
+      .unwrap();
+    segment
+      .append_log_message(1003, &HashMap::new(), "log 3")
+      .unwrap();
+
+    // Get all log message IDs from the forward map.
+    let all_log_ids: Vec<u32> = segment
+      .get_forward_map()
+      .iter()
+      .map(|entry| *entry.key())
+      .collect();
+
+    // Test matching exact phrase in text.
+    let log_ids_text = segment.find_exact_phrase_matches(&all_log_ids, None, "log 2");
+    assert_eq!(log_ids_text, HashSet::from_iter(vec![1]));
+
+    // Test matching exact phrase in a specific field.
+    let mut fields = HashMap::new();
+    fields.insert("field_name".to_string(), "log 3".to_string());
+    segment
+      .append_log_message(1004, &fields, "some message")
+      .unwrap();
+
+    let all_log_ids_with_fields: Vec<u32> = segment
+      .get_forward_map()
+      .iter()
+      .map(|entry| *entry.key())
+      .collect();
+
+    let log_ids_field =
+      segment.find_exact_phrase_matches(&all_log_ids_with_fields, Some("field_name"), "log 3");
+    assert_eq!(log_ids_field, HashSet::from_iter(vec![3]));
   }
 
   #[test]
