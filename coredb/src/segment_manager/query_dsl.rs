@@ -381,9 +381,8 @@ impl Segment {
       }
     }
 
-    if let Some(field) = fieldname {
-      if let Some(query_str) = query_text {
-        // Get the doc IDs for all the search
+    match (fieldname, query_text) {
+      (Some(field), Some(query_str)) => {
         let search_result = self
           .process_search(
             self.analyze_query_text(query_str, Some(field), false).await,
@@ -402,19 +401,18 @@ impl Segment {
         );
 
         Ok(matching_document_ids)
-      } else {
-        Err(AstError::UnsupportedQuery(
-          "Query string is missing".to_string(),
-        ))
       }
-    } else {
-      Err(AstError::UnsupportedQuery(
+      (None, _) => Err(AstError::UnsupportedQuery(
         "Field name is missing".to_string(),
-      ))
+      )),
+      (_, None) => Err(AstError::UnsupportedQuery(
+        "Query string is missing".to_string(),
+      )),
     }
   }
 
   /// Prep the query terms for the search
+
   async fn analyze_query_text(
     &self,
     query_text: &str,
@@ -432,16 +430,15 @@ impl Segment {
     tokenize(&query, &mut terms);
 
     // If fieldname is provided, concatenate it with each term; otherwise, use the term as is
-    let transformed_terms: Vec<String> = terms
-      .into_iter()
-      .map(|term| {
-        if let Some(field) = fieldname {
-          format!("{}{}{}", field, FIELD_DELIMITER, term)
-        } else {
-          term.to_owned()
-        }
-      })
-      .collect();
+    let transformed_terms: Vec<String> = if let Some(field) = fieldname {
+      let prefix = format!("{}{}", field, FIELD_DELIMITER); // Prepare the prefix once
+      terms
+        .into_iter()
+        .map(|term| format!("{}{}", prefix, term))
+        .collect()
+    } else {
+      terms.into_iter().map(|term| term.to_owned()).collect() // No fieldname, just clone the term
+    };
 
     transformed_terms
   }
