@@ -70,7 +70,7 @@ impl LogMessage {
     tokenize(&text, &mut tokens);
     terms.extend(tokens.into_iter().map(|s| s.to_string()));
 
-    // Each word in a field value goes with a perfix a of its field name, followed by ":".
+    // Each word in a field value goes with a prefix a of its field name, followed by ":".
     for field in &self.fields {
       let name = field.0;
       let mut values: Vec<&str> = Vec::new();
