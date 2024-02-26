@@ -13,8 +13,8 @@
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::AstError;
 
-use crate::utils::tokenize::{tokenize, FIELD_DELIMITER};
 use crate::utils::error::SearchLogsError;
+use crate::utils::tokenize::{tokenize, FIELD_DELIMITER};
 
 use futures::StreamExt;
 use log::debug;
