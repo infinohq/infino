@@ -29,13 +29,14 @@ use std::result::Result;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query};
+use axum::response::IntoResponse;
 use axum::routing::{delete, put};
 use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
@@ -46,7 +47,7 @@ use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
 use coredb::utils::environment::load_env;
-use coredb::utils::error::{CoreDBError, SearchLogsError};
+use coredb::utils::error::{CoreDBError, SearchLogsError, SearchMetricsError};
 use coredb::CoreDB;
 
 use crate::queue_manager::queue::RabbitMQ;
@@ -629,8 +630,8 @@ async fn summarize(
         }
       }
     }
-    Err(codedb_error) => {
-      match codedb_error {
+    Err(coredb_error) => {
+      match coredb_error {
         CoreDBError::SearchLogsError(search_logs_error) => {
           // Handle the error and return an appropriate status code and error message.
           match search_logs_error {
@@ -664,15 +665,13 @@ async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
   json_body: String,
-) -> Result<String, (StatusCode, String)> {
-  debug!("Searching metrics: {:?}", metrics_query);
+) -> impl IntoResponse {
+  debug!("MAIN: Search metrics for HTTP query: {:?}", metrics_query);
 
-  // Convert legacy Infino syntax to PromQL
   let query_text: String = if let (Some(label_name), Some(label_value)) = (
     metrics_query.label_name.as_ref(),
     metrics_query.label_value.as_ref(),
   ) {
-    // Construct the string and return it directly
     format!("{{ {}=\"{}\" }}", label_name, label_value)
   } else {
     "".to_owned()
@@ -690,9 +689,7 @@ async fn search_metrics(
     .search_metrics(
       text_ref,
       &json_body,
-      // The default for range start time is 0.
       metrics_query.start_time.unwrap_or(0_u64),
-      // The default for range end time is the current time.
       metrics_query
         .end_time
         .unwrap_or_else(|| Utc::now().timestamp_millis() as u64),
@@ -701,14 +698,44 @@ async fn search_metrics(
 
   match results {
     Ok(metrics) => {
-      Ok(serde_json::to_string(&metrics).expect("Could not convert search results to json"))
+      let response = json!({
+          "status": "success",
+          "data": metrics,
+      });
+      (StatusCode::OK, Json(response))
     }
+    Err(coredb_error) => {
+      let (status_code, error_type, error_message) = match coredb_error {
+        CoreDBError::SearchMetricsError(search_metrics_error) => match search_metrics_error {
+          SearchMetricsError::JsonParseError(_) => {
+            (StatusCode::BAD_REQUEST, "bad_data", "Invalid JSON input")
+          }
+          SearchMetricsError::SegmentSearchError(_) | SearchMetricsError::SegmentError(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+          ),
+          SearchMetricsError::NoQueryProvided => {
+            (StatusCode::BAD_REQUEST, "bad_data", "No query provided")
+          }
+          SearchMetricsError::AstError(_) => {
+            (StatusCode::BAD_REQUEST, "bad_data", "Unsupported Query")
+          }
+        },
+        _ => (
+          StatusCode::INTERNAL_SERVER_ERROR,
+          "internal_error",
+          "Internal server error",
+        ),
+      };
 
-    // TODO: separate between user triggered errors and internal errors.
-    Err(_) => Err((
-      StatusCode::INTERNAL_SERVER_ERROR,
-      "Internal server error".to_string(),
-    )),
+      let response = json!({
+          "status": "error",
+          "errorType": error_type,
+          "error": error_message,
+      });
+      (status_code, Json(response))
+    }
   }
 }
 
@@ -792,9 +819,9 @@ mod tests {
   use coredb::index_manager::index::Index;
   use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
-  use coredb::request_manager::promql_time_series::PromQLTimeSeries;
   use coredb::storage_manager::storage::Storage;
   use coredb::storage_manager::storage::StorageType;
+  use coredb::utils::error::AstError;
   use coredb::utils::io::get_joined_path;
   use coredb::utils::tokenize::FIELD_DELIMITER;
 
@@ -804,7 +831,7 @@ mod tests {
   /// Represents an entry in the metric append request.
   struct Metric {
     time: u64,
-    metric_name_value: HashMap<String, f64>,
+    metric_name_value: HashMap<String, u64>,
     labels: HashMap<String, String>,
   }
 
@@ -950,22 +977,36 @@ mod tests {
     Ok(())
   }
 
-  fn check_metric_point_vectors(expected: &[MetricPoint], received: &[MetricPoint]) {
-    assert_eq!(expected.len(), received.len());
+  fn check_metric_point_vectors(expected: &[MetricPoint], results: &serde_json::Value) {
+    let results_array = results.as_array().expect("Results should be an array");
 
-    // The time series is sorted by time - and in tests we may insert multiple values at the same time instant.
-    // To avoid test failure in such scenarios, we compare the times and values separately. We also need to sort
-    // received values as they may not be in sorted order (only time is the sort key in time series).
-    let expected_times: Vec<u64> = expected.iter().map(|item| item.get_time()).collect();
-    let expected_values: Vec<f64> = expected.iter().map(|item| item.get_value()).collect();
-    let received_times: Vec<u64> = received.iter().map(|item| item.get_time()).collect();
-    let mut received_values: Vec<f64> = received.iter().map(|item| item.get_value()).collect();
-    received_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for result in results_array {
+      let values = result
+        .get("values")
+        .expect("Values field missing")
+        .as_array()
+        .expect("Values should be an array");
 
-    assert_eq!(expected_times, received_times);
-    assert_eq!(expected_values, received_values);
+      for (i, value_array) in values.iter().enumerate() {
+        if let Some(mp) = expected.get(i) {
+          let cmp = mp.get_value();
+
+          if let Some(inner_value) = value_array.get(1).and_then(|v| v.as_f64()) {
+            assert!(
+              (inner_value - cmp).abs() < (10.0 * f64::EPSILON),
+              "Value does not match expected"
+            );
+          } else {
+            panic!("Expected a floating point number as the second element of each 'value_array'");
+          }
+        } else {
+          panic!("No corresponding expected MetricPoint for index {}", i);
+        }
+      }
+    }
   }
 
+  // Check that metrics queries adhere to Prometheus input and output format
   async fn check_time_series(
     app: &mut Router,
     config_dir_path: &str,
@@ -978,32 +1019,24 @@ mod tests {
     let query_end_time = query
       .end_time
       .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value));
-    let query_text = query
-      .text
-      .clone()
-      .map_or_else(|| "".to_owned(), |text| format!("text={}", text));
+    let query_text = query.text.as_deref().unwrap_or("");
+    let query_encode = format!("text={}", query_text);
 
     let query_string = format!(
-      "{}{}{}",
-      encode(&query_text),
+      "text={}{}{}",
+      encode(&query_encode),
       query_start_time,
       query_end_time
     );
 
     let uri = format!("/search_metrics?{}", query_string);
 
-    info!(
-      "Calling search metrics in check_time_series with URI: {}",
-      uri
-    );
-
-    // Now call search to get the documents.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::GET)
           .uri(uri)
-          .header(http::header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())
+          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
           .body(Body::from(""))
           .unwrap(),
       )
@@ -1016,34 +1049,72 @@ mod tests {
       .await
       .unwrap();
 
-    let mut results: Vec<PromQLTimeSeries> = serde_json::from_slice(&body).unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
 
-    // If both results and metrics are empty then the test passes, or we compare if they're not.
-    if !results.is_empty() && !metric_points_expected.is_empty() {
-      let metric_points_received = results[0].get_metric_points();
-      check_metric_point_vectors(&metric_points_expected, metric_points_received);
+    let status = json["status"]
+      .as_str()
+      .expect("Expected status field in response");
+
+    match status {
+      "success" => {
+        let data = json.get("data").expect("Expected data field in response");
+        let results_vec = data["result"]
+          .as_array()
+          .expect("Expected result field to be an array");
+        if results_vec.is_empty() {
+        } else {
+          let results_value = Value::Array(results_vec.clone());
+          check_metric_point_vectors(&metric_points_expected, &results_value);
+        }
+      }
+      "error" => {
+        let error_type = json["errorType"]
+          .as_str()
+          .expect("Expected errorType field in response");
+        let error = json["error"]
+          .as_str()
+          .expect("Expected error field in response");
+        error!("Error response from Prometheus: {} - {}", error_type, error);
+        return Err(CoreDBError::AstError(AstError::CoreDBError(format!(
+          "Error from Prometheus: {} - {}",
+          error_type, error
+        ))));
+      }
+      _ => panic!("Unexpected status value in response"),
     }
 
-    // Sleep for 2 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(2000)).await;
+    // Sleep for 2 seconds to simulate delay or wait for a condition.
+    sleep(Duration::from_secs(2)).await;
 
+    // Refresh CoreDB instance with the given configuration directory path.
     let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
+
+    // Calculate the start and end time for querying metrics post-refresh.
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64);
+      .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
 
-    let query_text = query.text.clone().unwrap_or_default();
-
+    // Use the refreshed CoreDB instance to search metrics with updated parameters.
     let mut results = refreshed_coredb
-      .search_metrics(&query_text, "", start_time, end_time)
-      .await
-      .expect("Could not get metrics");
+      .search_metrics(&query.text.unwrap_or_default(), "", start_time, end_time)
+      .await?;
 
-    // If both results and metrics are empty then the test passes, or we compare if they're not.
-    if !results.is_empty() && !metric_points_expected.is_empty() {
-      let metric_points_received = results[0].get_metric_points();
-      check_metric_point_vectors(&metric_points_expected, metric_points_received);
+    // If there are expected metric points and actual results, proceed to validate them.
+    if !metric_points_expected.is_empty() && !results.get_vector().is_empty() {
+      let mut tmpvec = results.take_vector();
+      let metric_points_received = tmpvec[0].get_metric_points();
+
+      // Assert that the expected metric points match the received metric points.
+      assert_eq!(
+        &metric_points_expected, metric_points_received,
+        "Metric points mismatch between expected and received values."
+      );
+    } else if metric_points_expected.is_empty() && results.get_vector().is_empty() {
+      // If both expected and received results are empty, consider it as a pass.
+      info!("Both expected and received metric points are empty, test passes.");
+    } else {
+      panic!("Mismatch in expected and received results: one is empty and the other is not.");
     }
 
     Ok(())
@@ -1053,7 +1124,7 @@ mod tests {
   // #[test_case(true ; "use rabbitmq")]
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_basic(use_rabbitmq: bool) -> Result<(), CoreDBError> {
+  async fn test_basic_main(use_rabbitmq: bool) -> Result<(), CoreDBError> {
     init();
 
     let config_dir = TempDir::new("config_test").unwrap();
@@ -1174,7 +1245,7 @@ mod tests {
     for i in 0..num_metric_points {
       let time = Utc::now().timestamp_millis() as u64;
       let value = i as f64;
-      let metric_point = MetricPoint::new(time, i as f64);
+      let metric_point = MetricPoint::new(time, value);
 
       let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, metric_name, value);
       metric_points_expected.push(metric_point);

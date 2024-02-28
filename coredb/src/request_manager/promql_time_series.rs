@@ -4,13 +4,17 @@
 use crate::metric::metric_point::MetricPoint;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PromQLTimeSeries {
+  #[serde(rename = "metric")]
   labels: HashMap<String, String>,
+
+  #[serde(skip_serializing)]
   metric_points: Vec<MetricPoint>,
 }
 
@@ -827,6 +831,36 @@ impl PromQLTimeSeries {
     for mp in &mut self.metric_points {
       mp.set_value(mp.get_value().tanh());
     }
+  }
+}
+
+impl Serialize for PromQLTimeSeries {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    // Start serializing a struct with a dynamic number of fields.
+    let mut state = serializer.serialize_struct("PromQLTimeSeries", 2)?;
+
+    // Serialize the labels directly.
+    state.serialize_field("metric", &self.labels)?;
+
+    let points: Vec<_> = self
+      .metric_points
+      .iter()
+      .map(|point| {
+        // Serialize each MetricPoint using its custom serialize implementation.
+        serde_json::to_value(point).expect("Failed to serialize MetricPoint")
+      })
+      .collect();
+
+    let value_str = if points.len() > 1 { "values" } else { "value" };
+
+    // Serialize the points array under a custom field name, e.g., "values".
+    state.serialize_field(value_str, &points)?;
+
+    // Finish serialization.
+    state.end()
   }
 }
 

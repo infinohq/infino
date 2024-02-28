@@ -166,7 +166,7 @@ impl Index {
     nodes: &Pairs<'_, Rule>,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<PromQLTimeSeries>, AstError> {
+  ) -> Result<PromQLObject, AstError> {
     debug!("Traversing ast {:?},\n", nodes);
 
     let mut stack = VecDeque::new();
@@ -197,7 +197,7 @@ impl Index {
       }
     }
 
-    Ok(results.take_vector())
+    Ok(results)
   }
 
   /// General dispatcher for query processing
@@ -1078,7 +1078,7 @@ mod tests {
     query: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<PromQLTimeSeries>, AstError> {
+  ) -> Result<PromQLObject, AstError> {
     let _ = env_logger::builder().is_test(true).try_init();
 
     let parsed_query = PromQLParser::parse(Rule::start, query)
@@ -1102,9 +1102,11 @@ mod tests {
     let num_metric_points = 10;
     let (index, _index_dir_path) = create_index("test_index", num_metric_points).await;
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1);
-    assert_eq!(results[0].get_metric_points()[0].get_value(), 1000.0);
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1);
+    assert_eq!(mp[0].get_value(), 1000.0);
   }
 
   #[tokio::test]
@@ -1116,9 +1118,9 @@ mod tests {
 
     match result {
       Ok(mut results) => {
-        assert_eq!(results.len(), 1);
+        assert_eq!(results.get_vector().len(), 1);
         assert_eq!(
-          results[0].get_metric_points().len(),
+          results.take_vector()[0].get_metric_points().len(),
           num_metric_points as usize
         );
       }
@@ -1134,9 +1136,9 @@ mod tests {
     let mut results = execute_query(&index, query, 0, u64::MAX)
       .await
       .expect("Did not execute query correctly");
-    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_vector().len(), 1);
     assert_eq!(
-      results[0].get_metric_points().len(),
+      results.take_vector()[0].get_metric_points().len(),
       num_metric_points as usize
     );
   }
@@ -1147,9 +1149,9 @@ mod tests {
     let num_metric_points = 10;
     let (index, _index_dir_path) = create_index("test_index", num_metric_points).await;
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_vector().len(), 1);
     assert_eq!(
-      results[0].get_metric_points().len(),
+      results.take_vector()[0].get_metric_points().len(),
       num_metric_points as usize
     );
   }
@@ -1160,9 +1162,11 @@ mod tests {
     let num_metric_points = 10;
     let (index, _index_dir_path) = create_index("test_index_avg", num_metric_points).await;
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1);
-    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0);
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1);
+    assert_eq!(mp[0].get_value(), 100.0);
   }
 
   #[tokio::test]
@@ -1171,8 +1175,11 @@ mod tests {
     let num_metric_points = 10;
     let (index, _index_dir_path) = create_index("test_index_max", num_metric_points).await;
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0);
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1);
+    assert_eq!(mp[0].get_value(), 100.0);
   }
 
   #[tokio::test]
@@ -1192,9 +1199,11 @@ mod tests {
     }
 
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1);
-    assert_eq!(results[0].get_metric_points()[0].get_value(), 5.0);
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1);
+    assert_eq!(mp[0].get_value(), 5.0);
   }
 
   #[tokio::test]
@@ -1204,12 +1213,11 @@ mod tests {
     let (index, _index_dir_path) = create_index("test_index_count", num_metric_points).await;
 
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1);
-    assert_eq!(
-      results[0].get_metric_points()[0].get_value(),
-      num_metric_points as f64
-    );
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1);
+    assert_eq!(mp[0].get_value(), num_metric_points as f64);
   }
 
   #[tokio::test]
@@ -1220,11 +1228,10 @@ mod tests {
       create_index("test_index_equality_selector", num_metric_points).await;
 
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(
-      results[0].get_metric_points().len(),
-      num_metric_points as usize
-    );
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), num_metric_points as usize);
   }
 
   #[tokio::test]
@@ -1237,7 +1244,7 @@ mod tests {
     append_metric_points_complex(&index).await;
 
     let results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert!(!results.is_empty());
+    assert!(!results.get_vector().is_empty());
   }
 
   async fn append_metric_points_complex(index: &Index) {
@@ -1276,10 +1283,12 @@ mod tests {
     append_metric_points_varied(&index, "label_name_1", &["label_value_1"]).await;
 
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1); // Expect one aggregated result
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1); // Expect one aggregated result
     assert_eq!(
-      results[0].get_metric_points()[0].get_value(),
+      mp[0].get_value(),
       1.0 + num_metric_points as f64 // metric adds 1 more
     ); // Expected sum of count
 
@@ -1292,9 +1301,11 @@ mod tests {
     append_metric_points_varied(&index, "label_name_1", &["label_value_1"]).await;
 
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1); // Expect one aggregated result
-    assert_eq!(results[0].get_metric_points()[0].get_value(), 100.0); // Expected average of maximums
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1);
+    assert_eq!(mp[0].get_value(), 100.0); // Expected average of maximums
   }
 
   #[tokio::test]
@@ -1307,8 +1318,8 @@ mod tests {
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
 
     // Assert the results
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1);
+    assert_eq!(results.get_vector().len(), 1);
+    assert_eq!(results.take_vector()[0].get_metric_points().len(), 1);
     let expected_rate = 1.0;
     let actual_rate = 1.0;
     assert_eq!(actual_rate, expected_rate);
@@ -1341,11 +1352,14 @@ mod tests {
     let mut results = execute_query(&index, query, range_start_time, range_end_time)
       .await
       .unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get_metric_points().len(), 1); // Expect single aggregated result
+
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 1); // Expect one aggregated result
     assert_eq!(
-      results[0].get_metric_points()[0].get_value(),
-      1.0 + num_metric_points as f64 // metric label adds another metric point
-    ); // Expected sum of count within the time range
+      mp[0].get_value(),
+      1.0 + num_metric_points as f64 // metric adds 1 more
+    );
   }
 }

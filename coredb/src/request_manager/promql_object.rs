@@ -6,6 +6,7 @@
 use super::promql_time_series::PromQLTimeSeries;
 use crate::metric::metric_point::MetricPoint;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -100,18 +101,27 @@ pub enum FunctionOperator {
   PresentOverTime,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum PromQLObjectType {
+  #[serde(rename = "scalar")]
   Scalar,
+
+  #[serde(rename = "vector")]
   InstantVector,
+
+  #[serde(rename = "matrix")]
   RangeVector,
-  Undefined,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PromQLObject {
+  #[serde(rename = "result")]
   vector: Vec<PromQLTimeSeries>,
+
+  #[serde(skip_serializing)]
   scalar: f64,
+
+  #[serde(rename = "resultType")]
   object_type: PromQLObjectType,
 }
 
@@ -121,7 +131,7 @@ impl PromQLObject {
     PromQLObject {
       vector: Vec::new(),
       scalar: 0.0,
-      object_type: PromQLObjectType::Undefined,
+      object_type: PromQLObjectType::InstantVector,
     }
   }
 
@@ -203,6 +213,11 @@ impl PromQLObject {
   pub fn set_vector(&mut self, vector: Vec<PromQLTimeSeries>) {
     self.vector = vector;
     self.update_object_type();
+  }
+
+  /// Getter for object type
+  pub fn get_object_type(&self) -> &PromQLObjectType {
+    &self.object_type
   }
 
   /// Getter for scalar
