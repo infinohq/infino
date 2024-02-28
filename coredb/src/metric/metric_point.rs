@@ -3,12 +3,13 @@
 
 use approx::abs_diff_eq;
 use chrono::{DateTime, Datelike, LocalResult, TimeZone, Timelike, Utc};
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeTuple;
+use serde::{Deserialize, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
 /// Represents a metric point in time series.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 pub struct MetricPoint {
   /// Timestamp from epoch.
   time: u64,
@@ -87,6 +88,18 @@ impl MetricPoint {
   // Extracts the hour from the timestamp
   pub fn hour(&self) -> u32 {
     self.datetime().hour()
+  }
+}
+
+impl Serialize for MetricPoint {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let mut tuple_serializer = serializer.serialize_tuple(2)?;
+    tuple_serializer.serialize_element(&self.time)?;
+    tuple_serializer.serialize_element(&self.value)?;
+    tuple_serializer.end()
   }
 }
 

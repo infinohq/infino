@@ -13,6 +13,7 @@ use crate::index_manager::metadata::Metadata;
 use crate::index_manager::segment_summary::SegmentSummary;
 use crate::log::log_message::LogMessage;
 use crate::request_manager::promql;
+use crate::request_manager::promql_object::PromQLObject;
 use crate::request_manager::query_dsl;
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
@@ -21,8 +22,6 @@ use crate::utils::error::{CoreDBError, SearchMetricsError};
 use crate::utils::io;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex, TokioRwLock};
-
-use crate::request_manager::promql_time_series::PromQLTimeSeries;
 
 /// File name where the information about all segements is stored.
 const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
@@ -345,7 +344,7 @@ impl Index {
     ast: &Pairs<'_, promql::Rule>,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<PromQLTimeSeries>, CoreDBError> {
+  ) -> Result<PromQLObject, CoreDBError> {
     debug!(
       "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
       ast, range_start_time, range_end_time
@@ -902,7 +901,10 @@ mod tests {
       .await
       .expect("Error in get_metrics");
 
-    assert_eq!(&mut expected_metric_points, results[0].get_metric_points())
+    assert_eq!(
+      &mut expected_metric_points,
+      results.take_vector()[0].get_metric_points()
+    )
   }
 
   #[test_case(true, false; "when only logs are appended")]
@@ -1352,7 +1354,7 @@ mod tests {
 
     assert_eq!(
       num_metric_points,
-      results[0].get_metric_points().len() as u32
+      results.take_vector()[0].get_metric_points().len() as u32
     )
   }
 
@@ -1567,7 +1569,9 @@ mod tests {
       .await
       .expect("Error in get_metrics");
 
-    assert_eq!(expected_len, results[0].get_metric_points().len());
+    let mut tmpvec = results.take_vector();
+    let mp = tmpvec[0].get_metric_points();
+    assert_eq!(expected_len, mp.len());
   }
 
   #[tokio::test]

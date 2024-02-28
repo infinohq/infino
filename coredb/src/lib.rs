@@ -20,7 +20,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use pest::error::Error as PestError;
 use policy_manager::retention_policy::TimeBasedRetention;
 use request_manager::promql::Rule;
-use request_manager::promql_time_series::PromQLTimeSeries;
+use request_manager::promql_object::PromQLObject;
 use storage_manager::storage::Storage;
 use utils::error::SearchLogsError;
 
@@ -231,7 +231,7 @@ impl CoreDB {
     json_query: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<PromQLTimeSeries>, CoreDBError> {
+  ) -> Result<PromQLObject, CoreDBError> {
     debug!(
       "COREDB: Search metrics for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
       url_query, json_query, range_start_time, range_end_time
@@ -484,22 +484,13 @@ mod tests {
       .search_metrics("some_metric", "", start, end)
       .await
       .expect("Error in get_metrics");
-    assert_eq!(
-      results[0]
-        .get_metric_points()
-        .first()
-        .expect("Could not unwrap result")
-        .get_value(),
-      1.0
-    );
-    assert_eq!(
-      results[0]
-        .get_metric_points()
-        .get(1)
-        .expect("Could not unwrap result")
-        .get_value(),
-      2.0
-    );
+
+    let mut v = results.take_vector();
+    let mp = v[0].take_metric_points();
+    assert_eq!(v.len(), 1);
+    assert_eq!(mp.len(), 2);
+    assert_eq!(mp[0].get_value(), 1.0);
+    assert_eq!(mp[1].get_value(), 2.0);
 
     coredb
       .trigger_retention()
