@@ -15,6 +15,7 @@ bytes = "1.0"
 chrono = "0.4.23"
 config = "0.14.0"
 crossbeam = "0.8.2"
+crossbeam-queue = "0.3.11"
 futures = "0.3.30"
 dashmap = { version = "5.5.3", features = ["serde"] }
 dotenv = "0.15.0"

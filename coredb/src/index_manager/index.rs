@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use crossbeam_queue::SegQueue;
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use log::error;
@@ -63,6 +64,9 @@ pub struct Index {
 
   /// Storage for this index.
   storage: Storage,
+
+  /// Segment numbers that aren't yet committed to storage.
+  uncommitted_segment_numbers: SegQueue<u32>,
 }
 
 impl Index {
@@ -143,6 +147,8 @@ impl Index {
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
+    let uncommitted_segment_numbers = SegQueue::new();
+
     let index = Index {
       metadata,
       all_segments_summaries,
@@ -151,6 +157,7 @@ impl Index {
       index_dir_lock,
       search_memory_budget_bytes,
       storage,
+      uncommitted_segment_numbers,
     };
 
     // Commit the empty index so that the index directory will be created.
@@ -557,6 +564,9 @@ impl Index {
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
+    // No segment is uncommitted when the index is refreshed.
+    let uncommitted_segment_numbers = SegQueue::new();
+
     // Create an index with empty segment summaries and empry memory_segments_map.
     let mut index = Index {
       metadata,
@@ -566,6 +576,7 @@ impl Index {
       index_dir_lock,
       search_memory_budget_bytes,
       storage,
+      uncommitted_segment_numbers,
     };
 
     let all_segments_summaries_vec = index.get_all_segments_summaries().await?;
