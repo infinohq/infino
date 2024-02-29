@@ -1067,7 +1067,9 @@ mod tests {
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     for _ in 1..=num_metric_points {
-      index.append_metric_point("metric", &label_map, timestamp, 100.0);
+      index
+        .append_metric_point("metric", &label_map, timestamp, 100.0)
+        .await;
     }
 
     (index, index_dir_path)
@@ -1195,7 +1197,9 @@ mod tests {
 
     let values = [10.0, 20.0, 5.0, 15.0, 25.0];
     for value in values.iter() {
-      index.append_metric_point("metric", &label_map, timestamp, *value);
+      index
+        .append_metric_point("metric", &label_map, timestamp, *value)
+        .await;
     }
 
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
@@ -1268,7 +1272,9 @@ mod tests {
     ];
 
     for (label_map, value) in label_combinations {
-      index.append_metric_point("metric", &label_map, timestamp, value);
+      index
+        .append_metric_point("metric", &label_map, timestamp, value)
+        .await;
     }
   }
 
@@ -1331,7 +1337,9 @@ mod tests {
     for &label_value in label_values {
       let mut label_map = HashMap::new();
       label_map.insert(label_name.to_string(), label_value.to_string());
-      index.append_metric_point("metric", &label_map, timestamp, 100.0);
+      index
+        .append_metric_point("metric", &label_map, timestamp, 100.0)
+        .await;
     }
   }
 

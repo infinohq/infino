@@ -427,7 +427,10 @@ async fn append_log(
       }
     }
 
-    state.coredb.append_log_message(timestamp, &fields, &text);
+    state
+      .coredb
+      .append_log_message(timestamp, &fields, &text)
+      .await;
   }
 
   state.commit_notify.notify_one();
@@ -511,7 +514,8 @@ async fn append_metric(
 
         state
           .coredb
-          .append_metric_point(key, &labels, timestamp, value_f64);
+          .append_metric_point(key, &labels, timestamp, value_f64)
+          .await;
       }
     }
   }

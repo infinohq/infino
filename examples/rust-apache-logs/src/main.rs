@@ -178,7 +178,7 @@ async fn index(
       let timestamp = log.date;
       let fields = log.get_fields_map();
       let text = fields.values().cloned().collect::<Vec<String>>().join(" ");
-      coredb.append_log_message(timestamp, &fields, &text);
+      coredb.append_log_message(timestamp, &fields, &text).await;
       continue;
     }
 

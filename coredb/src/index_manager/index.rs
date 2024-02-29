@@ -3,9 +3,8 @@
 
 use std::collections::HashMap;
 
-use crossbeam_queue::SegQueue;
 use dashmap::mapref::one::Ref;
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use log::error;
 use log::{debug, info};
 use pest::iterators::Pairs;
@@ -46,6 +45,7 @@ pub struct Index {
   metadata: Metadata,
 
   /// A reverse-chronological sorted vector of segment summaries.
+  // Use TokioRwLock, as it needs to be held across await points.
   all_segments_summaries: Arc<TokioRwLock<Vec<SegmentSummary>>>,
 
   /// DashMap of segment number to segment - only for the segments that are in memory.
@@ -57,6 +57,7 @@ pub struct Index {
   /// Mutex for locking the directory where the index is committed / read from, so that two threads
   /// don't write the directory at the same time.
   /// Essentially, this mutex serializes the commit() and refresh() operations on this index.
+  // Use TokioMutex, as it needs to be held across await points.
   index_dir_lock: Arc<TokioMutex<thread::ThreadId>>,
 
   /// Memory budget for searching this index.
@@ -66,7 +67,7 @@ pub struct Index {
   storage: Storage,
 
   /// Segment numbers that aren't yet committed to storage.
-  uncommitted_segment_numbers: SegQueue<u32>,
+  uncommitted_segment_numbers: DashSet<u32>,
 }
 
 impl Index {
@@ -147,7 +148,7 @@ impl Index {
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
-    let uncommitted_segment_numbers = SegQueue::new();
+    let uncommitted_segment_numbers = DashSet::new();
 
     let index = Index {
       metadata,
@@ -161,7 +162,7 @@ impl Index {
     };
 
     // Commit the empty index so that the index directory will be created.
-    index.commit().await.expect("Could not commit index");
+    index.commit(true).await.expect("Could not commit index");
 
     Ok(index)
   }
@@ -200,7 +201,10 @@ impl Index {
     // within the memory budget.
     let memory_to_evict = memory_consumed - self.search_memory_budget_bytes;
 
-    info!("Evicting memory {} bytes", memory_to_evict);
+    info!(
+      "Need to evict segments upto size: {} bytes",
+      memory_to_evict
+    );
 
     // Sort this vector by end time in ascending order (i.e., oldest segments first).
     segment_data.sort_by_key(|&(_, _, end_time)| end_time);
@@ -214,9 +218,12 @@ impl Index {
       let uncompressed_size = segment.1;
 
       // Do not evict the current segment - as it would be needed for inserts.
-      if segment_number == self.metadata.get_current_segment_number() {
+      let current_segment_number = self.metadata.get_current_segment_number();
+      if segment_number == current_segment_number
+        || self.uncommitted_segment_numbers.contains(&segment_number)
+      {
         debug!(
-          "Not evicting the current segment with segment_number {}",
+          "Not evicting the segment with segment_number {} as it is the current segment or is in the uncommitted segment numbers",
           segment_number
         );
         continue;
@@ -242,42 +249,120 @@ impl Index {
   }
 
   /// Get the reference for the current segment.
-  fn get_current_segment_ref(&self) -> Ref<u32, Segment> {
+  fn get_current_segment_ref(&self) -> (u32, Ref<'_, u32, Segment>) {
+    // Note that we get the current segment number from the metadata, and then get the reference to
+    // the segment from memory. In between the two statements, there is a a chance that the current
+    // segment is changed.
+    //
+    // This is okay, as the current segment is only used for appending data, and we may append the
+    // data to an older segment in such a scenario. This is also okay, as we support overlapping
+    // segments in search.
+
     let segment_number = self.metadata.get_current_segment_number();
 
-    self
+    let segment = self
       .memory_segments_map
       .get(&segment_number)
       .unwrap_or_else(|| {
         // Here, we may choose to load the current segment in memory. However,
-        // we always keep the segment being inserted into (i.e. current segment) in
-        // memory, so this should never happen. Keeping a panic for now to know quickly
-        // in case this happens due to an unanticipated scenario.
+        // we always keep the multiple most recent segments in memory, so this should never happen.
+        // Keeping a panic for now to know quickly in case this happens due to an
+        // unanticipated scenario.
+        //
+        // We may choose to get rid of this panic by retrying getting the current segment number and
+        // checking if the segment is in memory, and load it in memory in case it isn't.
         panic!(
           "Could not get segment corresponding to segment number {} in memory",
           segment_number
         )
-      })
+      });
+
+    (segment_number, segment)
+  }
+
+  /// Check whether the current segment is full, and if it is, create a new segment (which becomes the new
+  /// current segment where append operations go to).
+  async fn check_and_create_new_segment(&self) {
+    let (current_segment_number, current_segment) = self.get_current_segment_ref();
+    let num_log_messages = current_segment.get_log_message_count();
+    let num_metric_points = current_segment.get_metric_point_count();
+
+    // Check if the current segment is full - and return if it isn't.
+    if num_log_messages < 100_000 && num_metric_points < 1_000_000 {
+      return;
+    }
+
+    // Create a new segment since the current one has become too big.
+    let new_segment = Segment::new();
+    let new_segment_number = self.metadata.fetch_increment_segment_count();
+    let summary = SegmentSummary::new(new_segment_number, &new_segment);
+
+    {
+      // We will be updating the self.all_segment_summaries, so acquire the lock.
+      let write_lock_summaries = &mut self.all_segments_summaries.write().await;
+
+      // Update the start and end time in the summary for the current segment.
+      // We don't update these in append_* methods for performance, and update only in commit.
+      let current_segment_id = current_segment.get_id();
+      let start_time = current_segment.get_start_time();
+      let end_time = current_segment.get_end_time();
+      if let Some(summary) = write_lock_summaries
+        .iter_mut()
+        .find(|s| s.get_segment_id() == current_segment_id)
+      {
+        summary.update_start_end_time(start_time, end_time);
+      }
+
+      // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
+      write_lock_summaries.insert(0, summary);
+
+      // Sort the summaries in reverse chronological order (i.e., most recent segment first).
+      write_lock_summaries.sort();
+    }
+
+    // Note that DashMap::insert *may* cause a single-thread deadlock if the thread has a read
+    // reference to an item in the map. Make sure that no read reference for all_segments_map
+    // is present before the insert and visible in this block.
+    self.insert_memory_segments_map(new_segment_number, new_segment);
+
+    // Appends will start going to the new segment after this point.
+    self
+      .metadata
+      .update_current_segment_number(new_segment_number);
+
+    // Add the original segment number to the uncommitted segment numbers, so that it will be committed
+    // by the commit thread.
+    self
+      .uncommitted_segment_numbers
+      .insert(current_segment_number);
   }
 
   /// Append a log message to the current segment of the index.
-  pub fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, message: &str) {
+  pub async fn append_log_message(
+    &self,
+    time: u64,
+    fields: &HashMap<String, String>,
+    message: &str,
+  ) {
     debug!(
       "Appending log message, time: {}, fields: {:?}, message: {}",
       time, fields, message
     );
 
     // Get the current segment.
-    let current_segment_ref = self.get_current_segment_ref();
-    let current_segment = current_segment_ref.value();
+    let (_, current_segment) = self.get_current_segment_ref();
 
+    // Append the log message to the current segment.
     current_segment
       .append_log_message(time, fields, message)
       .unwrap();
+
+    // Check if a new segment needs to be created, and if so - create it.
+    self.check_and_create_new_segment().await;
   }
 
   /// Append a metric point to the current segment of the index.
-  pub fn append_metric_point(
+  pub async fn append_metric_point(
     &self,
     metric_name: &str,
     labels: &HashMap<String, String>,
@@ -290,13 +375,15 @@ impl Index {
     );
 
     // Get the current segment.
-    let current_segment_ref = self.get_current_segment_ref();
-    let current_segment = current_segment_ref.value();
+    let (_, current_segment) = self.get_current_segment_ref();
 
     // Append the metric point to the current segment.
     current_segment
       .append_metric_point(metric_name, labels, time, value)
       .unwrap();
+
+    // Check if a new segment needs to be created, and if so - create it.
+    self.check_and_create_new_segment().await;
   }
 
   /// Search for given query in the given time range.
@@ -439,7 +526,7 @@ impl Index {
   }
 
   /// Commit an index to disk.
-  pub async fn commit(&self) -> Result<(), CoreDBError> {
+  pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
     info!("Committing index at {}", chrono::Utc::now());
 
     // Lock to make sure only one thread calls commit at a time. If the lock isn't avilable, we simply
@@ -458,80 +545,40 @@ impl Index {
     };
     *lock = thread::current().id();
 
-    // We will be updating the self.all_segment_summaries, so acquire the lock.
-    let write_lock_summaries = &mut self.all_segments_summaries.write().await;
-
-    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
-
-    // Commit the current segment. This also updates the start and end times in the corresponding segment summary.
-    let original_current_segment_number = self.metadata.get_current_segment_number();
-    let (segment_id, start_time, end_time, uncompressed_segment_size, _compressed_segment_size) =
-      self.commit_segment(original_current_segment_number).await?;
-
-    // Update the start and end time in the summary for this segment.
-    // We don't update these in append_* methods for performance, and update only in commit.
-    if let Some(summary) = write_lock_summaries
-      .iter_mut()
-      .find(|s| s.get_segment_id() == segment_id)
-    {
-      summary.update_start_end_time(start_time, end_time);
+    // Commit the uncommitted segments, and remove them from the uncommitted_segment_numbers set once
+    // the commit is complete.
+    for segment_number in self.uncommitted_segment_numbers.iter() {
+      self.commit_segment(*segment_number).await?;
+      self.uncommitted_segment_numbers.remove(&segment_number);
     }
 
-    if uncompressed_segment_size > self.metadata.get_segment_size_threshold_bytes() {
-      // Create a new segment since the current one has become too big.
-      let new_segment = Segment::new();
-      let new_segment_number = self.metadata.fetch_increment_segment_count();
-      let new_segment_dir_path = io::get_joined_path(
-        &self.index_dir_path,
-        new_segment_number.to_string().as_str(),
-      );
-
-      // Write the new (empty) segment to disk.
-      new_segment
-        .commit(&self.storage, new_segment_dir_path.as_str())
-        .await?;
-
-      // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
-      let summary = SegmentSummary::new(new_segment_number, &new_segment);
-      write_lock_summaries.insert(0, summary);
-
-      // Note that DashMap::insert *may* cause a single-thread deadlock if the thread has a read
-      // reference to an item in the map. Make sure that no read reference for all_segments_map
-      // is present before the insert and visible in this block.
-      self.insert_memory_segments_map(new_segment_number, new_segment);
-
-      // Appends will start going to the new segment after this point.
-      self
-        .metadata
-        .update_current_segment_number(new_segment_number);
-
-      // Commit the new_segment again as there might be more documents added after making it the
-      // current segment.
-      self.commit_segment(new_segment_number).await?;
-
-      // Commit the original segment again to commit any updates from the previous commit till the
-      // time of changing the current_sgement_number above.
-      self.commit_segment(original_current_segment_number).await?;
-
-      // We created a new segment - possibly exceeding the memory budget. So, evict older segments if needed.
-      self.shrink_to_fit();
+    // Commit the current segment if requested (typically during shutdown).
+    if commit_current_segment {
+      let current_segment_number = self.metadata.get_current_segment_number();
+      self.commit_segment(current_segment_number).await?;
     }
-
-    // Sort the summaries in reverse chronological order.
-    write_lock_summaries.sort();
-    let summaries: &Vec<SegmentSummary> = write_lock_summaries.as_ref();
 
     // Write the summaries to disk.
-    self
-      .storage
-      .write(summaries, all_segments_file.as_str())
-      .await?;
+    {
+      // Minimize the duration that the summaries lock is held, so this is in a separate block.
+      let read_lock_summaries = &self.all_segments_summaries.read().await;
+      let summaries: &Vec<SegmentSummary> = read_lock_summaries.as_ref();
+      let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+      self
+        .storage
+        .write(&summaries, all_segments_file.as_str())
+        .await?;
+    }
 
+    // Write the metadata to disk.
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     self
       .storage
       .write(&self.metadata, metadata_path.as_str())
       .await?;
+
+    // Shrink the memory segments map.
+    self.shrink_to_fit();
 
     Ok(())
   }
@@ -565,7 +612,7 @@ impl Index {
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
     // No segment is uncommitted when the index is refreshed.
-    let uncommitted_segment_numbers = SegQueue::new();
+    let uncommitted_segment_numbers = DashSet::new();
 
     // Create an index with empty segment summaries and empry memory_segments_map.
     let mut index = Index {
@@ -731,7 +778,7 @@ mod tests {
     let index = Index::new(&StorageType::Local, &index_dir_path)
       .await
       .unwrap();
-    let segment_ref = index.get_current_segment_ref();
+    let (_, segment_ref) = index.get_current_segment_ref();
     let segment = segment_ref.value();
     assert_eq!(segment.get_log_message_count(), 0);
     assert_eq!(segment.get_term_count(), 0);
@@ -769,11 +816,13 @@ mod tests {
 
     for i in 1..=num_log_messages {
       let message = format!("{}{}", message_prefix, i);
-      expected.append_log_message(
-        Utc::now().timestamp_millis() as u64,
-        &HashMap::new(),
-        &message,
-      );
+      expected
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        )
+        .await;
     }
 
     let metric_name = "request_count";
@@ -782,15 +831,17 @@ mod tests {
     let mut label_map = HashMap::new();
     label_map.insert(other_label_name.to_owned(), other_label_value.to_owned());
     for i in 1..=num_metric_points {
-      expected.append_metric_point(
-        metric_name,
-        &label_map,
-        Utc::now().timestamp_millis() as u64,
-        i as f64,
-      );
+      expected
+        .append_metric_point(
+          metric_name,
+          &label_map,
+          Utc::now().timestamp_millis() as u64,
+          i as f64,
+        )
+        .await;
     }
 
-    expected.commit().await.expect("Could not commit");
+    expected.commit(true).await.expect("Could not commit");
     let received = Index::refresh(&storage_type, &index_dir_path, 1024)
       .await
       .unwrap();
@@ -801,9 +852,9 @@ mod tests {
       &received.memory_segments_map.len()
     );
 
-    let expected_segment_ref = expected.get_current_segment_ref();
+    let (_, expected_segment_ref) = expected.get_current_segment_ref();
     let expected_segment = expected_segment_ref.value();
-    let received_segment_ref = received.get_current_segment_ref();
+    let (_, received_segment_ref) = received.get_current_segment_ref();
     let received_segment = received_segment_ref.value();
     assert_eq!(
       &expected_segment.get_log_message_count(),
@@ -825,19 +876,23 @@ mod tests {
 
     for i in 1..num_log_messages {
       let message = format!("{} {}", message_prefix, i);
-      index.append_log_message(
-        Utc::now().timestamp_millis() as u64,
-        &HashMap::new(),
-        &message,
-      );
+      index
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        )
+        .await;
       expected_log_messages.push(message);
     }
     // Now add a unique log message.
-    index.append_log_message(
-      Utc::now().timestamp_millis() as u64,
-      &HashMap::new(),
-      "thisisunique",
-    );
+    index
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        "thisisunique",
+      )
+      .await;
 
     let query_message = r#"{
       "query": {
@@ -899,7 +954,9 @@ mod tests {
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
     for i in 1..num_metric_points {
-      index.append_metric_point("metric", &HashMap::new(), i, i as f64);
+      index
+        .append_metric_point("metric", &HashMap::new(), i, i as f64)
+        .await;
       let dp = MetricPoint::new(i, i as f64);
       expected_metric_points.push(dp);
     }
@@ -946,23 +1003,27 @@ mod tests {
 
       for i in 0..original_segment_num_log_messages {
         let message = format!("{} {}", message_prefix, i);
-        index.append_log_message(
-          Utc::now().timestamp_millis() as u64,
-          &HashMap::new(),
-          &message,
-        );
+        index
+          .append_log_message(
+            Utc::now().timestamp_millis() as u64,
+            &HashMap::new(),
+            &message,
+          )
+          .await;
         expected_log_messages.push(message);
       }
 
       for _ in 0..original_segment_num_metric_points {
         let dp = MetricPoint::new(Utc::now().timestamp_millis() as u64, 1.0);
-        index.append_metric_point("some_name", &HashMap::new(), dp.get_time(), dp.get_value());
+        index
+          .append_metric_point("some_name", &HashMap::new(), dp.get_time(), dp.get_value())
+          .await;
         expected_metric_points.push(dp);
       }
 
       // Force commit and then refresh the index.
       // This will write one segment to disk and create a new empty segment.
-      index.commit().await.expect("Could not commit index");
+      index.commit(true).await.expect("Could not commit index");
 
       // Read the index from disk and see that it has expected number of log messages and metric points.
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
@@ -986,7 +1047,7 @@ mod tests {
         // Write these in a separate block so that reference of current_segment from all_segments_map
         // does not persist when commit() is called (and all_segments_map is updated).
         // Otherwise, this test may deadlock.
-        let current_segment_ref = index.get_current_segment_ref();
+        let (_, current_segment_ref) = index.get_current_segment_ref();
         let current_segment = current_segment_ref.value();
 
         assert_eq!(index.memory_segments_map.len(), 2);
@@ -998,25 +1059,29 @@ mod tests {
       let mut new_segment_num_log_messages = 0;
       let mut new_segment_num_metric_points = 0;
       if append_log {
-        index.append_log_message(
-          Utc::now().timestamp_millis() as u64,
-          &HashMap::new(),
-          "some_message_1",
-        );
+        index
+          .append_log_message(
+            Utc::now().timestamp_millis() as u64,
+            &HashMap::new(),
+            "some_message_1",
+          )
+          .await;
         new_segment_num_log_messages += 1;
       }
       if append_metric_point {
-        index.append_metric_point(
-          "some_name",
-          &HashMap::new(),
-          Utc::now().timestamp_millis() as u64,
-          1.0,
-        );
+        index
+          .append_metric_point(
+            "some_name",
+            &HashMap::new(),
+            Utc::now().timestamp_millis() as u64,
+            1.0,
+          )
+          .await;
         new_segment_num_metric_points += 1;
       }
 
       // Force a commit and refresh. The index should still have only 2 segments.
-      index.commit().await.expect("Could not commit index");
+      index.commit(true).await.expect("Could not commit index");
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .unwrap();
@@ -1040,7 +1105,7 @@ mod tests {
         // Write these in a separate block so that reference of current_segment from all_segments_map
         // does not persist when commit() is called (and all_segments_map is updated).
         // Otherwise, this test may deadlock.
-        let current_segment_ref = index.get_current_segment_ref();
+        let (_, current_segment_ref) = index.get_current_segment_ref();
         let current_segment = current_segment_ref.value();
         assert_eq!(
           current_segment.get_log_message_count(),
@@ -1055,25 +1120,29 @@ mod tests {
       // Add one more log message and/or a metric point. This should land in the current_segment that has
       // only 1 log message and/or metric point.
       if append_log {
-        index.append_log_message(
-          Utc::now().timestamp_millis() as u64,
-          &HashMap::new(),
-          "some_message_2",
-        );
+        index
+          .append_log_message(
+            Utc::now().timestamp_millis() as u64,
+            &HashMap::new(),
+            "some_message_2",
+          )
+          .await;
         new_segment_num_log_messages += 1;
       }
       if append_metric_point {
-        index.append_metric_point(
-          "some_name",
-          &HashMap::new(),
-          Utc::now().timestamp_millis() as u64,
-          1.0,
-        );
+        index
+          .append_metric_point(
+            "some_name",
+            &HashMap::new(),
+            Utc::now().timestamp_millis() as u64,
+            1.0,
+          )
+          .await;
         new_segment_num_metric_points += 1;
       }
 
       // Force a commit and refresh.
-      index.commit().await.expect("Could not commit index");
+      index.commit(true).await.expect("Could not commit index");
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
@@ -1087,7 +1156,7 @@ mod tests {
         // Write these in a separate block so that reference of current_segment from all_segments_map
         // does not persist when commit() is called (and all_segments_map is updated).
         // Otherwise, this test may deadlock.
-        let current_segment_ref = index.get_current_segment_ref();
+        let (_, current_segment_ref) = index.get_current_segment_ref();
         let current_segment = current_segment_ref.value();
         current_segment_log_message_count = current_segment.get_log_message_count();
         current_segment_metric_point_count = current_segment.get_metric_point_count();
@@ -1113,19 +1182,19 @@ mod tests {
       );
 
       // Commit and refresh a few times. The index should not change.
-      index.commit().await.expect("Could not commit index");
+      index.commit(true).await.expect("Could not commit index");
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      index.commit().await.expect("Could not commit index");
-      index.commit().await.expect("Could not commit index");
+      index.commit(true).await.expect("Could not commit index");
+      index.commit(true).await.expect("Could not commit index");
       Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .unwrap();
       let index_final = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .unwrap();
-      let index_final_current_segment_ref = index_final.get_current_segment_ref();
+      let (_, index_final_current_segment_ref) = index_final.get_current_segment_ref();
       let index_final_current_segment = index_final_current_segment_ref.value();
 
       assert_eq!(
@@ -1168,23 +1237,25 @@ mod tests {
     let mut num_log_messages_from_last_commit = 0;
     for i in 1..=num_log_messages {
       let message = format!("{} {}", message_prefix, i);
-      index.append_log_message(
-        Utc::now().timestamp_millis() as u64,
-        &HashMap::new(),
-        &message,
-      );
+      index
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        )
+        .await;
 
       // Commit after indexing more than commit_after messages.
       num_log_messages_from_last_commit += 1;
       if num_log_messages_from_last_commit > commit_after {
-        index.commit().await.expect("Could not commit index");
+        index.commit(true).await.expect("Could not commit index");
         num_log_messages_from_last_commit = 0;
         sleep(Duration::from_millis(1000));
       }
     }
 
     // Commit and sleep to ensure the index is written to disk.
-    index.commit().await.expect("Could not commit index");
+    index.commit(true).await.expect("Could not commit index");
     sleep(Duration::from_millis(1000));
 
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -1202,7 +1273,7 @@ mod tests {
     assert!(index.memory_segments_map.len() > 1);
 
     // The current segment should be empty (i.e., have 0 documents).
-    let current_segment_ref = index.get_current_segment_ref();
+    let (_, current_segment_ref) = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
     assert_eq!(current_segment.get_log_message_count(), 0);
 
@@ -1275,13 +1346,15 @@ mod tests {
       let message = &format!("{}{}", message_prefix, i);
       let count = 2u32.pow(i);
       for _ in 0..count {
-        index.append_log_message(
-          Utc::now().timestamp_millis() as u64,
-          &HashMap::new(),
-          message,
-        );
+        index
+          .append_log_message(
+            Utc::now().timestamp_millis() as u64,
+            &HashMap::new(),
+            message,
+          )
+          .await;
       }
-      index.commit().await.expect("Could not commit index");
+      index.commit(true).await.expect("Could not commit index");
     }
 
     for i in 1..num_message_suffixes {
@@ -1322,24 +1395,26 @@ mod tests {
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
     for _ in 1..=num_metric_points {
-      index.append_metric_point("metric", &label_map, start_time, 100.0);
+      index
+        .append_metric_point("metric", &label_map, start_time, 100.0)
+        .await;
       num_metric_points_from_last_commit += 1;
 
       // Commit after we have indexed more than commit_after messages.
       if num_metric_points_from_last_commit >= commit_after {
-        index.commit().await.expect("Could not commit index");
+        index.commit(true).await.expect("Could not commit index");
         num_metric_points_from_last_commit = 0;
       }
     }
     // Commit and sleep to make sure the index is written to disk.
-    index.commit().await.expect("Could not commit index");
+    index.commit(true).await.expect("Could not commit index");
     sleep(Duration::from_millis(10000));
 
     // Refresh the segment from disk.
     index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
       .await
       .unwrap();
-    let current_segment_ref = index.get_current_segment_ref();
+    let (_, current_segment_ref) = index.get_current_segment_ref();
     let current_segment = current_segment_ref.value();
 
     // Make sure that more than 1 segment got created.
@@ -1382,7 +1457,7 @@ mod tests {
       .unwrap();
 
     // If we don't get any panic/error during commit, that means the commit is successful.
-    index.commit().await.expect("Could not commit index");
+    index.commit(true).await.expect("Could not commit index");
   }
 
   #[tokio::test]
@@ -1412,8 +1487,12 @@ mod tests {
     let storage_type = StorageType::Local;
     let (index, _index_dir_path) = create_index("test_overlap_one_segment", &storage_type).await;
 
-    index.append_log_message(1000, &HashMap::new(), "message_1");
-    index.append_log_message(2000, &HashMap::new(), "message_2");
+    index
+      .append_log_message(1000, &HashMap::new(), "message_1")
+      .await;
+    index
+      .append_log_message(2000, &HashMap::new(), "message_2")
+      .await;
 
     assert_eq!(index.get_overlapping_segments(500, 1500).await.len(), 1);
     assert_eq!(index.get_overlapping_segments(1500, 2500).await.len(), 1);
@@ -1449,9 +1528,13 @@ mod tests {
 
     for i in 0..num_segments {
       let start = i * 2 * 1000;
-      index.append_log_message(start, &HashMap::new(), "message_1");
-      index.append_log_message(start + 500, &HashMap::new(), "message_2");
-      index.commit().await.expect("Could not commit index");
+      index
+        .append_log_message(start, &HashMap::new(), "message_1")
+        .await;
+      index
+        .append_log_message(start + 500, &HashMap::new(), "message_2")
+        .await;
+      index.commit(true).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
@@ -1506,12 +1589,12 @@ mod tests {
     // Start a thread to commit the index periodically.
     let arc_index_clone = arc_index.clone();
     let ten_millis = Duration::from_millis(10);
-    let handle = thread::spawn(move || {
+    let handle = tokio::spawn(async move {
       let rt = tokio::runtime::Runtime::new().unwrap();
       rt.block_on(async {
         for _ in 0..100 {
           arc_index_clone
-            .commit()
+            .commit(true)
             .await
             .expect("Could not commit index");
           sleep(ten_millis);
@@ -1528,26 +1611,33 @@ mod tests {
       let mut label_map = HashMap::new();
       label_map.insert("label1".to_owned(), "value1".to_owned());
 
-      let handle = thread::spawn(move || {
+      let handle = tokio::spawn(async move {
         for j in 0..num_appends_per_thread {
           let time = start + j;
-          arc_index_clone.append_log_message(time as u64, &HashMap::new(), "message");
-          arc_index_clone.append_metric_point("metric", &label_map, time as u64, 1.0);
+          arc_index_clone
+            .append_log_message(time as u64, &HashMap::new(), "message")
+            .await;
+          arc_index_clone
+            .append_metric_point("metric", &label_map, time as u64, 1.0)
+            .await;
         }
       });
       append_handles.push(handle);
     }
 
     for handle in append_handles {
-      handle.join().unwrap();
+      handle.await.unwrap();
     }
 
     for handle in commit_handles {
-      handle.join().unwrap();
+      handle.await.unwrap();
     }
 
     // Commit again to cover the scenario that append threads run for more time than the commit thread
-    arc_index.commit().await.expect("Could not commit index");
+    arc_index
+      .commit(true)
+      .await
+      .expect("Could not commit index");
 
     let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
       .await
@@ -1598,8 +1688,10 @@ mod tests {
 
     let start_time = Utc::now().timestamp_millis();
 
-    index.append_log_message(start_time as u64, &HashMap::new(), "some_message_1");
-    index.commit().await.expect("Could not commit index");
+    index
+      .append_log_message(start_time as u64, &HashMap::new(), "some_message_1")
+      .await;
+    index.commit(true).await.expect("Could not commit index");
 
     // Create one more new index using same dir location
     let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
@@ -1674,9 +1766,13 @@ mod tests {
       // Insert unique messages in each segment - these will come handy for testing later.
       let message_start = &format!("message_{}", start);
       let message_end = &format!("message_{}", end);
-      index.append_log_message(start, &HashMap::new(), message_start);
-      index.append_log_message(end, &HashMap::new(), message_end);
-      index.commit().await.expect("Could not commit index");
+      index
+        .append_log_message(start, &HashMap::new(), message_start)
+        .await;
+      index
+        .append_log_message(end, &HashMap::new(), message_end)
+        .await;
+      index.commit(true).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
@@ -1730,14 +1826,16 @@ mod tests {
     let (index, _index_dir_path) =
       create_index("test_delete_segment_in_memory", &storage_type).await;
     let message = "test_message";
-    index.append_log_message(
-      Utc::now().timestamp_millis() as u64,
-      &HashMap::new(),
-      message,
-    );
+    index
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        message,
+      )
+      .await;
 
-    index.commit().await.expect("Could not commit");
-    let segment_number = *index.get_current_segment_ref().key(); // Get current cos it has been committed to.
+    index.commit(true).await.expect("Could not commit");
+    let segment_number = *index.get_current_segment_ref().1.key(); // Get current cos it has been committed to.
 
     // try to delete segment
     index
@@ -1773,9 +1871,13 @@ mod tests {
       // Insert unique messages in each segment - these will come handy for testing later.
       let message_start = &format!("message_{}", start);
       let message_end = &format!("message_{}", end);
-      index.append_log_message(start, &HashMap::new(), message_start);
-      index.append_log_message(end, &HashMap::new(), message_end);
-      index.commit().await.expect("Could not commit index");
+      index
+        .append_log_message(start, &HashMap::new(), message_start)
+        .await;
+      index
+        .append_log_message(end, &HashMap::new(), message_end)
+        .await;
+      index.commit(true).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.

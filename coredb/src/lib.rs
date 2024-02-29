@@ -134,7 +134,7 @@ impl CoreDB {
   }
 
   /// Append a log message.
-  pub fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, text: &str) {
+  pub async fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, text: &str) {
     debug!(
       "Appending log message in CoreDB: time {}, fields {:?}, text {}",
       time, fields, text
@@ -144,11 +144,12 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .append_log_message(time, fields, text);
+      .append_log_message(time, fields, text)
+      .await;
   }
 
   /// Append a metric point.
-  pub fn append_metric_point(
+  pub async fn append_metric_point(
     &self,
     metric_name: &str,
     labels: &HashMap<String, String>,
@@ -164,7 +165,8 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .append_metric_point(metric_name, labels, time, value);
+      .append_metric_point(metric_name, labels, time, value)
+      .await;
   }
 
   /// Search the log messages for given query and range.
@@ -257,7 +259,7 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .commit()
+      .commit(true)
       .await
   }
 
@@ -437,30 +439,38 @@ mod tests {
     let start = Utc::now().timestamp_millis() as u64;
 
     // Add a few log messages.
-    coredb.append_log_message(
-      Utc::now().timestamp_millis() as u64,
-      &HashMap::new(),
-      "log message 1",
-    );
-    coredb.append_log_message(
-      Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
-      &HashMap::new(),
-      "log message 2",
-    );
+    coredb
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        "log message 1",
+      )
+      .await;
+    coredb
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
+        &HashMap::new(),
+        "log message 2",
+      )
+      .await;
 
     // Add a few metric points.
-    coredb.append_metric_point(
-      "some_metric",
-      &HashMap::new(),
-      Utc::now().timestamp_millis() as u64,
-      1.0,
-    );
-    coredb.append_metric_point(
-      "some_metric",
-      &HashMap::new(),
-      Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
-      2.0,
-    );
+    coredb
+      .append_metric_point(
+        "some_metric",
+        &HashMap::new(),
+        Utc::now().timestamp_millis() as u64,
+        1.0,
+      )
+      .await;
+    coredb
+      .append_metric_point(
+        "some_metric",
+        &HashMap::new(),
+        Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
+        2.0,
+      )
+      .await;
 
     coredb.commit().await.expect("Could not commit");
     let coredb = CoreDB::refresh(config_dir_path).await?;
