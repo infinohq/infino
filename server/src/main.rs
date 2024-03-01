@@ -101,15 +101,17 @@ struct SummarizeQueryResponse {
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
 /// can be asyncronously committed), and triggers retention policy every hour
-async fn commit_in_loop(
-  state: Arc<AppState>,
-  notify: Arc<Notify>,
-  shutdown_flag: Arc<Mutex<bool>>,
-) {
+async fn commit_in_loop(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let policy_interval_ms = 3600000; // 1hr in ms
+  let mut is_shutdown = false;
   loop {
     let result = state.coredb.commit().await;
+
+    if is_shutdown {
+      info!("Received shutdown in commit thread. Exiting...");
+      break;
+    }
 
     let current_time = Utc::now().timestamp_millis() as u64;
     // TODO: make trigger policy interval configurable
@@ -127,26 +129,18 @@ async fn commit_in_loop(
       last_trigger_policy_time = current_time;
     }
 
-    let shutdown = shutdown_flag.lock().await;
-    if *shutdown {
-      info!("Received shutdown in commit thread. Exiting...");
-      break;
-    }
-    drop(shutdown); // Explicitly drop the lock before awaiting
-
     if let Err(e) = result {
       error!("Error committing to coredb: {}", e);
     }
 
-    // Park the task until another thread calls notify.notify_one().
-    tokio::select! {
-        _ = notify.notified() => {
-            info!("Commit thread waking up as it was notified");
-        }
-        _ = sleep(Duration::from_millis(policy_interval_ms)) => {
-            info!("Commit thread waking up as it timed out. Timeout is {} ms", policy_interval_ms);
-        }
+    let shutdown = shutdown_flag.lock().await;
+    if *shutdown {
+      // Received shutdown signal - set the is_shutdown flag.
+      is_shutdown = true;
     }
+    drop(shutdown); // Explicitly drop the lock before sleeping
+
+    tokio::time::sleep(Duration::from_millis(1000)).await;
   }
 }
 
@@ -202,7 +196,6 @@ async fn app(
   let commit_thread_shutdown_flag = Arc::new(Mutex::new(false));
   let commit_thread_handle = tokio::spawn(commit_in_loop(
     shared_state.clone(),
-    commit_notify.clone(),
     commit_thread_shutdown_flag.clone(),
   ));
 
@@ -287,7 +280,6 @@ async fn run_server() {
 
   // Signal the commit thread to shutdown, wake it up, and wait for it to finish.
   *commit_thread_shutdown_flag.lock().await = true;
-  commit_notify.notify_one();
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
@@ -433,7 +425,6 @@ async fn append_log(
       .await;
   }
 
-  state.commit_notify.notify_one();
   Ok(())
 }
 
@@ -520,7 +511,6 @@ async fn append_metric(
     }
   }
 
-  state.commit_notify.notify_one();
   Ok(())
 }
 

@@ -291,10 +291,15 @@ impl Index {
     if num_log_messages < 100_000 && num_metric_points < 1_000_000 {
       return;
     }
+    println!(
+      "### Creating a new segment, current segment num_log_messages={} ###",
+      num_log_messages
+    );
 
     // Create a new segment since the current one has become too big.
     let new_segment = Segment::new();
     let new_segment_number = self.metadata.fetch_increment_segment_count();
+    println!("#### New segment num {} ####", new_segment_number);
     let summary = SegmentSummary::new(new_segment_number, &new_segment);
 
     {
@@ -335,6 +340,11 @@ impl Index {
     self
       .uncommitted_segment_numbers
       .insert(current_segment_number);
+
+    println!(
+      "#### Uncommitted segment numbers: {:?} ####",
+      self.uncommitted_segment_numbers
+    );
   }
 
   /// Append a log message to the current segment of the index.
@@ -545,10 +555,25 @@ impl Index {
     };
     *lock = thread::current().id();
 
+    println!("#### Acquired lock in commit index ####");
+
     // Commit the uncommitted segments, and remove them from the uncommitted_segment_numbers set once
     // the commit is complete.
+    let mut committed_segment_numbers = Vec::new();
     for segment_number in self.uncommitted_segment_numbers.iter() {
-      self.commit_segment(*segment_number).await?;
+      let segment_number = *segment_number;
+      println!("#### Committing segment number {} ####", segment_number);
+      self.commit_segment(segment_number).await?;
+      println!("#### Segment number {} committed ####", segment_number);
+      committed_segment_numbers.push(segment_number);
+    }
+
+    // Remove the committed segments from the uncommitted_segment_numbers set.
+    for segment_number in committed_segment_numbers {
+      println!(
+        "#### Removing segment number {} from uncommitted_segment_numbers ####",
+        segment_number
+      );
       self.uncommitted_segment_numbers.remove(&segment_number);
     }
 
