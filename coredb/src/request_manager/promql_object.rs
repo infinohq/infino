@@ -115,6 +115,9 @@ pub enum PromQLObjectType {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PromQLObject {
+  #[serde(skip_serializing)]
+  execution_time: u64,
+
   #[serde(rename = "result")]
   vector: Vec<PromQLTimeSeries>,
 
@@ -129,6 +132,7 @@ impl PromQLObject {
   /// Constructor
   pub fn new() -> Self {
     PromQLObject {
+      execution_time: 0,
       vector: Vec::new(),
       scalar: 0.0,
       object_type: PromQLObjectType::InstantVector,
@@ -139,6 +143,7 @@ impl PromQLObject {
   #[allow(dead_code)]
   pub fn new_as_scalar(value: f64) -> Self {
     PromQLObject {
+      execution_time: 0,
       vector: Vec::new(),
       scalar: value,
       object_type: PromQLObjectType::Scalar,
@@ -149,6 +154,7 @@ impl PromQLObject {
   pub fn new_as_vector(vector: Vec<PromQLTimeSeries>) -> Self {
     let mut object = PromQLObject {
       vector,
+      execution_time: 0,
       scalar: 0.0,
       object_type: PromQLObjectType::InstantVector,
     };
@@ -230,6 +236,16 @@ impl PromQLObject {
   pub fn set_scalar(&mut self, scalar: f64) {
     self.scalar = scalar;
     self.object_type = PromQLObjectType::Scalar;
+  }
+
+  /// Getter for execution time
+  pub fn get_execution_time(&mut self) -> u64 {
+    self.execution_time
+  }
+
+  /// Setter for execution time
+  pub fn set_execution_time(&mut self, execution_time: u64) {
+    self.execution_time = execution_time;
   }
 
   // ******** Logical Operators: https://prometheus.io/docs/prometheus/latest/querying/operators/
@@ -655,7 +671,7 @@ impl PromQLObject {
       FunctionOperator::Round(to_nearest) => self.round(to_nearest),
       FunctionOperator::Scalar => {
         let _ = self.scalar();
-      } // Assuming scalar() returns a value that might not be used directly
+      }
       FunctionOperator::Sgn => self.sgn(),
       FunctionOperator::Sort => self.sort(),
       FunctionOperator::SortDesc => self.sort_desc(),
@@ -663,7 +679,7 @@ impl PromQLObject {
       FunctionOperator::Timestamp => self.timestamp(),
       FunctionOperator::ConvertToVector(s) => {
         let _ = self.convert_to_vector(s);
-      } // Assuming convert_to_vector() returns a PromQLObject
+      }
       FunctionOperator::Year => self.year(),
       FunctionOperator::AvgOverTime => self.avg_over_time(),
       FunctionOperator::MinOverTime => self.min_over_time(),
