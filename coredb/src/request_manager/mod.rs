@@ -4,5 +4,5 @@
 //! Manages requests in CoreDB.
 pub mod promql;
 pub mod promql_object;
-pub mod promql_time_series;
 pub mod query_dsl;
+pub mod time_series;

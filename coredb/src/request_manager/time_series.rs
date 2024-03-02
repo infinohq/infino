@@ -1,6 +1,12 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
+// This code is intended to be the base layer for implementing
+// metrics queries in Infino. Support for any specific query languages,
+// such as PromQL, should be built on top of this. If basic functionality
+// is missing in this layer then please feel free to expand the capabilities
+// of this layer.
+
 use crate::metric::metric_point::MetricPoint;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use regex::Regex;
@@ -10,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PromQLTimeSeries {
+pub struct QueryTimeSeries {
   #[serde(rename = "metric")]
   labels: HashMap<String, String>,
 
@@ -18,20 +24,18 @@ pub struct PromQLTimeSeries {
   metric_points: Vec<MetricPoint>,
 }
 
-// For implementing PromQL functions on time series
-
-impl PromQLTimeSeries {
-  /// Creates a new empty `PromQLTimeSeries`.
+impl QueryTimeSeries {
+  /// Creates a new empty `QueryTimeSeries`.
   pub fn new() -> Self {
-    PromQLTimeSeries {
+    QueryTimeSeries {
       labels: HashMap::new(),
       metric_points: Vec::new(),
     }
   }
 
-  /// Creates a new `PromQLTimeSeries` with the given labels and metric points.
+  /// Creates a new `QueryTimeSeries` with the given labels and metric points.
   pub fn new_with_params(labels: HashMap<String, String>, metric_points: Vec<MetricPoint>) -> Self {
-    PromQLTimeSeries {
+    QueryTimeSeries {
       labels,
       metric_points,
     }
@@ -72,8 +76,6 @@ impl PromQLTimeSeries {
   fn most_recent_timestamp(&self) -> Option<u64> {
     self.metric_points.iter().map(|mp| mp.get_time()).max()
   }
-
-  // **** Functions: https://prometheus.io/docs/prometheus/latest/querying/functions
 
   /// Applies the absolute value operation to every metric point's value.
   pub fn abs(&mut self) {
@@ -590,8 +592,6 @@ impl PromQLTimeSeries {
     }
   }
 
-  // *** Aggregations over time: https://prometheus.io/docs/prometheus/latest/querying/functions ****
-
   /// Calculates the average value over all metric points in the time series.
   pub fn avg_over_time(&mut self) {
     let sum: f64 = self.metric_points.iter().map(|mp| mp.get_value()).sum();
@@ -834,13 +834,13 @@ impl PromQLTimeSeries {
   }
 }
 
-impl Serialize for PromQLTimeSeries {
+impl Serialize for QueryTimeSeries {
   fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
   where
     S: Serializer,
   {
     // Start serializing a struct with a dynamic number of fields.
-    let mut state = serializer.serialize_struct("PromQLTimeSeries", 2)?;
+    let mut state = serializer.serialize_struct("QueryTimeSeries", 2)?;
 
     // Serialize the labels directly.
     state.serialize_field("metric", &self.labels)?;
@@ -864,21 +864,21 @@ impl Serialize for PromQLTimeSeries {
   }
 }
 
-impl PartialEq for PromQLTimeSeries {
+impl PartialEq for QueryTimeSeries {
   fn eq(&self, other: &Self) -> bool {
     self.labels == other.labels && self.metric_points == other.metric_points
   }
 }
 
-impl Eq for PromQLTimeSeries {}
+impl Eq for QueryTimeSeries {}
 
-impl PartialOrd for PromQLTimeSeries {
+impl PartialOrd for QueryTimeSeries {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     Some(self.cmp(other))
   }
 }
 
-impl Ord for PromQLTimeSeries {
+impl Ord for QueryTimeSeries {
   fn cmp(&self, other: &Self) -> Ordering {
     self
       .most_recent_timestamp()
@@ -886,7 +886,7 @@ impl Ord for PromQLTimeSeries {
   }
 }
 
-impl Default for PromQLTimeSeries {
+impl Default for QueryTimeSeries {
   fn default() -> Self {
     Self::new()
   }
@@ -916,7 +916,7 @@ mod tests {
   fn create_labels() -> HashMap<String, String> {
     HashMap::from([
       ("instance".to_string(), "localhost:9090".to_string()),
-      ("job".to_string(), "prometheus".to_string()),
+      ("job".to_string(), "metrics".to_string()),
     ])
   }
 
@@ -930,7 +930,7 @@ mod tests {
     let labels = create_labels();
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
 
-    let mut ts = PromQLTimeSeries::new_with_params(labels.clone(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(labels.clone(), metric_points.clone());
     assert_eq!(ts.get_labels(), &labels);
     assert_eq!(ts.get_metric_points(), &metric_points);
   }
@@ -939,7 +939,7 @@ mod tests {
   fn test_exp() {
     let expected = [10.0, 20.0, 30.0, 40.0, 50.0];
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &expected);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.exp();
 
     for (i, mp) in ts.get_metric_points().iter().enumerate() {
@@ -951,7 +951,7 @@ mod tests {
   #[test]
   fn test_floor() {
     let metric_points = create_metric_points(&[1, 2, 3], &[9.5, 16.5, 25.5]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.floor();
 
     let expected = [9.0, 16.0, 25.0];
@@ -964,7 +964,7 @@ mod tests {
   #[test]
   fn test_sqrt() {
     let metric_points = create_metric_points(&[1, 2, 3], &[9.5, 16.5, 25.5]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.sqrt();
 
     // Since the original values are slightly above perfect squares, check against the sqrt of the floored values
@@ -978,7 +978,7 @@ mod tests {
   #[test]
   fn test_sqrt_negative() {
     let metric_points = create_metric_points(&[1], &[-1.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.sqrt();
     assert!(
       ts.get_metric_points()[0].get_value().is_nan(),
@@ -989,7 +989,7 @@ mod tests {
   #[test]
   fn test_sqrt_zero() {
     let metric_points = create_metric_points(&[1], &[0.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.sqrt();
     assert_eq!(
       ts.get_metric_points()[0].get_value(),
@@ -1002,7 +1002,7 @@ mod tests {
   fn test_sqrt_large_number() {
     let large_number = 1e10;
     let metric_points = create_metric_points(&[1], &[large_number]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.sqrt();
     let expected_value = large_number.sqrt();
     assert_eq!(
@@ -1016,7 +1016,7 @@ mod tests {
   fn test_label_replace() {
     let labels = create_labels();
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(labels, metric_points);
 
     ts.label_replace("job", "replaced_job", "job", ".*");
     assert_eq!(ts.labels.get("job").unwrap(), &"replaced_job");
@@ -1027,16 +1027,16 @@ mod tests {
     let mut labels = create_labels();
     labels.insert("region".to_string(), "us-west".to_string());
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(labels, metric_points);
 
     ts.label_join("new_label", "-", &["job".to_owned(), "region".to_owned()]);
-    assert_eq!(ts.labels.get("new_label").unwrap(), &"prometheus-us-west");
+    assert_eq!(ts.labels.get("new_label").unwrap(), &"metrics-us-west");
   }
 
   #[test]
   fn test_log2() {
     let metric_points = create_metric_points(&[1, 2], &[1.0, 2.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.log2();
 
     let expected_values = [0.0, 1.0, 2.0];
@@ -1048,7 +1048,7 @@ mod tests {
   #[test]
   fn test_max_over_time() {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.max_over_time();
     assert_eq!(ts.get_metric_points()[0].get_value(), 50.0);
   }
@@ -1056,7 +1056,7 @@ mod tests {
   #[test]
   fn test_min_over_time() {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.min_over_time();
     assert_eq!(ts.get_metric_points()[0].get_value(), 10.0);
   }
@@ -1064,7 +1064,7 @@ mod tests {
   #[test]
   fn test_increase() {
     let metric_points = create_metric_points(&[1, 2, 3], &[100.0, 150.0, 200.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.increase();
 
     assert_eq!(ts.get_metric_points()[0].get_value(), 100.0); // 200.0 - 100.0 = 100.0
@@ -1073,7 +1073,7 @@ mod tests {
   #[test]
   fn test_irate() {
     let metric_points = create_metric_points(&[1, 2, 4], &[100.0, 110.0, 130.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     let expected_rate = 10.0; // (130.0 - 110.0) / (4 - 2)
     ts.irate();
     assert_eq!(ts.get_metric_points()[0].get_value(), expected_rate);
@@ -1082,7 +1082,7 @@ mod tests {
   #[test]
   fn test_last_over_time() {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.last_over_time();
 
     // The last value should match the value of the last MetricPoint in the series
@@ -1094,7 +1094,7 @@ mod tests {
   fn test_ln() {
     let metric_points =
       create_metric_points(&[1, 2], &[std::f64::consts::E, std::f64::consts::E.powi(2)]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.ln();
 
     // Check if ln was applied correctly
@@ -1105,7 +1105,7 @@ mod tests {
   #[test]
   fn test_ln_negative() {
     let metric_points = create_metric_points(&[1], &[-1.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.ln();
     assert!(
       ts.get_metric_points()[0].get_value().is_nan(),
@@ -1116,7 +1116,7 @@ mod tests {
   #[test]
   fn test_ln_zero() {
     let metric_points = create_metric_points(&[1], &[0.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.ln();
     assert_eq!(
       ts.get_metric_points()[0].get_value(),
@@ -1129,7 +1129,7 @@ mod tests {
   fn test_ln_large_number() {
     let large_number = 1e10;
     let metric_points = create_metric_points(&[1], &[large_number]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.ln();
     let expected_value = large_number.ln();
     assert_eq!(
@@ -1142,7 +1142,7 @@ mod tests {
   #[test]
   fn test_log10() {
     let metric_points = create_metric_points(&[1, 2], &[10.0, 100.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.log10();
 
     // Validate that log10 was applied correctly
@@ -1153,7 +1153,7 @@ mod tests {
   #[test]
   fn test_log10_negative() {
     let metric_points = create_metric_points(&[1], &[-1.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.log10();
     assert!(
       ts.get_metric_points()[0].get_value().is_nan(),
@@ -1164,7 +1164,7 @@ mod tests {
   #[test]
   fn test_log10_zero() {
     let metric_points = create_metric_points(&[1], &[0.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.log10();
     assert_eq!(
       ts.get_metric_points()[0].get_value(),
@@ -1177,7 +1177,7 @@ mod tests {
   fn test_log10_large_number() {
     let large_number = 1e10;
     let metric_points = create_metric_points(&[1], &[large_number]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.log10();
     let expected_value = large_number.log10();
     assert_eq!(
@@ -1190,7 +1190,7 @@ mod tests {
   #[test]
   fn test_holt_winters() {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     let alpha = 0.8;
     let beta = 0.2;
     ts.holt_winters(alpha, beta);
@@ -1206,7 +1206,7 @@ mod tests {
   #[allow(clippy::unnecessary_literal_unwrap)]
   fn test_rate() {
     let metric_points = create_metric_points(&[1, 2, 4], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     // Rate should calculate the rate of change between the first and last points
     let expected_rate = Some((30.0 - 10.0) / (4 - 1) as f64);
@@ -1220,7 +1220,7 @@ mod tests {
   #[test]
   fn test_sum_over_time() {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[10.0, 20.0, 30.0, 40.0, 50.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     // sum_over_time should return the sum of all values over the entire time range
     let expected_sum = 150.0; // 10.0 + 20.0 + 30.0 + 40.0 + 50.0
@@ -1231,7 +1231,7 @@ mod tests {
   #[test]
   fn test_timestamp() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
     ts.timestamp();
     let extracted_timestamps = ts
       .get_metric_points()
@@ -1247,7 +1247,7 @@ mod tests {
       &[1, 2, 3],
       &[0.0, std::f64::consts::PI / 4.0, std::f64::consts::PI / 3.0],
     );
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
     ts.tan();
 
     let expected = [0.0, 1.0, round_to_3((3.0_f64).sqrt())];
@@ -1269,7 +1269,7 @@ mod tests {
         2.0 * std::f64::consts::PI,
       ],
     );
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.sin();
 
     let expected = [0.0, 1.0, 0.0, -1.0, 0.0];
@@ -1283,7 +1283,7 @@ mod tests {
   #[test]
   fn test_sinh() {
     let metric_points = create_metric_points(&[1, 2, 3], &[0.0, 1.0, 2.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
     ts.sinh();
 
     let expected = [0.0, 1.175, 3.627];
@@ -1297,7 +1297,7 @@ mod tests {
   #[test]
   fn test_delta() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
     ts.delta();
     let delta_values = ts
       .get_metric_points()
@@ -1310,7 +1310,7 @@ mod tests {
   #[test]
   fn test_deriv() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
     ts.deriv();
     let deriv_values = ts
       .get_metric_points()
@@ -1323,14 +1323,14 @@ mod tests {
   #[test]
   fn test_avg_over_time() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.avg_over_time();
     assert_eq!(ts.get_metric_points()[0].get_value(), 20.0);
   }
   #[test]
   fn test_count() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.count_over_time();
     let count = ts
       .get_metric_points()
@@ -1343,7 +1343,7 @@ mod tests {
   #[test]
   fn test_day_of_year_leap_year() {
     let metric_points = create_metric_points(&[1582934400], &[10.0]); // 2020-02-29
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.day_of_year();
     assert_eq!(
       ts.get_metric_points()
@@ -1356,7 +1356,7 @@ mod tests {
 
   #[test]
   fn test_increase_no_points() {
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), Vec::new());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), Vec::new());
     ts.increase();
     assert!(ts.get_metric_points().is_empty()); // Still expect no points after operation
   }
@@ -1364,7 +1364,7 @@ mod tests {
   #[test]
   fn test_max_min_equal_values() {
     let metric_points = create_metric_points(&[1, 2], &[10.0, 10.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.max_over_time();
     let max_value = ts.get_metric_points().first().map(|mp| mp.get_value());
     assert_eq!(max_value, Some(10.0));
@@ -1379,7 +1379,7 @@ mod tests {
     let mut labels = HashMap::new();
     labels.insert("env".to_string(), "production".to_string());
     let metric_points = create_metric_points(&[1], &[10.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(labels, metric_points.clone());
     ts.label_replace("new_env", "staging", "env", "^test$");
     assert_eq!(ts.labels.get("env").unwrap(), "production");
     assert!(!ts.labels.contains_key("new_env"));
@@ -1389,7 +1389,7 @@ mod tests {
   fn test_day_of_year() {
     let metric_points =
       create_metric_points(&[1613924400, 1621098000, 1626284400], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
     ts.day_of_year();
     let day_of_year = ts
       .get_metric_points()
@@ -1402,7 +1402,7 @@ mod tests {
   #[test]
   fn test_predict_linear() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points.clone());
     ts.predict_linear(10.0);
     let result = ts.get_metric_points().last().unwrap().get_value();
     assert_eq!(result, 100.0);
@@ -1411,7 +1411,7 @@ mod tests {
   #[test]
   fn test_sgn() {
     let metric_points = create_metric_points(&[1, 2, 3], &[-10.0, 0.0, 10.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.sgn();
     let expected_signs = vec![-1.0, 0.0, 1.0];
     let actual_signs = ts
@@ -1426,7 +1426,7 @@ mod tests {
   fn test_label_replace_matching_regex() {
     let labels = HashMap::from([("role".to_string(), "db-master".to_string())]);
     let metric_points = create_metric_points(&[1], &[10.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(labels, metric_points);
     ts.label_replace("role", "db-slave", "role", "db-.*");
     assert_eq!(ts.labels.get("role").unwrap(), &"db-slave");
   }
@@ -1434,7 +1434,7 @@ mod tests {
   #[test]
   fn test_resets_no_resets() {
     let metric_points = create_metric_points(&[1, 2, 3], &[1.0, 2.0, 3.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.resets();
     let resets = ts
       .get_metric_points()
@@ -1447,7 +1447,7 @@ mod tests {
   #[test]
   fn test_resets_multiple_resets() {
     let metric_points = create_metric_points(&[1, 2, 3, 4], &[3.0, 1.0, 4.0, 2.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.resets();
     let resets = ts
       .get_metric_points()
@@ -1460,7 +1460,7 @@ mod tests {
   #[test]
   fn test_log2_powers_of_two() {
     let metric_points = create_metric_points(&[1, 2, 3], &[2.0, 4.0, 8.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.log2();
     let expected_values = vec![1.0, 2.0, 3.0];
     assert_eq!(
@@ -1475,7 +1475,7 @@ mod tests {
   #[test]
   fn test_predict_linear_downward_trend() {
     let metric_points = create_metric_points(&[1, 2, 3, 4], &[10.0, 8.0, 6.0, 4.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     // Assuming the future time 't' is relative to the first time point and we want to predict for 2 units after the last time point.
     let t = 4.0 + 2.0 - 1.0; // The '-1.0' adjusts for 't' being relative to the first time point in predict_linear's implementation.
     ts.predict_linear(t);
@@ -1490,7 +1490,7 @@ mod tests {
   #[test]
   fn test_sum_with_nan_values() {
     let metric_points = create_metric_points(&[1, 2, 3], &[f64::NAN, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.sum_over_time();
     let sum = ts
       .get_metric_points()
@@ -1503,7 +1503,7 @@ mod tests {
   #[test]
   fn test_quantile_over_time_uniform_distribution() {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[1.0, 2.0, 3.0, 4.0, 5.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.quantile_over_time(0.5);
     let quantile_value = ts
       .get_metric_points()
@@ -1516,7 +1516,7 @@ mod tests {
   #[test]
   fn test_rate_irregular_intervals() {
     let metric_points = create_metric_points(&[1, 3, 6], &[10.0, 30.0, 60.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
     ts.rate();
     let rate_value = ts
       .get_metric_points()
@@ -1529,7 +1529,7 @@ mod tests {
   #[test]
   fn test_quantile_sorted_series() {
     let metric_points = create_metric_points(&[1, 2, 3, 4, 5], &[1.0, 2.0, 3.0, 4.0, 5.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     // Test for 0th quantile (minimum value)
     ts.quantile_over_time(0.0);
@@ -1574,7 +1574,7 @@ mod tests {
   #[test]
   fn test_function_with_nan_input() {
     let metric_points = create_metric_points(&[1, 2, 3], &[f64::NAN, 1.0, 2.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.exp(); // Function that behave unpredictably with NaN
     assert!(
@@ -1586,7 +1586,7 @@ mod tests {
   #[test]
   fn test_aggregate_function_with_nan_values() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, f64::NAN, 20.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.avg_over_time();
     assert!(
@@ -1598,7 +1598,7 @@ mod tests {
   #[test]
   fn test_handling_nan_in_comparisons() {
     let metric_points = create_metric_points(&[1, 2], &[f64::NAN, 1.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.max_over_time();
     assert_eq!(
@@ -1611,7 +1611,7 @@ mod tests {
   #[test]
   fn test_function_with_infinity() {
     let metric_points = create_metric_points(&[1, 2], &[f64::INFINITY, 1.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.log10(); // Applying a function that might be influenced by Infinity
     assert_eq!(
@@ -1624,7 +1624,7 @@ mod tests {
   #[test]
   fn test_aggregate_function_with_infinity() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, f64::INFINITY, 20.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.sum_over_time(); // Summing values including Infinity
     assert_eq!(
@@ -1637,7 +1637,7 @@ mod tests {
   #[test]
   fn test_handling_infinity_in_comparisons() {
     let metric_points = create_metric_points(&[1, 2, 3], &[f64::INFINITY, 1.0, 2.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.min_over_time(); // Comparing values including Infinity
     assert_eq!(
@@ -1650,7 +1650,7 @@ mod tests {
   #[test]
   fn test_avg_over_time_empty_series() {
     let metric_points = Vec::new(); // Empty series
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.avg_over_time();
     assert!(
@@ -1662,7 +1662,7 @@ mod tests {
   #[test]
   fn test_sum_over_time_empty_series() {
     let metric_points = Vec::new(); // Empty series
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.sum_over_time();
     // Sum of an empty series could be considered 0
@@ -1676,7 +1676,7 @@ mod tests {
   #[test]
   fn test_min_over_time_empty_series() {
     let metric_points = Vec::new(); // Empty series
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.min_over_time();
     assert!(
@@ -1688,7 +1688,7 @@ mod tests {
   #[test]
   fn test_max_over_time_empty_series() {
     let metric_points = Vec::new(); // Empty series
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.max_over_time();
     assert!(
@@ -1700,7 +1700,7 @@ mod tests {
   #[test]
   fn test_count_over_time_empty_series() {
     let metric_points = Vec::new(); // Empty series
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.count_over_time();
     // Count of an empty series should logically be 0
@@ -1715,7 +1715,7 @@ mod tests {
   fn test_predict_linear_future() {
     // Time series data: linear increase by 10 every step
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     // Predict the value at a future time, t=5 (two steps ahead of the last point, t=3)
     ts.predict_linear(5.0);
@@ -1732,7 +1732,7 @@ mod tests {
   fn test_predict_linear_past() {
     // Time series data: linear increase by 10 every step
     let metric_points = create_metric_points(&[2, 3, 4], &[20.0, 30.0, 40.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     // Predict the value at a past time, t=1 (one step before the first point, t=2)
     ts.predict_linear(1.0);
@@ -1749,7 +1749,7 @@ mod tests {
   fn test_predict_linear_non_linear_data() {
     // Time series data: exponential growth
     let metric_points = create_metric_points(&[1, 2, 3], &[2.0, 4.0, 8.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     // Attempt to predict the future value at t=4
     ts.predict_linear(4.0);
@@ -1764,7 +1764,7 @@ mod tests {
   #[test]
   fn test_quantile_over_time_zero_quantile() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 5.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.quantile_over_time(0.0); // Quantile of 0 should return the minimum value
     let min_value = ts.get_metric_points()[0].get_value();
@@ -1777,7 +1777,7 @@ mod tests {
   #[test]
   fn test_quantile_over_time_one_quantile() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 5.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.quantile_over_time(1.0); // Quantile of 1 should return the maximum value
     let max_value = ts.get_metric_points()[0].get_value();
@@ -1790,7 +1790,7 @@ mod tests {
   #[test]
   fn test_quantile_over_time_negative_quantile() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.quantile_over_time(-0.5); // Testing with a negative quantile
                                  // Default to the minimum value
@@ -1804,7 +1804,7 @@ mod tests {
   #[test]
   fn test_quantile_over_time_greater_than_one_quantile() {
     let metric_points = create_metric_points(&[1, 2, 3], &[10.0, 20.0, 30.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.quantile_over_time(1.5); // Testing with a quantile greater than 1
     let value = ts.get_metric_points()[0].get_value();
@@ -1818,7 +1818,7 @@ mod tests {
   fn test_irate_irregular_intervals() {
     // Creating a time series with irregular intervals: [1 to 3] then [3 to 6]
     let metric_points = create_metric_points(&[1, 3, 6], &[10.0, 30.0, 70.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     ts.irate();
     // Expectation: The rate calculation between 3 and 6 should consider the interval length
@@ -1835,7 +1835,7 @@ mod tests {
   fn test_predict_linear_irregular_intervals() {
     // Series with irregular intervals
     let metric_points = create_metric_points(&[1, 3, 8], &[20.0, 40.0, 80.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(HashMap::new(), metric_points);
 
     // Predicting value at t=10, based on irregular historical intervals
     ts.predict_linear(10.0);
@@ -1849,7 +1849,7 @@ mod tests {
   fn test_label_replace_empty_replacement() {
     let labels = HashMap::from([("team".to_string(), "devops".to_string())]);
     let metric_points = create_metric_points(&[1], &[10.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(labels.clone(), metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(labels.clone(), metric_points);
 
     ts.label_replace("team", "", "team", ".*");
     // Expectation: The label value should be replaced with an empty string
@@ -1864,7 +1864,7 @@ mod tests {
   fn test_label_join_non_existent_labels() {
     let labels = HashMap::from([("service".to_string(), "web".to_string())]);
     let metric_points = create_metric_points(&[1], &[10.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(labels, metric_points);
 
     ts.label_join(
       "new_label",
@@ -1887,7 +1887,7 @@ mod tests {
       ("env".to_string(), "prod".to_string()),
     ]);
     let metric_points = create_metric_points(&[1], &[10.0]);
-    let mut ts = PromQLTimeSeries::new_with_params(labels, metric_points);
+    let mut ts = QueryTimeSeries::new_with_params(labels, metric_points);
 
     ts.label_join("new_label", "🚀", &["region".to_owned(), "env".to_owned()]);
     // Expectation: The new label should correctly use the special character as a separator

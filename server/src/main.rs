@@ -46,9 +46,9 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
-use coredb::request_manager::promql::PromQLDuration;
 use coredb::utils::environment::load_env;
 use coredb::utils::error::{AstError, CoreDBError, SearchLogsError, SearchMetricsError};
+use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
 use crate::queue_manager::queue::RabbitMQ;
@@ -686,7 +686,7 @@ async fn search_metrics(
     metrics_query.query.as_ref().unwrap_or(&default_text)
   };
 
-  let timeout = PromQLDuration::parse_time_range(&metrics_query.timeout.unwrap_or(String::new()))
+  let timeout = parse_time_range(&metrics_query.timeout.unwrap_or(String::new()))
     .expect("Could not parse timeout parameter");
 
   let start_time = metrics_query.start.unwrap_or(0_u64);
