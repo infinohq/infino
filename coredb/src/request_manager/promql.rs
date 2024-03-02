@@ -11,12 +11,12 @@
 //! transitory nodes onto the stack for further processing.
 
 use super::promql_object::{AggregationOperator, FunctionOperator, PromQLObject};
-use super::promql_time_series::PromQLTimeSeries;
+use super::time_series::QueryTimeSeries;
 use crate::metric::constants::{MetricsQueryCondition, METRIC_NAME_PREFIX};
-use crate::{index_manager::index::Index, metric::metric_point::MetricPoint};
-
 use crate::utils::error::{AstError, SearchMetricsError};
-use chrono::{Duration, Utc};
+use crate::utils::request::{check_query_time, parse_time_range};
+use crate::{index_manager::index::Index, metric::metric_point::MetricPoint};
+use chrono::Utc;
 use pest::iterators::{Pair, Pairs};
 use std::collections::{HashMap, VecDeque};
 
@@ -98,43 +98,17 @@ impl PromQLDuration {
 
   /// Sets the duration based on a Prometheus duration string (e.g., "2h", "15m").
   pub fn set_duration(&mut self, duration_str: &str) -> Result<(), AstError> {
-    let duration = Self::parse_time_range(duration_str)?;
+    let duration = parse_time_range(duration_str)?;
     self.end_time = Utc::now().timestamp() as u64;
     self.start_time = self.end_time.saturating_sub(duration.num_seconds() as u64);
 
     Ok(())
   }
 
-  /// Parses a time range string into a `Duration` object, handling Prometheus-style units.
-  pub fn parse_time_range(s: &str) -> Result<Duration, AstError> {
-    if s.is_empty() {
-      return Ok(Duration::seconds(0));
-    }
-
-    let units = s.chars().last().ok_or(AstError::UnsupportedQuery(
-      "Invalid duration string".to_string(),
-    ))?;
-    let value = s[..s.len() - 1]
-      .parse::<i64>()
-      .map_err(|_| AstError::UnsupportedQuery("Invalid number in duration".to_string()))?;
-
-    match units {
-      's' => Ok(Duration::seconds(value)),
-      'm' => Ok(Duration::minutes(value)),
-      'h' => Ok(Duration::hours(value)),
-      'd' => Ok(Duration::days(value)),
-      'w' => Ok(Duration::weeks(value)),
-      _ => Err(AstError::UnsupportedQuery(format!(
-        "Unsupported duration unit: {:?}",
-        s
-      ))),
-    }
-  }
-
   /// Sets the offset for the duration based on a Prometheus-style duration string (e.g., "2h", "15m").
   #[allow(dead_code)]
   pub fn set_offset(&mut self, offset_str: &str) -> Result<(), AstError> {
-    let duration = Self::parse_time_range(offset_str)?;
+    let duration = parse_time_range(offset_str)?;
     self.offset = duration.num_seconds() as u64;
     Ok(())
   }
@@ -205,26 +179,11 @@ impl Index {
       }
     }
 
-    let execution_time = self.check_query_time(timeout, query_start_time)?;
+    let execution_time = check_query_time(timeout, query_start_time)?;
 
     results.set_execution_time(execution_time);
 
     Ok(results)
-  }
-
-  // Check elapsed time after processing the query
-  fn check_query_time(&self, timeout: u64, query_start_time: u64) -> Result<u64, AstError> {
-    let query_end_time = Utc::now().timestamp_millis() as u64;
-    let elapsed = query_end_time - query_start_time;
-    if timeout != 0 && elapsed > timeout {
-      let elapsed_seconds = elapsed as f64 / 1000.0;
-      return Err(AstError::TimeOutError(format!(
-        "Query took {:?} s",
-        elapsed_seconds
-      )));
-    }
-
-    Ok(elapsed)
   }
 
   /// General dispatcher for query processing
@@ -250,7 +209,7 @@ impl Index {
       ))),
     };
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     result
   }
@@ -296,7 +255,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -339,7 +298,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -385,7 +344,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -437,7 +396,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -483,7 +442,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -532,7 +491,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -575,7 +534,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -617,7 +576,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -683,7 +642,7 @@ impl Index {
       }
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -756,7 +715,7 @@ impl Index {
 
     results.apply_aggregation_operator(operator);
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -895,7 +854,7 @@ impl Index {
 
     results.apply_function_operator(operator);
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -994,7 +953,7 @@ impl Index {
       .process_metric_search(timeout, &mut selectors, &duration)
       .await?;
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -1093,7 +1052,7 @@ impl Index {
       .await?;
 
     if !metrics_results.is_empty() {
-      results.add_to_vector(PromQLTimeSeries::new_with_params(labels, metrics_results));
+      results.add_to_vector(QueryTimeSeries::new_with_params(labels, metrics_results));
     }
 
     if results.get_vector().is_empty() {
@@ -1101,7 +1060,7 @@ impl Index {
       return Ok(PromQLObject::new());
     }
 
-    self.check_query_time(timeout, query_start_time)?;
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -1147,7 +1106,7 @@ impl Index {
       results.append(&mut segment_results);
 
       // Let's check the elapsed time after each segment search
-      self.check_query_time(timeout, query_start_time)?;
+      check_query_time(timeout, query_start_time)?;
     }
 
     Ok(results)
