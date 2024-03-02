@@ -186,6 +186,21 @@ impl Index {
     Ok(results)
   }
 
+  // Check elapsed time after processing the query
+  fn check_query_time(&self, timeout: u64, query_start_time: u64) -> Result<u64, AstError> {
+    let query_end_time = Utc::now().timestamp_millis() as u64;
+    let elapsed = query_end_time - query_start_time;
+    if timeout != 0 && elapsed > timeout {
+      let elapsed_seconds = elapsed as f64 / 1000.0;
+      return Err(AstError::TimeOutError(format!(
+        "Query took {:?} s",
+        elapsed_seconds
+      )));
+    }
+
+    Ok(elapsed)
+  }
+
   /// General dispatcher for query processing
   async fn query_dispatcher(
     &self,
