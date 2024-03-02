@@ -452,14 +452,16 @@ mod tests {
         &HashMap::new(),
         "log message 1",
       )
-      .await;
+      .await
+      .expect("Could not append log message");
     coredb
       .append_log_message(
         Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
         &HashMap::new(),
         "log message 2",
       )
-      .await;
+      .await
+      .expect("Could not append log message");
 
     // Add a few metric points.
     coredb
@@ -469,7 +471,8 @@ mod tests {
         Utc::now().timestamp_millis() as u64,
         1.0,
       )
-      .await;
+      .await
+      .expect("Could not append metric point");
     coredb
       .append_metric_point(
         "some_metric",
@@ -477,7 +480,8 @@ mod tests {
         Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
         2.0,
       )
-      .await;
+      .await
+      .expect("Could not append metric point");
 
     coredb.commit(true).await.expect("Could not commit");
     let coredb = CoreDB::refresh(config_dir_path).await?;

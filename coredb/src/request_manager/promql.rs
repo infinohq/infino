@@ -1135,7 +1135,8 @@ mod tests {
     for _ in 1..=num_metric_points {
       index
         .append_metric_point("metric", &label_map, timestamp, 100.0)
-        .await;
+        .await
+        .expect("Could not append metric point");
     }
 
     (index, index_dir_path)
@@ -1266,7 +1267,8 @@ mod tests {
     for value in values.iter() {
       index
         .append_metric_point("metric", &label_map, timestamp, *value)
-        .await;
+        .await
+        .expect("Could not append metric point");
     }
 
     let mut results = execute_query(&index, query, 0, u64::MAX).await.unwrap();
@@ -1341,7 +1343,8 @@ mod tests {
     for (label_map, value) in label_combinations {
       index
         .append_metric_point("metric", &label_map, timestamp, value)
-        .await;
+        .await
+        .expect("Could not append metric point");
     }
   }
 
@@ -1406,7 +1409,8 @@ mod tests {
       label_map.insert(label_name.to_string(), label_value.to_string());
       index
         .append_metric_point("metric", &label_map, timestamp, 100.0)
-        .await;
+        .await
+        .expect("Could not append metric point");
     }
   }
 

@@ -848,7 +848,8 @@ mod tests {
           &HashMap::new(),
           &message,
         )
-        .await;
+        .await
+        .expect("Could not append log message");
     }
 
     let metric_name = "request_count";
@@ -864,7 +865,8 @@ mod tests {
           Utc::now().timestamp_millis() as u64,
           i as f64,
         )
-        .await;
+        .await
+        .expect("Could not append metric point");
     }
 
     expected.commit(true).await.expect("Could not commit");
@@ -908,7 +910,8 @@ mod tests {
           &HashMap::new(),
           &message,
         )
-        .await;
+        .await
+        .expect("Could not append log message");
       expected_log_messages.push(message);
     }
     // Now add a unique log message.
@@ -918,7 +921,8 @@ mod tests {
         &HashMap::new(),
         "thisisunique",
       )
-      .await;
+      .await
+      .expect("Could not append log message");
 
     let query_message = r#"{
       "query": {
@@ -982,7 +986,8 @@ mod tests {
     for i in 1..num_metric_points {
       index
         .append_metric_point("metric", &HashMap::new(), i, i as f64)
-        .await;
+        .await
+        .expect("Could not append metric point");
       let dp = MetricPoint::new(i, i as f64);
       expected_metric_points.push(dp);
     }
@@ -1035,7 +1040,8 @@ mod tests {
             &HashMap::new(),
             &message,
           )
-          .await;
+          .await
+          .expect("Could not append log message");
         expected_log_messages.push(message);
       }
 
@@ -1043,7 +1049,8 @@ mod tests {
         let dp = MetricPoint::new(Utc::now().timestamp_millis() as u64, 1.0);
         index
           .append_metric_point("some_name", &HashMap::new(), dp.get_time(), dp.get_value())
-          .await;
+          .await
+          .expect("Could not append metric point");
         expected_metric_points.push(dp);
       }
 
@@ -1091,7 +1098,8 @@ mod tests {
             &HashMap::new(),
             "some_message_1",
           )
-          .await;
+          .await
+          .expect("Could not append log message");
         new_segment_num_log_messages += 1;
       }
       if append_metric_point {
@@ -1102,7 +1110,8 @@ mod tests {
             Utc::now().timestamp_millis() as u64,
             1.0,
           )
-          .await;
+          .await
+          .expect("Could not append metric point");
         new_segment_num_metric_points += 1;
       }
 
@@ -1152,7 +1161,8 @@ mod tests {
             &HashMap::new(),
             "some_message_2",
           )
-          .await;
+          .await
+          .expect("Could not append log message");
         new_segment_num_log_messages += 1;
       }
       if append_metric_point {
@@ -1163,7 +1173,8 @@ mod tests {
             Utc::now().timestamp_millis() as u64,
             1.0,
           )
-          .await;
+          .await
+          .expect("Could not append metric point");
         new_segment_num_metric_points += 1;
       }
 
@@ -1269,7 +1280,8 @@ mod tests {
           &HashMap::new(),
           &message,
         )
-        .await;
+        .await
+        .expect("Could not append log message");
 
       // Commit after indexing more than commit_after messages.
       num_log_messages_from_last_commit += 1;
@@ -1378,7 +1390,8 @@ mod tests {
             &HashMap::new(),
             message,
           )
-          .await;
+          .await
+          .expect("Could not append log message");
       }
       index.commit(true).await.expect("Could not commit index");
     }
@@ -1423,7 +1436,8 @@ mod tests {
     for _ in 1..=num_metric_points {
       index
         .append_metric_point("metric", &label_map, start_time, 100.0)
-        .await;
+        .await
+        .expect("Could not append metric point");
       num_metric_points_from_last_commit += 1;
 
       // Commit after we have indexed more than commit_after messages.
@@ -1515,10 +1529,12 @@ mod tests {
 
     index
       .append_log_message(1000, &HashMap::new(), "message_1")
-      .await;
+      .await
+      .expect("Could not append log message");
     index
       .append_log_message(2000, &HashMap::new(), "message_2")
-      .await;
+      .await
+      .expect("Could not append log message");
 
     assert_eq!(index.get_overlapping_segments(500, 1500).await.len(), 1);
     assert_eq!(index.get_overlapping_segments(1500, 2500).await.len(), 1);
@@ -1556,10 +1572,12 @@ mod tests {
       let start = i * 2 * 1000;
       index
         .append_log_message(start, &HashMap::new(), "message_1")
-        .await;
+        .await
+        .expect("Could not append log message");
       index
         .append_log_message(start + 500, &HashMap::new(), "message_2")
-        .await;
+        .await
+        .expect("Could not append log message");
       index.commit(true).await.expect("Could not commit index");
     }
 
@@ -1642,10 +1660,12 @@ mod tests {
           let time = start + j;
           arc_index_clone
             .append_log_message(time as u64, &HashMap::new(), "message")
-            .await;
+            .await
+            .expect("Could not append log message");
           arc_index_clone
             .append_metric_point("metric", &label_map, time as u64, 1.0)
-            .await;
+            .await
+            .expect("Could not append metric point");
         }
       });
       append_handles.push(handle);
@@ -1716,7 +1736,8 @@ mod tests {
 
     index
       .append_log_message(start_time as u64, &HashMap::new(), "some_message_1")
-      .await;
+      .await
+      .expect("Could not append log message");
     index.commit(true).await.expect("Could not commit index");
 
     // Create one more new index using same dir location
@@ -1794,10 +1815,12 @@ mod tests {
       let message_end = &format!("message_{}", end);
       index
         .append_log_message(start, &HashMap::new(), message_start)
-        .await;
+        .await
+        .expect("Could not append log message");
       index
         .append_log_message(end, &HashMap::new(), message_end)
-        .await;
+        .await
+        .expect("Could not append log message");
       index.commit(true).await.expect("Could not commit index");
     }
 
@@ -1855,7 +1878,8 @@ mod tests {
         &HashMap::new(),
         message,
       )
-      .await;
+      .await
+      .expect("Could not append log message");
 
     index.commit(true).await.expect("Could not commit");
     let segment_number = *index.get_current_segment_ref().1.key(); // Get current cos it has been committed to.
@@ -1896,10 +1920,12 @@ mod tests {
       let message_end = &format!("message_{}", end);
       index
         .append_log_message(start, &HashMap::new(), message_start)
-        .await;
+        .await
+        .expect("Could not append log message");
       index
         .append_log_message(end, &HashMap::new(), message_end)
-        .await;
+        .await
+        .expect("Could not append log message");
       index.commit(true).await.expect("Could not commit index");
     }
 
