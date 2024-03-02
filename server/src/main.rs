@@ -414,10 +414,23 @@ async fn append_log(
       }
     }
 
-    state
+    let result = state
       .coredb
       .append_log_message(timestamp, &fields, &text)
       .await;
+
+    if let Err(error) = result {
+      match error {
+        CoreDBError::TooManyAppendsError() => {
+          // Handle the TooManyAppendsError specifically
+          return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
+        }
+        _ => {
+          // Catch-all for other errors
+          println!("An unexpected error occurred.");
+        }
+      }
+    }
   }
 
   Ok(())
@@ -498,10 +511,23 @@ async fn append_metric(
           continue;
         }
 
-        state
+        let result = state
           .coredb
           .append_metric_point(key, &labels, timestamp, value_f64)
           .await;
+
+        if let Err(error) = result {
+          match error {
+            CoreDBError::TooManyAppendsError() => {
+              // Handle the TooManyAppendsError specifically
+              return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
+            }
+            _ => {
+              // Catch-all for other errors
+              println!("An unexpected error occurred.");
+            }
+          }
+        }
       }
     }
   }

@@ -134,7 +134,12 @@ impl CoreDB {
   }
 
   /// Append a log message.
-  pub async fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, text: &str) {
+  pub async fn append_log_message(
+    &self,
+    time: u64,
+    fields: &HashMap<String, String>,
+    text: &str,
+  ) -> Result<(), CoreDBError> {
     debug!(
       "Appending log message in CoreDB: time {}, fields {:?}, text {}",
       time, fields, text
@@ -145,7 +150,7 @@ impl CoreDB {
       .unwrap()
       .value()
       .append_log_message(time, fields, text)
-      .await;
+      .await
   }
 
   /// Append a metric point.
@@ -155,7 +160,7 @@ impl CoreDB {
     labels: &HashMap<String, String>,
     time: u64,
     value: f64,
-  ) {
+  ) -> Result<(), CoreDBError> {
     debug!(
       "Appending metric point in CoreDB: time {}, value {}, labels {:?}, name {}",
       time, value, labels, metric_name
@@ -166,7 +171,7 @@ impl CoreDB {
       .unwrap()
       .value()
       .append_metric_point(metric_name, labels, time, value)
-      .await;
+      .await
   }
 
   /// Search the log messages for given query and range.

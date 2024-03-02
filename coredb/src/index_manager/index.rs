@@ -327,11 +327,18 @@ impl Index {
     time: u64,
     fields: &HashMap<String, String>,
     message: &str,
-  ) {
+  ) -> Result<(), CoreDBError> {
     debug!(
       "Appending log message, time: {}, fields: {:?}, message: {}",
       time, fields, message
     );
+
+    // TODO: change have the number of uncommitted segments in the index to be configurable.
+    if self.uncommitted_segment_numbers.len() > 10 {
+      // We have more than 10 uncommitted segments, which means that the commit thread is not keeping up.
+      // We cannot append to the current segment, so we return an error to the caller, asking it to slow down.
+      return Err(CoreDBError::TooManyAppendsError());
+    }
 
     // Get the current segment.
     let (current_segment_number, current_segment) = self.get_current_segment_ref();
@@ -349,6 +356,8 @@ impl Index {
 
     // Check if a new segment needs to be created, and if so - create it.
     self.check_and_create_new_segment().await;
+
+    Ok(())
   }
 
   /// Append a metric point to the current segment of the index.
@@ -358,11 +367,18 @@ impl Index {
     labels: &HashMap<String, String>,
     time: u64,
     value: f64,
-  ) {
+  ) -> Result<(), CoreDBError> {
     debug!(
       "Appending metric point: metric name: {}, labels: {:?}, time: {}, value: {}",
       metric_name, labels, time, value
     );
+
+    // TODO: change have the number of uncommitted segments in the index to be configurable.
+    if self.uncommitted_segment_numbers.len() > 10 {
+      // We have more than 10 uncommitted segments, which means that the commit thread is not keeping up.
+      // We cannot append to the current segment, so we return an error to the caller, asking it to slow down.
+      return Err(CoreDBError::TooManyAppendsError());
+    }
 
     // Get the current segment.
     let (_, current_segment) = self.get_current_segment_ref();
@@ -374,6 +390,8 @@ impl Index {
 
     // Check if a new segment needs to be created, and if so - create it.
     self.check_and_create_new_segment().await;
+
+    Ok(())
   }
 
   /// Search for given query in the given time range.

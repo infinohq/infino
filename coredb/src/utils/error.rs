@@ -68,6 +68,9 @@ pub enum CoreDBError {
 
   #[error("Azure Storage Utils Error: {0}")]
   AzureStorageUtilsError(String),
+
+  #[error("Too many append requests, slow down so that commit thread can keep up")]
+  TooManyAppendsError(),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
