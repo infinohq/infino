@@ -11,12 +11,12 @@
 //! transitory nodes onto the stack for further processing.
 
 use super::promql_object::{AggregationOperator, FunctionOperator, PromQLObject};
-use super::promql_time_series::PromQLTimeSeries;
+use super::time_series::QueryTimeSeries;
 use crate::metric::constants::{MetricsQueryCondition, METRIC_NAME_PREFIX};
-use crate::{index_manager::index::Index, metric::metric_point::MetricPoint};
-
 use crate::utils::error::{AstError, SearchMetricsError};
-use chrono::{Duration, Utc};
+use crate::utils::request::{check_query_time, parse_time_range};
+use crate::{index_manager::index::Index, metric::metric_point::MetricPoint};
+use chrono::Utc;
 use pest::iterators::{Pair, Pairs};
 use std::collections::{HashMap, VecDeque};
 
@@ -98,39 +98,17 @@ impl PromQLDuration {
 
   /// Sets the duration based on a Prometheus duration string (e.g., "2h", "15m").
   pub fn set_duration(&mut self, duration_str: &str) -> Result<(), AstError> {
-    let duration = Self::parse_duration(duration_str)?;
+    let duration = parse_time_range(duration_str)?;
     self.end_time = Utc::now().timestamp() as u64;
     self.start_time = self.end_time.saturating_sub(duration.num_seconds() as u64);
 
     Ok(())
   }
 
-  /// Parses a duration string into a `Duration` object, handling Prometheus-style units.
-  fn parse_duration(s: &str) -> Result<Duration, AstError> {
-    let units = s.chars().last().ok_or(AstError::UnsupportedQuery(
-      "Invalid duration string".to_string(),
-    ))?;
-    let value = s[..s.len() - 1]
-      .parse::<i64>()
-      .map_err(|_| AstError::UnsupportedQuery("Invalid number in duration".to_string()))?;
-
-    match units {
-      's' => Ok(Duration::seconds(value)),
-      'm' => Ok(Duration::minutes(value)),
-      'h' => Ok(Duration::hours(value)),
-      'd' => Ok(Duration::days(value)),
-      'w' => Ok(Duration::weeks(value)),
-      _ => Err(AstError::UnsupportedQuery(format!(
-        "Unsupported duration unit: {:?}",
-        s
-      ))),
-    }
-  }
-
   /// Sets the offset for the duration based on a Prometheus-style duration string (e.g., "2h", "15m").
   #[allow(dead_code)]
   pub fn set_offset(&mut self, offset_str: &str) -> Result<(), AstError> {
-    let duration = Self::parse_duration(offset_str)?;
+    let duration = parse_time_range(offset_str)?;
     self.offset = duration.num_seconds() as u64;
     Ok(())
   }
@@ -164,10 +142,13 @@ impl Index {
   pub async fn traverse_promql_ast(
     &self,
     nodes: &Pairs<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Traversing ast {:?},\n", nodes);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut stack = VecDeque::new();
 
@@ -180,7 +161,8 @@ impl Index {
 
     // Pop the nodes off the stack and process
     while let Some(node) = stack.pop_front() {
-      let processing_result = self.query_dispatcher(&node, range_start_time, range_end_time);
+      let processing_result =
+        self.query_dispatcher(&node, timeout, range_start_time, range_end_time);
 
       match processing_result.await {
         Ok(mut node_results) => {
@@ -197,6 +179,10 @@ impl Index {
       }
     }
 
+    let execution_time = check_query_time(timeout, query_start_time)?;
+
+    results.set_execution_time(execution_time);
+
     Ok(results)
   }
 
@@ -204,30 +190,41 @@ impl Index {
   async fn query_dispatcher(
     &self,
     node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
-    match node.as_rule() {
-      Rule::expression => Ok(
+    let query_start_time = Utc::now().timestamp_millis() as u64;
+
+    // Initialize processing based on the node's rule
+    let result = match node.as_rule() {
+      Rule::expression => {
         self
-          .process_expression(node, range_start_time, range_end_time)
-          .await?,
-      ),
+          .process_expression(node, timeout, range_start_time, range_end_time)
+          .await
+      }
       _ => Err(AstError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
       ))),
-    }
+    };
+
+    check_query_time(timeout, query_start_time)?;
+
+    result
   }
 
   /// Processes an expression node from the AST to perform data retrieval or computation.
   async fn process_expression(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Expression Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut and_results = PromQLObject::new();
@@ -238,7 +235,7 @@ impl Index {
       match node.as_rule() {
         Rule::and_expression => {
           and_results = self
-            .process_and_expression(&node, range_start_time, range_end_time)
+            .process_and_expression(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(and_results.take_vector());
@@ -258,6 +255,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -265,10 +264,13 @@ impl Index {
   async fn process_and_expression(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("AND Expression Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut equality_results = PromQLObject::new();
@@ -279,7 +281,7 @@ impl Index {
       match node.as_rule() {
         Rule::equality => {
           equality_results = self
-            .process_equality(&node, range_start_time, range_end_time)
+            .process_equality(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(equality_results.take_vector());
@@ -296,6 +298,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -303,10 +307,13 @@ impl Index {
   async fn process_equality(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Equality Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut comparison_results = PromQLObject::new();
@@ -317,7 +324,7 @@ impl Index {
       match node.as_rule() {
         Rule::comparison => {
           comparison_results = self
-            .process_comparison(&node, range_start_time, range_end_time)
+            .process_comparison(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(comparison_results.take_vector());
@@ -337,6 +344,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -344,10 +353,13 @@ impl Index {
   async fn process_comparison(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Comparison Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut term_results = PromQLObject::new();
@@ -358,7 +370,7 @@ impl Index {
       match node.as_rule() {
         Rule::term => {
           term_results = self
-            .process_term(&node, range_start_time, range_end_time)
+            .process_term(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(term_results.take_vector());
@@ -384,6 +396,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -391,10 +405,13 @@ impl Index {
   async fn process_term(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Term Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut factor_results = PromQLObject::new();
@@ -405,7 +422,7 @@ impl Index {
       match node.as_rule() {
         Rule::factor => {
           factor_results = self
-            .process_factor(&node, range_start_time, range_end_time)
+            .process_factor(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(factor_results.take_vector());
@@ -425,6 +442,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -432,10 +451,13 @@ impl Index {
   async fn process_factor(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Factor Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut exponent_results = PromQLObject::new();
@@ -446,7 +468,7 @@ impl Index {
       match node.as_rule() {
         Rule::exponent => {
           exponent_results = self
-            .process_exponent(&node, range_start_time, range_end_time)
+            .process_exponent(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(exponent_results.take_vector());
@@ -469,6 +491,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -476,10 +500,13 @@ impl Index {
   async fn process_exponent(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Exponent Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut unary_results = PromQLObject::new();
@@ -490,7 +517,7 @@ impl Index {
       match node.as_rule() {
         Rule::unary => {
           unary_results = self
-            .process_unary(&node, range_start_time, range_end_time)
+            .process_unary(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(unary_results.take_vector());
@@ -507,6 +534,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -514,10 +543,13 @@ impl Index {
   async fn process_unary(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Unary Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
@@ -530,7 +562,7 @@ impl Index {
         }
         Rule::leaf => {
           let mut leaf_results = self
-            .process_leaf(&node, range_start_time, range_end_time)
+            .process_leaf(&node, timeout, range_start_time, range_end_time)
             .await?;
           if results.get_vector().is_empty() {
             results.set_vector(leaf_results.take_vector());
@@ -544,6 +576,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -551,10 +585,13 @@ impl Index {
   async fn process_leaf(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Leaf Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
@@ -581,19 +618,19 @@ impl Index {
         }
         Rule::vector => {
           let mut promql_object = self
-            .process_vector(&node, range_start_time, range_end_time)
+            .process_vector(&node, timeout, range_start_time, range_end_time)
             .await?;
           results.set_vector(promql_object.take_vector());
         }
         Rule::aggregations => {
           let mut promql_object = self
-            .process_aggregations(&node, range_start_time, range_end_time)
+            .process_aggregations(&node, timeout, range_start_time, range_end_time)
             .await?;
           results.set_vector(promql_object.take_vector());
         }
         Rule::functions => {
           let mut promql_object = self
-            .process_functions(&node, range_start_time, range_end_time)
+            .process_functions(&node, timeout, range_start_time, range_end_time)
             .await?;
           results.set_vector(promql_object.take_vector());
         }
@@ -605,6 +642,8 @@ impl Index {
       }
     }
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -612,10 +651,13 @@ impl Index {
   async fn process_aggregations(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Aggregation Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut operator = AggregationOperator::Undefined;
 
@@ -628,7 +670,7 @@ impl Index {
       match node.as_rule() {
         Rule::vector => {
           let mut promql_object = self
-            .process_vector(&node, range_start_time, range_end_time)
+            .process_vector(&node, timeout, range_start_time, range_end_time)
             .await?;
           results.set_vector(promql_object.take_vector());
         }
@@ -673,6 +715,8 @@ impl Index {
 
     results.apply_aggregation_operator(operator);
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -680,10 +724,13 @@ impl Index {
   async fn process_functions(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Functions Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut operator = FunctionOperator::Absent; // Default or placeholder
 
@@ -696,7 +743,7 @@ impl Index {
       match node.as_rule() {
         Rule::vector => {
           let mut promql_object = self
-            .process_vector(&node, range_start_time, range_end_time)
+            .process_vector(&node, timeout, range_start_time, range_end_time)
             .await?;
           results.set_vector(promql_object.take_vector());
         }
@@ -807,6 +854,8 @@ impl Index {
 
     results.apply_function_operator(operator);
 
+    check_query_time(timeout, query_start_time)?;
+
     Ok(results)
   }
 
@@ -852,10 +901,13 @@ impl Index {
   async fn process_vector(
     &self,
     root_node: &Pair<'_, Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, AstError> {
     debug!("Vector Node {:?},\n", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
     stack.push_back(root_node.clone());
@@ -898,8 +950,10 @@ impl Index {
     );
 
     let results = self
-      .process_metric_search(&mut selectors, &duration)
+      .process_metric_search(timeout, &mut selectors, &duration)
       .await?;
+
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -963,6 +1017,7 @@ impl Index {
   /// it differently.
   async fn process_metric_search(
     &self,
+    timeout: u64,
     selectors: &mut Vec<PromQLSelector>,
     duration: &PromQLDuration,
   ) -> Result<PromQLObject, AstError> {
@@ -970,6 +1025,8 @@ impl Index {
       "PromQL: Searching metrics with selectors {:?} and duration {:?}\n",
       selectors, duration
     );
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results = PromQLObject::new();
     let mut labels: HashMap<String, String> = HashMap::new();
@@ -988,19 +1045,22 @@ impl Index {
       .process_segments(
         &labels,
         &MetricsQueryCondition::Equals,
+        timeout,
         duration.start_time,
         duration.end_time,
       )
       .await?;
 
     if !metrics_results.is_empty() {
-      results.add_to_vector(PromQLTimeSeries::new_with_params(labels, metrics_results));
+      results.add_to_vector(QueryTimeSeries::new_with_params(labels, metrics_results));
     }
 
     if results.get_vector().is_empty() {
       debug!("No results found from searching segments. Returning empty handed.");
       return Ok(PromQLObject::new());
     }
+
+    check_query_time(timeout, query_start_time)?;
 
     Ok(results)
   }
@@ -1010,6 +1070,7 @@ impl Index {
     &self,
     labels: &HashMap<String, String>,
     condition: &MetricsQueryCondition,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<Vec<MetricPoint>, AstError> {
@@ -1017,6 +1078,8 @@ impl Index {
       "PromQL: Searching segments with args {:?} {:?} {} {}",
       labels, condition, range_start_time, range_end_time
     );
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
 
     let mut results: Vec<MetricPoint> = Vec::new();
 
@@ -1041,6 +1104,9 @@ impl Index {
         };
 
       results.append(&mut segment_results);
+
+      // Let's check the elapsed time after each segment search
+      check_query_time(timeout, query_start_time)?;
     }
 
     Ok(results)
@@ -1091,6 +1157,7 @@ mod tests {
     index
       .traverse_promql_ast(
         &Pairs::single(parsed_query),
+        0,
         range_start_time,
         range_end_time,
       )

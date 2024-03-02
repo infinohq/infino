@@ -426,6 +426,7 @@ impl Index {
   pub async fn search_metrics(
     &self,
     ast: &Pairs<'_, promql::Rule>,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, CoreDBError> {
@@ -436,7 +437,7 @@ impl Index {
 
     // Now start the search
     let mut results = self
-      .traverse_promql_ast(&ast.clone(), range_start_time, range_end_time)
+      .traverse_promql_ast(&ast.clone(), timeout, range_start_time, range_end_time)
       .await
       .map_err(SearchMetricsError::AstError)?;
 
@@ -972,7 +973,7 @@ mod tests {
     let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
       .expect("Failed to parse query");
     let mut results = index
-      .search_metrics(&ast, 0, u64::MAX)
+      .search_metrics(&ast, 0, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 
@@ -1441,7 +1442,7 @@ mod tests {
     let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
       .expect("Failed to parse query");
     let mut results = index
-      .search_metrics(&ast, 0, u64::MAX)
+      .search_metrics(&ast, 0, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 
@@ -1673,7 +1674,7 @@ mod tests {
     let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
       .expect("Failed to parse query");
     let mut results = index
-      .search_metrics(&ast, 0, u64::MAX)
+      .search_metrics(&ast, 0, 0, u64::MAX)
       .await
       .expect("Error in get_metrics");
 

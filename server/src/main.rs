@@ -47,7 +47,8 @@ use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
 use coredb::utils::environment::load_env;
-use coredb::utils::error::{CoreDBError, SearchLogsError, SearchMetricsError};
+use coredb::utils::error::{AstError, CoreDBError, SearchLogsError, SearchMetricsError};
+use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
 use crate::queue_manager::queue::RabbitMQ;
@@ -76,11 +77,12 @@ struct LogsQuery {
 #[derive(Debug, Deserialize, Serialize)]
 /// Represents a metrics query.
 struct MetricsQuery {
-  text: Option<String>,
+  query: Option<String>,
   label_name: Option<String>,
   label_value: Option<String>,
-  start_time: Option<u64>,
-  end_time: Option<u64>,
+  timeout: Option<String>,
+  start: Option<u64>,
+  end: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -668,27 +670,39 @@ async fn search_metrics(
   let text_ref = if !query_text.is_empty() {
     &query_text
   } else {
-    metrics_query.text.as_ref().unwrap_or(&default_text)
+    metrics_query.query.as_ref().unwrap_or(&default_text)
   };
+
+  let timeout = parse_time_range(&metrics_query.timeout.unwrap_or(String::new()))
+    .expect("Could not parse timeout parameter");
+
+  let start_time = metrics_query.start.unwrap_or(0_u64);
+  let end_time = metrics_query
+    .end
+    .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
 
   let results = state
     .coredb
     .search_metrics(
       text_ref,
       &json_body,
-      metrics_query.start_time.unwrap_or(0_u64),
-      metrics_query
-        .end_time
-        .unwrap_or_else(|| Utc::now().timestamp_millis() as u64),
+      timeout.num_seconds() as u64,
+      start_time,
+      end_time,
     )
     .await;
 
   match results {
-    Ok(metrics) => {
+    Ok(mut metrics) => {
       let response = json!({
           "status": "success",
           "data": metrics,
       });
+      debug!(
+        "Query {:?} completed in {:?} seconds.\n",
+        text_ref,
+        metrics.get_execution_time()
+      );
       (StatusCode::OK, Json(response))
     }
     Err(coredb_error) => {
@@ -705,6 +719,11 @@ async fn search_metrics(
           SearchMetricsError::NoQueryProvided => {
             (StatusCode::BAD_REQUEST, "bad_data", "No query provided")
           }
+          SearchMetricsError::AstError(AstError::TimeOutError(_)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "timeout",
+            "Query timed out at {}",
+          ),
           SearchMetricsError::AstError(_) => {
             (StatusCode::BAD_REQUEST, "bad_data", "Unsupported Query")
           }
@@ -1001,16 +1020,16 @@ mod tests {
     metric_points_expected: Vec<MetricPoint>,
   ) -> Result<(), CoreDBError> {
     let query_start_time = query
-      .start_time
-      .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
+      .start
+      .map_or_else(|| "".to_owned(), |value| format!("&start={}", value));
     let query_end_time = query
-      .end_time
-      .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value));
-    let query_text = query.text.as_deref().unwrap_or("");
-    let query_encode = format!("text={}", query_text);
+      .end
+      .map_or_else(|| "".to_owned(), |value| format!("&end={}", value));
+    let query_text = query.query.as_deref().unwrap_or("");
+    let query_encode = format!("query={}", query_text);
 
     let query_string = format!(
-      "text={}{}{}",
+      "query={}{}{}",
       encode(&query_encode),
       query_start_time,
       query_end_time
@@ -1077,14 +1096,20 @@ mod tests {
     let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
 
     // Calculate the start and end time for querying metrics post-refresh.
-    let start_time = query.start_time.unwrap_or(0);
+    let start_time = query.start.unwrap_or(0);
     let end_time = query
-      .end_time
+      .end
       .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
 
     // Use the refreshed CoreDB instance to search metrics with updated parameters.
     let mut results = refreshed_coredb
-      .search_metrics(&query.text.unwrap_or_default(), "", start_time, end_time)
+      .search_metrics(
+        &query.query.unwrap_or_default(),
+        "",
+        0,
+        start_time,
+        end_time,
+      )
       .await?;
 
     // If there are expected metric points and actual results, proceed to validate them.
@@ -1256,22 +1281,24 @@ mod tests {
     // (i.e., they will default to 0 and to current time respectively).
     let query_text = format!("{{{}=\"{}\"}}", name_for_metric_name_label, metric_name);
     let query = MetricsQuery {
-      text: Some(query_text),
+      query: Some(query_text),
+      timeout: None,
       label_name: None,
       label_value: None,
-      start_time: None,
-      end_time: None,
+      start: None,
+      end: None,
     };
     check_time_series(&mut app, config_dir_path, query, metric_points_expected).await?;
 
     // End time in this query is too old - this should yield 0 results.
     // Test legacy Infino syntax here
     let query = MetricsQuery {
-      text: None,
+      query: None,
+      timeout: None,
       label_name: Some(name_for_metric_name_label.to_string()),
       label_value: Some(metric_name.to_string()),
-      start_time: Some(1),
-      end_time: Some(10000),
+      start: Some(1),
+      end: Some(10000),
     };
     check_time_series(&mut app, config_dir_path, query, Vec::new()).await?;
 

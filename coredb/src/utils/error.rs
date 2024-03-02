@@ -92,6 +92,9 @@ pub enum AstError {
 
   #[error("CoreDB error: {0}")]
   CoreDBError(String),
+
+  #[error("CoreDB error: {0}")]
+  TimeOutError(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

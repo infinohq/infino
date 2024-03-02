@@ -14,6 +14,7 @@ services:
     container_name: opensearch-node
     environment:
       - discovery.type=single-node
+      - plugins.security.ssl.http.enabled=false # disables TLS for HTTP
       - INFINO_SERVER_URL=http://infino-node:3000
       - cluster.name=opensearch-cluster
       - node.name=opensearch-node
@@ -39,7 +40,7 @@ services:
     ports:
       - 5601:5601
     environment:
-      OPENSEARCH_HOSTS: '["https://opensearch-node:9200"]'
+      OPENSEARCH_HOSTS: '["http://opensearch-node:9200"]'
     networks:
       - opensearch-net
 

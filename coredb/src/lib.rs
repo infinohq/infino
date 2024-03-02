@@ -231,6 +231,7 @@ impl CoreDB {
     &self,
     url_query: &str,
     json_query: &str,
+    timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<PromQLObject, CoreDBError> {
@@ -248,7 +249,7 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .search_metrics(&ast, range_start_time, range_end_time)
+      .search_metrics(&ast, timeout, range_start_time, range_end_time)
       .await
   }
 
@@ -492,7 +493,7 @@ mod tests {
 
     // Search for metric points.
     let mut results = coredb
-      .search_metrics("some_metric", "", start, end)
+      .search_metrics("some_metric", "", 0, start, end)
       .await
       .expect("Error in get_metrics");
 

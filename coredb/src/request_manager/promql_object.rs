@@ -3,7 +3,7 @@
 
 // TODO: Add error checking
 // TODO: Histograms are not yet supported
-use super::promql_time_series::PromQLTimeSeries;
+use super::time_series::QueryTimeSeries;
 use crate::metric::metric_point::MetricPoint;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -115,8 +115,11 @@ pub enum PromQLObjectType {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PromQLObject {
+  #[serde(skip_serializing)]
+  execution_time: u64,
+
   #[serde(rename = "result")]
-  vector: Vec<PromQLTimeSeries>,
+  vector: Vec<QueryTimeSeries>,
 
   #[serde(skip_serializing)]
   scalar: f64,
@@ -129,6 +132,7 @@ impl PromQLObject {
   /// Constructor
   pub fn new() -> Self {
     PromQLObject {
+      execution_time: 0,
       vector: Vec::new(),
       scalar: 0.0,
       object_type: PromQLObjectType::InstantVector,
@@ -139,6 +143,7 @@ impl PromQLObject {
   #[allow(dead_code)]
   pub fn new_as_scalar(value: f64) -> Self {
     PromQLObject {
+      execution_time: 0,
       vector: Vec::new(),
       scalar: value,
       object_type: PromQLObjectType::Scalar,
@@ -146,9 +151,10 @@ impl PromQLObject {
   }
 
   /// Constructor for instant and range vectors
-  pub fn new_as_vector(vector: Vec<PromQLTimeSeries>) -> Self {
+  pub fn new_as_vector(vector: Vec<QueryTimeSeries>) -> Self {
     let mut object = PromQLObject {
       vector,
+      execution_time: 0,
       scalar: 0.0,
       object_type: PromQLObjectType::InstantVector,
     };
@@ -156,8 +162,8 @@ impl PromQLObject {
     object
   }
 
-  /// Method to add a PromQLTimeSeries to the vector
-  pub fn add_to_vector(&mut self, series: PromQLTimeSeries) {
+  /// Method to add a QueryTimeSeries to the vector
+  pub fn add_to_vector(&mut self, series: QueryTimeSeries) {
     self.vector.push(series);
     self.update_object_type();
   }
@@ -199,18 +205,18 @@ impl PromQLObject {
   }
 
   /// Getter for vector
-  pub fn get_vector(&self) -> &Vec<PromQLTimeSeries> {
+  pub fn get_vector(&self) -> &Vec<QueryTimeSeries> {
     &self.vector
   }
 
   /// Take for vector - getter to allow the vector to be
   /// transferred out of the object and comply with Rust's ownership rules
-  pub fn take_vector(&mut self) -> Vec<PromQLTimeSeries> {
+  pub fn take_vector(&mut self) -> Vec<QueryTimeSeries> {
     std::mem::take(&mut self.vector)
   }
 
   /// Setter for vector
-  pub fn set_vector(&mut self, vector: Vec<PromQLTimeSeries>) {
+  pub fn set_vector(&mut self, vector: Vec<QueryTimeSeries>) {
     self.vector = vector;
     self.update_object_type();
   }
@@ -230,6 +236,16 @@ impl PromQLObject {
   pub fn set_scalar(&mut self, scalar: f64) {
     self.scalar = scalar;
     self.object_type = PromQLObjectType::Scalar;
+  }
+
+  /// Getter for execution time
+  pub fn get_execution_time(&mut self) -> u64 {
+    self.execution_time
+  }
+
+  /// Setter for execution time
+  pub fn set_execution_time(&mut self, execution_time: u64) {
+    self.execution_time = execution_time;
   }
 
   // ******** Logical Operators: https://prometheus.io/docs/prometheus/latest/querying/operators/
@@ -536,8 +552,8 @@ impl PromQLObject {
         count as f64,
       )];
 
-      // Push a new PromQLTimeSeries with the derived label and the count as its only metric point
-      self.vector.push(PromQLTimeSeries::new_with_params(
+      // Push a new QueryTimeSeries with the derived label and the count as its only metric point
+      self.vector.push(QueryTimeSeries::new_with_params(
         labels.clone(),
         metric_points,
       ));
@@ -655,7 +671,7 @@ impl PromQLObject {
       FunctionOperator::Round(to_nearest) => self.round(to_nearest),
       FunctionOperator::Scalar => {
         let _ = self.scalar();
-      } // Assuming scalar() returns a value that might not be used directly
+      }
       FunctionOperator::Sgn => self.sgn(),
       FunctionOperator::Sort => self.sort(),
       FunctionOperator::SortDesc => self.sort_desc(),
@@ -663,7 +679,7 @@ impl PromQLObject {
       FunctionOperator::Timestamp => self.timestamp(),
       FunctionOperator::ConvertToVector(s) => {
         let _ = self.convert_to_vector(s);
-      } // Assuming convert_to_vector() returns a PromQLObject
+      }
       FunctionOperator::Year => self.year(),
       FunctionOperator::AvgOverTime => self.avg_over_time(),
       FunctionOperator::MinOverTime => self.min_over_time(),
@@ -779,7 +795,7 @@ impl PromQLObject {
       let mut labels = HashMap::new();
       labels.insert("absent".to_string(), "true".to_string());
       let absent_metric_point = MetricPoint::new(chrono::Utc::now().timestamp() as u64, 1.0);
-      let absent_series = PromQLTimeSeries::new_with_params(labels, vec![absent_metric_point]);
+      let absent_series = QueryTimeSeries::new_with_params(labels, vec![absent_metric_point]);
       self.vector.push(absent_series);
     } else {
       self.vector.clear();
@@ -1089,7 +1105,7 @@ impl PromQLObject {
   /// Creates a new PromQLObject as a vector from a scalar value.
   pub fn convert_to_vector(&self, s: f64) -> PromQLObject {
     let current_time = Utc::now().timestamp();
-    PromQLObject::new_as_vector(vec![PromQLTimeSeries::new_with_params(
+    PromQLObject::new_as_vector(vec![QueryTimeSeries::new_with_params(
       HashMap::new(),
       vec![MetricPoint::new(current_time as u64, s)],
     )])
@@ -1238,12 +1254,12 @@ mod tests {
       .collect()
   }
 
-  fn create_time_series(values: Vec<f64>, timestamp: u64) -> PromQLTimeSeries {
+  fn create_time_series(values: Vec<f64>, timestamp: u64) -> QueryTimeSeries {
     let metric_points = values
       .iter()
       .map(|&value| MetricPoint::new(timestamp, value))
       .collect();
-    PromQLTimeSeries::new_with_params(HashMap::new(), metric_points)
+    QueryTimeSeries::new_with_params(HashMap::new(), metric_points)
   }
 
   #[test]
@@ -1486,8 +1502,8 @@ mod tests {
   fn test_deriv() {
     let metric_points1 = create_metric_points_with_times(&[1, 2, 3], &[10.0, 20.0, 30.0]);
     let metric_points2 = create_metric_points_with_times(&[2, 4, 6], &[20.0, 40.0, 60.0]);
-    let ts1 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points1);
-    let ts2 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points2);
+    let ts1 = QueryTimeSeries::new_with_params(HashMap::new(), metric_points1);
+    let ts2 = QueryTimeSeries::new_with_params(HashMap::new(), metric_points2);
 
     let mut vector = PromQLObject::new_as_vector(vec![ts1, ts2]);
 
@@ -1545,8 +1561,8 @@ mod tests {
   fn test_irate() {
     let metric_points1 = create_metric_points_with_times(&[1, 2, 4], &[100.0, 110.0, 130.0]);
     let metric_points2 = create_metric_points_with_times(&[1, 5, 10], &[20.0, 50.0, 80.0]);
-    let ts1 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points1);
-    let ts2 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points2);
+    let ts1 = QueryTimeSeries::new_with_params(HashMap::new(), metric_points1);
+    let ts2 = QueryTimeSeries::new_with_params(HashMap::new(), metric_points2);
 
     let mut vector = PromQLObject::new_as_vector(vec![ts1, ts2]);
 
@@ -1565,8 +1581,8 @@ mod tests {
   fn test_rate() {
     let metric_points1 = create_metric_points_with_times(&[1, 2, 5], &[100.0, 110.0, 130.0]);
     let metric_points2 = create_metric_points_with_times(&[1, 5, 13], &[20.0, 50.0, 80.0]);
-    let ts1 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points1);
-    let ts2 = PromQLTimeSeries::new_with_params(HashMap::new(), metric_points2);
+    let ts1 = QueryTimeSeries::new_with_params(HashMap::new(), metric_points1);
+    let ts2 = QueryTimeSeries::new_with_params(HashMap::new(), metric_points2);
 
     let mut vector = PromQLObject::new_as_vector(vec![ts1, ts2]);
 
