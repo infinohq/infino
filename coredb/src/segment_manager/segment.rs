@@ -448,6 +448,8 @@ impl Segment {
   }
 
   /// Update the start and end time of this segment.
+  // Note: Changing logic of this function may need corresponding change in
+  // SegmentSummary::update_start_end_time.
   fn update_start_end_time(&self, time: u64) {
     // Update start and end timestamps.
     if time > self.metadata.get_end_time() {

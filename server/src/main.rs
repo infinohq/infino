@@ -38,7 +38,7 @@ use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
@@ -63,7 +63,6 @@ struct AppState {
   coredb: CoreDB,
   settings: Settings,
   openai_helper: OpenAIHelper,
-  commit_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -106,7 +105,9 @@ async fn commit_in_loop(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
   let policy_interval_ms = 3600000; // 1hr in ms
   let mut is_shutdown = false;
   loop {
-    let result = state.coredb.commit().await;
+    // Commit the index to object store. Set commit_current_segment to is_shurdown -- i.e.,
+    // commit the current segment only when the server is shutting down.
+    let result = state.coredb.commit(is_shutdown).await;
 
     if is_shutdown {
       info!("Received shutdown in commit thread. Exiting...");
@@ -140,7 +141,8 @@ async fn commit_in_loop(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
     }
     drop(shutdown); // Explicitly drop the lock before sleeping
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    // Sleep for some time before committing again.
+    sleep(Duration::from_millis(100)).await;
   }
 }
 
@@ -149,7 +151,6 @@ async fn app(
   config_dir_path: &str,
   image_name: &str,
   image_tag: &str,
-  commit_notify: Arc<Notify>,
 ) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
@@ -188,7 +189,6 @@ async fn app(
     coredb,
     settings,
     openai_helper,
-    commit_notify: commit_notify.clone(),
   });
 
   // Start a thread to periodically commit coredb.
@@ -236,16 +236,9 @@ async fn run_server() {
   let image_name = "rabbitmq";
   let image_tag = "3";
 
-  let commit_notify = Arc::new(Notify::new());
-
   // Create app.
-  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) = app(
-    config_dir_path,
-    image_name,
-    image_tag,
-    commit_notify.clone(),
-  )
-  .await;
+  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) =
+    app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -735,7 +728,7 @@ async fn search_metrics(
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
-  let result = state.coredb.commit().await;
+  let result = state.coredb.commit(true).await;
 
   match result {
     Ok(result) => Ok(result),
@@ -1135,7 +1128,7 @@ mod tests {
     );
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3", Arc::new(Notify::new())).await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Check whether the / works.
     let response = app
@@ -1324,7 +1317,7 @@ mod tests {
     );
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3", Arc::new(Notify::new())).await;
+    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Create an index.
     let index_name = "test_index";

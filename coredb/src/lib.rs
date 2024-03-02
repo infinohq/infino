@@ -253,13 +253,13 @@ impl CoreDB {
   }
 
   /// Commit the index to disk.
-  pub async fn commit(&self) -> Result<(), CoreDBError> {
+  pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
     self
       .index_map
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .commit(true)
+      .commit(commit_current_segment)
       .await
   }
 
@@ -367,10 +367,11 @@ impl CoreDB {
     let temp_reference = self.index_map.get(default_index_name).unwrap();
     let index = temp_reference.value();
 
-    let all_segments_summaries_vec = index.get_all_segments_summaries().await?;
-    let segment_ids_to_delete = self
-      .get_retention_policy()
-      .apply(all_segments_summaries_vec);
+    // TODO: this does not need to read all_segments_summaries from disk - can use the one already
+    // in memory in Index::all_segments_summaries()
+    let all_segments_summaries = index.get_all_segments_summaries().await?;
+
+    let segment_ids_to_delete = self.get_retention_policy().apply(&all_segments_summaries);
 
     let mut deletion_futures: FuturesUnordered<_> = segment_ids_to_delete
       .into_iter()
@@ -472,7 +473,7 @@ mod tests {
       )
       .await;
 
-    coredb.commit().await.expect("Could not commit");
+    coredb.commit(true).await.expect("Could not commit");
     let coredb = CoreDB::refresh(config_dir_path).await?;
 
     let end = Utc::now().timestamp_millis() as u64;

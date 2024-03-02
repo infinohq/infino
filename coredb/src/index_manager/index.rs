@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use dashmap::mapref::one::Ref;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 use log::error;
 use log::{debug, info};
 use pest::iterators::Pairs;
@@ -21,7 +21,7 @@ use crate::storage_manager::storage::StorageType;
 use crate::utils::error::{CoreDBError, SearchMetricsError};
 use crate::utils::io;
 use crate::utils::sync::thread;
-use crate::utils::sync::{Arc, TokioMutex, TokioRwLock};
+use crate::utils::sync::{Arc, TokioMutex};
 
 /// File name where the information about all segements is stored.
 const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
@@ -46,7 +46,7 @@ pub struct Index {
 
   /// A reverse-chronological sorted vector of segment summaries.
   // Use TokioRwLock, as it needs to be held across await points.
-  all_segments_summaries: Arc<TokioRwLock<Vec<SegmentSummary>>>,
+  all_segments_summaries: DashMap<u32, SegmentSummary>,
 
   /// DashMap of segment number to segment - only for the segments that are in memory.
   memory_segments_map: DashMap<u32, Segment>,
@@ -66,8 +66,8 @@ pub struct Index {
   /// Storage for this index.
   storage: Storage,
 
-  /// Segment numbers that aren't yet committed to storage.
-  uncommitted_segment_numbers: DashSet<u32>,
+  /// Segment numbers that aren't yet committed to storage, along with their end times.
+  uncommitted_segment_numbers: DashMap<u32, u64>,
 }
 
 impl Index {
@@ -138,17 +138,16 @@ impl Index {
     metadata.update_current_segment_number(current_segment_number);
 
     // Create the summary for the initial segment.
-    let mut all_segments_summaries_vec = Vec::new();
+    let all_segments_summaries = DashMap::new();
     let current_segment_summary = SegmentSummary::new(current_segment_number, &segment);
-    all_segments_summaries_vec.push(current_segment_summary);
-    let all_segments_summaries = Arc::new(TokioRwLock::new(all_segments_summaries_vec));
+    all_segments_summaries.insert(current_segment_number, current_segment_summary);
 
     let memory_segments_map = DashMap::new();
     memory_segments_map.insert(current_segment_number, segment);
 
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
-    let uncommitted_segment_numbers = DashSet::new();
+    let uncommitted_segment_numbers = DashMap::new();
 
     let index = Index {
       metadata,
@@ -167,8 +166,12 @@ impl Index {
     Ok(index)
   }
 
-  /// Insert a segment in the memory segments map.
-  fn insert_memory_segments_map(&self, segment_number: u32, segment: Segment) {
+  /// Insert a new segment in the memory segments map and in the all_segments_summaries map.
+  fn insert_new_segment(&self, segment_number: u32, segment: Segment) {
+    self.all_segments_summaries.insert(
+      segment_number,
+      SegmentSummary::new(segment_number, &segment),
+    );
     self.memory_segments_map.insert(segment_number, segment);
   }
 
@@ -220,7 +223,9 @@ impl Index {
       // Do not evict the current segment - as it would be needed for inserts.
       let current_segment_number = self.metadata.get_current_segment_number();
       if segment_number == current_segment_number
-        || self.uncommitted_segment_numbers.contains(&segment_number)
+        || self
+          .uncommitted_segment_numbers
+          .contains_key(&segment_number)
       {
         debug!(
           "Not evicting the segment with segment_number {} as it is the current segment or is in the uncommitted segment numbers",
@@ -291,44 +296,18 @@ impl Index {
     if num_log_messages < 100_000 && num_metric_points < 1_000_000 {
       return;
     }
-    println!(
-      "### Creating a new segment, current segment num_log_messages={} ###",
-      num_log_messages
-    );
 
     // Create a new segment since the current one has become too big.
     let new_segment = Segment::new();
     let new_segment_number = self.metadata.fetch_increment_segment_count();
-    println!("#### New segment num {} ####", new_segment_number);
-    let summary = SegmentSummary::new(new_segment_number, &new_segment);
+    info!(
+      "Creating a new segment with segment_number {}, id {}",
+      new_segment_number,
+      new_segment.get_id()
+    );
 
-    {
-      // We will be updating the self.all_segment_summaries, so acquire the lock.
-      let write_lock_summaries = &mut self.all_segments_summaries.write().await;
-
-      // Update the start and end time in the summary for the current segment.
-      // We don't update these in append_* methods for performance, and update only in commit.
-      let current_segment_id = current_segment.get_id();
-      let start_time = current_segment.get_start_time();
-      let end_time = current_segment.get_end_time();
-      if let Some(summary) = write_lock_summaries
-        .iter_mut()
-        .find(|s| s.get_segment_id() == current_segment_id)
-      {
-        summary.update_start_end_time(start_time, end_time);
-      }
-
-      // Add the segment to summaries. Insert at the beginning - as this is the most recent segment.
-      write_lock_summaries.insert(0, summary);
-
-      // Sort the summaries in reverse chronological order (i.e., most recent segment first).
-      write_lock_summaries.sort();
-    }
-
-    // Note that DashMap::insert *may* cause a single-thread deadlock if the thread has a read
-    // reference to an item in the map. Make sure that no read reference for all_segments_map
-    // is present before the insert and visible in this block.
-    self.insert_memory_segments_map(new_segment_number, new_segment);
+    // Insert new segment in memory_segments_map and all_segments_summaries.
+    self.insert_new_segment(new_segment_number, new_segment);
 
     // Appends will start going to the new segment after this point.
     self
@@ -339,12 +318,7 @@ impl Index {
     // by the commit thread.
     self
       .uncommitted_segment_numbers
-      .insert(current_segment_number);
-
-    println!(
-      "#### Uncommitted segment numbers: {:?} ####",
-      self.uncommitted_segment_numbers
-    );
+      .insert(current_segment_number, current_segment.get_end_time());
   }
 
   /// Append a log message to the current segment of the index.
@@ -360,12 +334,18 @@ impl Index {
     );
 
     // Get the current segment.
-    let (_, current_segment) = self.get_current_segment_ref();
+    let (current_segment_number, current_segment) = self.get_current_segment_ref();
 
     // Append the log message to the current segment.
     current_segment
       .append_log_message(time, fields, message)
       .unwrap();
+
+    // Update start and end time of the summary of the current segment.
+    let current_segment_summary = self.all_segments_summaries.get(&current_segment_number);
+    if let Some(current_segment_summary) = current_segment_summary {
+      current_segment_summary.update_start_end_time(time);
+    }
 
     // Check if a new segment needs to be created, and if so - create it.
     self.check_and_create_new_segment().await;
@@ -508,7 +488,9 @@ impl Index {
   }
 
   /// Get the summaries of the segments in this index.
-  pub async fn get_all_segments_summaries(&self) -> Result<Vec<SegmentSummary>, CoreDBError> {
+  pub async fn get_all_segments_summaries(
+    &self,
+  ) -> Result<DashMap<u32, SegmentSummary>, CoreDBError> {
     info!(
       "Getting segment summaries of index from index_dir_path: {}",
       self.index_dir_path
@@ -523,21 +505,21 @@ impl Index {
       ));
     }
 
-    let (all_segments_summaries_vec, _): (Vec<SegmentSummary>, _) =
+    let (all_segments_summaries, _): (DashMap<u32, SegmentSummary>, _) =
       self.storage.read(&all_segments_file).await?;
 
     info!(
       "Number of segment summaries in index dir path {}: {}",
       self.index_dir_path,
-      all_segments_summaries_vec.len()
+      all_segments_summaries.len()
     );
 
-    Ok(all_segments_summaries_vec)
+    Ok(all_segments_summaries)
   }
 
   /// Commit an index to disk.
   pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
-    info!("Committing index at {}", chrono::Utc::now());
+    debug!("Committing index at {}", chrono::Utc::now());
 
     // Lock to make sure only one thread calls commit at a time. If the lock isn't avilable, we simply
     // log a message and return - so that the caller, typically on a schedule, can retry on the next
@@ -555,45 +537,56 @@ impl Index {
     };
     *lock = thread::current().id();
 
-    println!("#### Acquired lock in commit index ####");
+    // Get all uncommitted segment numbers in a vector and sort them based on the end times (second element of the tuple).
+    let mut uncommitted_segment_numbers: Vec<(u32, u64)>;
+    {
+      uncommitted_segment_numbers = self
+        .uncommitted_segment_numbers
+        .iter()
+        .map(|entry| (*entry.key(), *entry.value()))
+        .collect(); // Collect into a Vec
+    }
+    uncommitted_segment_numbers.sort_by(|a, b| a.1.cmp(&b.1));
+
+    info!(
+      "Commiting index, uncommitted segment numbers: {:?}",
+      uncommitted_segment_numbers
+    );
 
     // Commit the uncommitted segments, and remove them from the uncommitted_segment_numbers set once
     // the commit is complete.
-    let mut committed_segment_numbers = Vec::new();
-    for segment_number in self.uncommitted_segment_numbers.iter() {
-      let segment_number = *segment_number;
-      println!("#### Committing segment number {} ####", segment_number);
-      self.commit_segment(segment_number).await?;
-      println!("#### Segment number {} committed ####", segment_number);
-      committed_segment_numbers.push(segment_number);
-    }
+    for segment_number in uncommitted_segment_numbers {
+      let segment_number = segment_number.0;
 
-    // Remove the committed segments from the uncommitted_segment_numbers set.
-    for segment_number in committed_segment_numbers {
-      println!(
-        "#### Removing segment number {} from uncommitted_segment_numbers ####",
-        segment_number
-      );
+      info!("Now committing segment number {}", segment_number);
+      self.commit_segment(segment_number).await?;
+
+      // Remove the segment from the uncommitted_segment_numbers map.
       self.uncommitted_segment_numbers.remove(&segment_number);
+
+      // Shrink the memory segments map.
+      self.shrink_to_fit();
     }
 
     // Commit the current segment if requested (typically during shutdown).
     if commit_current_segment {
       let current_segment_number = self.metadata.get_current_segment_number();
+      info!(
+        "Now committing current segment with segment number {}",
+        current_segment_number
+      );
       self.commit_segment(current_segment_number).await?;
+
+      // Shrink the memory segments map.
+      self.shrink_to_fit();
     }
 
     // Write the summaries to disk.
-    {
-      // Minimize the duration that the summaries lock is held, so this is in a separate block.
-      let read_lock_summaries = &self.all_segments_summaries.read().await;
-      let summaries: &Vec<SegmentSummary> = read_lock_summaries.as_ref();
-      let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
-      self
-        .storage
-        .write(&summaries, all_segments_file.as_str())
-        .await?;
-    }
+    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    self
+      .storage
+      .write(&self.all_segments_summaries, all_segments_file.as_str())
+      .await?;
 
     // Write the metadata to disk.
     let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
@@ -601,9 +594,6 @@ impl Index {
       .storage
       .write(&self.metadata, metadata_path.as_str())
       .await?;
-
-    // Shrink the memory segments map.
-    self.shrink_to_fit();
 
     Ok(())
   }
@@ -637,12 +627,12 @@ impl Index {
     let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
     // No segment is uncommitted when the index is refreshed.
-    let uncommitted_segment_numbers = DashSet::new();
+    let uncommitted_segment_numbers = DashMap::new();
 
     // Create an index with empty segment summaries and empry memory_segments_map.
     let mut index = Index {
       metadata,
-      all_segments_summaries: Arc::new(TokioRwLock::new(Vec::new())),
+      all_segments_summaries: DashMap::new(),
       memory_segments_map: DashMap::new(),
       index_dir_path: index_dir_path.to_owned(),
       index_dir_lock,
@@ -651,12 +641,16 @@ impl Index {
       uncommitted_segment_numbers,
     };
 
-    let all_segments_summaries_vec = index.get_all_segments_summaries().await?;
+    let all_segments_summaries = index.get_all_segments_summaries().await?;
 
-    if all_segments_summaries_vec.is_empty() {
+    if all_segments_summaries.is_empty() {
       // No segment summary present - so this may not be an index directory. Return an error.
       return Err(CoreDBError::NotAnIndexDirectory(index_dir_path.to_string()));
     }
+
+    // Convert all_segments_summaries into a vector, and sort it based on the end times in reverse chronological order.
+    let mut all_segments_summaries_vec: Vec<_> = all_segments_summaries.iter().collect();
+    all_segments_summaries_vec.sort_by_key(|b| std::cmp::Reverse(b.value().get_end_time()));
 
     // Populate the segment summaries and memory_segments_map.
     let memory_segments_map: DashMap<u32, Segment> = DashMap::new();
@@ -673,9 +667,9 @@ impl Index {
         break;
       }
     }
+    drop(all_segments_summaries_vec);
 
     // Update the index.
-    let all_segments_summaries = Arc::new(TokioRwLock::new(all_segments_summaries_vec));
     index.all_segments_summaries = all_segments_summaries;
     index.memory_segments_map = memory_segments_map;
 
@@ -690,25 +684,13 @@ impl Index {
     range_end_time: u64,
   ) -> Vec<u32> {
     let mut segment_numbers = Vec::new();
-    let all_segments_summaries = &*self.all_segments_summaries.read().await;
 
-    // The segment start and end times in segment summaries are updated only in commit. So, prefer
-    // getting the start and end times of the segment in memory in case it is in memory_segment_map,
-    // else get the start and end times from the summary.
-    for segment_summary in all_segments_summaries {
-      let segment_number = segment_summary.get_segment_number();
-      let segment = self.memory_segments_map.get(&segment_number);
-      match segment {
-        Some(segment) => {
-          if segment.is_overlap(range_start_time, range_end_time) {
-            segment_numbers.push(segment_number);
-          }
-        }
-        _ => {
-          if segment_summary.is_overlap(range_start_time, range_end_time) {
-            segment_numbers.push(segment_number);
-          }
-        }
+    for entry in self.all_segments_summaries.iter() {
+      let segment_number = entry.key();
+      let segment_summary = entry.value();
+
+      if segment_summary.is_overlap(range_start_time, range_end_time) {
+        segment_numbers.push(*segment_number);
       }
     }
     segment_numbers
@@ -1801,10 +1783,7 @@ mod tests {
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
-    assert_eq!(
-      index.all_segments_summaries.read().await.len() as u64,
-      num_segments + 1
-    );
+    assert_eq!(index.all_segments_summaries.len() as u64, num_segments + 1);
 
     // We shouldn't have more than specified segments in memory.
     assert!(index.memory_segments_map.len() as u64 <= num_segments_in_memory);
@@ -1906,10 +1885,7 @@ mod tests {
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
-    assert_eq!(
-      index.all_segments_summaries.read().await.len() as u64,
-      num_segments + 1
-    );
+    assert_eq!(index.all_segments_summaries.len() as u64, num_segments + 1);
 
     index.shrink_to_fit();
     // We shouldn't have more than specified segments in memory.

@@ -1,9 +1,10 @@
 use std::cmp::Ordering;
 
+use crossbeam::atomic::AtomicCell;
 use serde::{Deserialize, Serialize};
 
 use crate::segment_manager::segment::Segment;
-use crate::utils::range::is_overlap;
+use crate::utils::custom_serde::atomic_cell_serde;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SegmentSummary {
@@ -14,10 +15,12 @@ pub struct SegmentSummary {
   segment_number: u32,
 
   /// Start time.
-  start_time: u64,
+  #[serde(with = "atomic_cell_serde")]
+  start_time: AtomicCell<u64>,
 
   /// Last modified time.
-  end_time: u64,
+  #[serde(with = "atomic_cell_serde")]
+  end_time: AtomicCell<u64>,
 
   /// Uncompressed size (i.e., size when the segment is loaded in memory)
   uncompressed_size: u64,
@@ -25,11 +28,13 @@ pub struct SegmentSummary {
 
 impl SegmentSummary {
   pub fn new(segment_number: u32, segment: &Segment) -> Self {
+    let start_time = AtomicCell::new(segment.get_start_time());
+    let end_time = AtomicCell::new(segment.get_end_time());
     SegmentSummary {
       segment_id: segment.get_id().to_owned(),
       segment_number,
-      start_time: segment.get_start_time(),
-      end_time: segment.get_end_time(),
+      start_time,
+      end_time,
       uncompressed_size: segment.get_uncompressed_size(),
     }
   }
@@ -43,25 +48,37 @@ impl SegmentSummary {
   }
 
   pub fn get_start_time(&self) -> u64 {
-    self.start_time
+    self.start_time.load()
   }
 
   pub fn get_end_time(&self) -> u64 {
-    self.end_time
+    self.end_time.load()
   }
 
   pub fn get_uncompressed_size(&self) -> u64 {
     self.uncompressed_size
   }
 
-  pub fn update_start_end_time(&mut self, start_time: u64, end_time: u64) {
-    self.start_time = start_time;
-    self.end_time = end_time;
+  // Note: Changing logic of this function may need corresponding change in
+  // Segment::update_start_end_time.
+  pub fn update_start_end_time(&self, time: u64) {
+    if time > self.get_end_time() {
+      self.end_time.store(time);
+    }
+
+    if time < self.get_start_time() {
+      self.start_time.store(time);
+    }
   }
 
+  #[cfg(test)]
+  pub fn update_start_end_time_test(&self, start_time: u64, end_time: u64) {
+    self.start_time.store(start_time);
+    self.end_time.store(end_time);
+  }
   /// Returns true if this segment summary overlaps with the given range.
   pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
-    is_overlap(
+    crate::utils::range::is_overlap(
       self.get_start_time(),
       self.get_end_time(),
       range_start_time,
@@ -84,7 +101,7 @@ impl PartialOrd for SegmentSummary {
   // do not know about it.
   #[allow(clippy::all)]
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-    other.end_time.partial_cmp(&self.end_time)
+    other.end_time.load().partial_cmp(&self.end_time.load())
   }
 }
 
