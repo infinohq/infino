@@ -46,7 +46,6 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use coredb::log::log_message::LogMessage;
-use coredb::request_manager::promql::PromQLDuration;
 use coredb::utils::environment::load_env;
 use coredb::utils::error::{AstError, CoreDBError, SearchLogsError, SearchMetricsError};
 use coredb::utils::request::parse_time_range;
