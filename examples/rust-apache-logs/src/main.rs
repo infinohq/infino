@@ -221,10 +221,11 @@ async fn index(
     println!("Indexed last batch {}", batch_count);
   }
 
-  let elapsed = now.elapsed().as_micros();
+  let elapsed = now.elapsed().as_secs_f64();
+  let throughout = max_docs as f64 / elapsed;
   println!(
-    "Infino REST time required for insertion: {} microseconds",
-    elapsed
+    "Infino REST time required for insertion: {:.2} seconds, throughput {:.2} docs/seconds",
+    elapsed, throughout
   );
 
   Ok(())

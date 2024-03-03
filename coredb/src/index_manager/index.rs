@@ -296,9 +296,19 @@ impl Index {
   /// Check whether the current segment is full, and if it is, create a new segment (which becomes the new
   /// current segment where append operations go to).
   async fn check_and_create_new_segment(&self) {
-    let (current_segment_number, current_segment) = self.get_current_segment_ref();
-    let num_log_messages = current_segment.get_log_message_count();
-    let num_metric_points = current_segment.get_metric_point_count();
+    let current_segment_number;
+    let num_log_messages;
+    let num_metric_points;
+    let current_segment_end_time;
+    {
+      // Write this in a new block, so that current_segment, which is a reference to an entry in DashMap,
+      // is dropped by the end of the block.
+      let current_segment;
+      (current_segment_number, current_segment) = self.get_current_segment_ref();
+      num_log_messages = current_segment.get_log_message_count();
+      num_metric_points = current_segment.get_metric_point_count();
+      current_segment_end_time = current_segment.get_end_time();
+    }
 
     // Check if the current segment is full - and return if it isn't.
     if num_log_messages < 100_000 && num_metric_points < 1_000_000 {
@@ -341,7 +351,7 @@ impl Index {
     // by the commit thread.
     self
       .uncommitted_segment_numbers
-      .insert(current_segment_number, current_segment.get_end_time());
+      .insert(current_segment_number, current_segment_end_time);
   }
 
   /// Append a log message to the current segment of the index.
@@ -364,17 +374,27 @@ impl Index {
     }
 
     // Get the current segment.
-    let (current_segment_number, current_segment) = self.get_current_segment_ref();
+    let current_segment_number;
+    {
+      // current_segment is a reference in DashMap. Write this in a block so that it is dropped
+      // at the end of the block.
+      let current_segment;
+      (current_segment_number, current_segment) = self.get_current_segment_ref();
 
-    // Append the log message to the current segment.
-    current_segment
-      .append_log_message(time, fields, message)
-      .unwrap();
+      // Append the log message to the current segment.
+      current_segment
+        .append_log_message(time, fields, message)
+        .unwrap();
+    }
 
     // Update start and end time of the summary of the current segment.
-    let current_segment_summary = self.all_segments_summaries.get(&current_segment_number);
-    if let Some(current_segment_summary) = current_segment_summary {
-      current_segment_summary.update_start_end_time(time);
+    {
+      // current_segment_summary is a reference in DashMap. Write this in a block so that it is dropped
+      // at the end of the block.
+      let current_segment_summary = self.all_segments_summaries.get(&current_segment_number);
+      if let Some(current_segment_summary) = current_segment_summary {
+        current_segment_summary.update_start_end_time(time);
+      }
     }
 
     // Check if a new segment needs to be created, and if so - create it.
@@ -404,12 +424,18 @@ impl Index {
     }
 
     // Get the current segment.
-    let (_, current_segment) = self.get_current_segment_ref();
+    let current_segment_number;
+    {
+      // current_segment is a reference in DashMap. Write this in a block so that it is dropped
+      // at the end of the block.
+      let current_segment;
+      (current_segment_number, current_segment) = self.get_current_segment_ref();
 
-    // Append the metric point to the current segment.
-    current_segment
-      .append_metric_point(metric_name, labels, time, value)
-      .unwrap();
+      // Append the metric point to the current segment.
+      current_segment
+        .append_metric_point(metric_name, labels, time, value)
+        .unwrap();
+    }
 
     // Check if a new segment needs to be created, and if so - create it.
     self.check_and_create_new_segment().await;
