@@ -1,13 +1,14 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::vec::Vec;
 
 use dashmap::DashMap;
 use log::debug;
 
 use super::metadata::Metadata;
+use super::search_logs::QueryLogMessage;
 use crate::log::inverted_map::InvertedMap;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
@@ -15,7 +16,7 @@ use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
-use crate::utils::error::LogError;
+use crate::utils::error::QueryError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::thread;
@@ -381,60 +382,28 @@ impl Segment {
     log_message_ids: &[u32],
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, LogError> {
-    let mut log_messages = Vec::new();
+  ) -> Result<Vec<QueryLogMessage>, QueryError> {
+    let mut log_messages = Vec::<QueryLogMessage>::new();
     for log_message_id in log_message_ids {
       let retval = self
         .forward_map
         .get(log_message_id)
-        .ok_or(LogError::LogMessageNotFound(*log_message_id))?;
+        .ok_or(QueryError::LogMessageNotFound(*log_message_id))?;
       let log_message = retval.value();
       let time = log_message.get_time();
       if time >= range_start_time && time <= range_end_time {
-        log_messages.push(LogMessage::new_with_fields_and_text(
-          time,
-          log_message.get_fields(),
-          log_message.get_text(),
+        log_messages.push(QueryLogMessage::new_with_params(
+          *log_message_id,
+          LogMessage::new_with_fields_and_text(
+            time,
+            log_message.get_fields(),
+            log_message.get_text(),
+          ),
         ));
       }
     }
 
     Ok(log_messages)
-  }
-
-  /// Match the exact phrase in log messages from the given log IDs in parallel.
-  /// If the field name is provided, match the phrase in that field; otherwise, match in the text.
-  pub fn find_exact_phrase_matches(
-    &self,
-    log_message_ids: &[u32],
-    field_name: Option<&str>,
-    phrase_text: &str,
-  ) -> HashSet<u32> {
-    let matching_document_ids: HashSet<_> = log_message_ids
-      .iter()
-      .filter_map(|log_id| {
-        if let Some(log_message) = self.forward_map.get(log_id) {
-          let log_message = log_message.value();
-          let text_to_search = match field_name {
-            Some(field) => log_message
-              .get_fields()
-              .get(field)
-              .map_or("", String::as_str),
-            None => log_message.get_text(),
-          };
-
-          if text_to_search.contains(phrase_text) {
-            Some(*log_id)
-          } else {
-            None
-          }
-        } else {
-          None
-        }
-      })
-      .collect();
-
-    matching_document_ids
   }
 
   /// Returns true if this segment overlaps with the given range.
@@ -801,49 +770,6 @@ mod tests {
 
     expected.sort();
     assert_eq!(expected, received);
-  }
-
-  #[test]
-  fn test_match_exact_phrase() {
-    let segment = Segment::new();
-
-    segment
-      .append_log_message(1001, &HashMap::new(), "log 1")
-      .unwrap();
-    segment
-      .append_log_message(1002, &HashMap::new(), "log 2")
-      .unwrap();
-    segment
-      .append_log_message(1003, &HashMap::new(), "log 3")
-      .unwrap();
-
-    // Get all log message IDs from the forward map.
-    let all_log_ids: Vec<u32> = segment
-      .get_forward_map()
-      .iter()
-      .map(|entry| *entry.key())
-      .collect();
-
-    // Test matching exact phrase in text.
-    let log_ids_text = segment.find_exact_phrase_matches(&all_log_ids, None, "log 2");
-    assert_eq!(log_ids_text, HashSet::from_iter(vec![1]));
-
-    // Test matching exact phrase in a specific field.
-    let mut fields = HashMap::new();
-    fields.insert("field_name".to_string(), "log 3".to_string());
-    segment
-      .append_log_message(1004, &fields, "some message")
-      .unwrap();
-
-    let all_log_ids_with_fields: Vec<u32> = segment
-      .get_forward_map()
-      .iter()
-      .map(|entry| *entry.key())
-      .collect();
-
-    let log_ids_field =
-      segment.find_exact_phrase_matches(&all_log_ids_with_fields, Some("field_name"), "log 3");
-    assert_eq!(log_ids_field, HashSet::from_iter(vec![3]));
   }
 
   #[test]

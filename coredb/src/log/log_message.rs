@@ -4,13 +4,14 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::utils::tokenize::tokenize;
 use crate::utils::tokenize::FIELD_DELIMITER;
 
 /// Struct to represent a log message with timestamp.
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq)]
 pub struct LogMessage {
   /// Timestamp for this log message.
   time: u64,
@@ -49,6 +50,12 @@ impl LogMessage {
   /// Get the fields.
   pub fn get_fields(&self) -> &HashMap<String, String> {
     &self.fields
+  }
+
+  /// Take for vector - getter to allow the fields to be
+  /// transferred out of the object and comply with Rust's ownership rules
+  pub fn take_fields(&mut self) -> HashMap<String, String> {
+    std::mem::take(&mut self.fields)
   }
 
   /// Get the message.
@@ -105,6 +112,33 @@ impl Ord for LogMessage {
 impl PartialOrd for LogMessage {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     Some(self.cmp(other))
+  }
+}
+
+// Add Serializer for Query DSL response. This will need to
+// be adapted or duplicated for other log query languages.
+//
+// TODO: Pull this out into the Query DSL layer.
+//       This is the wrong place to embed functionality specific to a single language
+impl Serialize for LogMessage {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let field_count = 2 + self.fields.len(); // "timestamp" and "text" + additional fields
+    let mut map = serializer.serialize_map(Some(field_count))?;
+
+    // Serialize "timestamp" and "text" as fields first. This is intended to add
+    // Infino semantics to QueryDSL responses without breaking syntax.
+    map.serialize_entry("timestamp", &self.time)?;
+    map.serialize_entry("text", &self.text)?;
+
+    // Serialize the actual fields next
+    for (key, value) in &self.fields {
+      map.serialize_entry(key, value)?;
+    }
+
+    map.end()
   }
 }
 

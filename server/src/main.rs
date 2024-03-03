@@ -33,6 +33,7 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, put};
 use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
+use coredb::request_manager::query_dsl_object::QueryDSLObject;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -45,9 +46,8 @@ use tokio::time::{sleep, Duration};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use coredb::log::log_message::LogMessage;
 use coredb::utils::environment::load_env;
-use coredb::utils::error::{AstError, CoreDBError, SearchLogsError, SearchMetricsError};
+use coredb::utils::error::{CoreDBError, QueryError};
 use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
@@ -98,7 +98,7 @@ struct SummarizeQuery {
 #[derive(Debug, Deserialize, Serialize)]
 struct SummarizeQueryResponse {
   summary: String,
-  results: Vec<LogMessage>,
+  results: QueryDSLObject,
 }
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
@@ -556,23 +556,23 @@ async fn search_logs(
     }
     Err(codedb_error) => {
       match codedb_error {
-        CoreDBError::SearchLogsError(search_logs_error) => {
+        CoreDBError::QueryError(search_logs_error) => {
           // Handle the error and return an appropriate status code and error message.
           match search_logs_error {
-            SearchLogsError::JsonParseError(_) => {
+            QueryError::JsonParseError(_) => {
               Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
             }
-            SearchLogsError::SegmentSearchError(_) => Err((
+            QueryError::TimeOutError(_) => Err((
               StatusCode::INTERNAL_SERVER_ERROR,
               "Internal server error".to_string(),
             )),
-            SearchLogsError::SegmentError(_) => Err((
-              StatusCode::INTERNAL_SERVER_ERROR,
-              "Internal server error".to_string(),
-            )),
-            SearchLogsError::NoQueryProvided => {
+            QueryError::NoQueryProvided => {
               Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
             }
+            _ => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
           }
         }
         _ => Err((
@@ -613,7 +613,10 @@ async fn summarize(
   match results {
     Ok(results) => {
       // Call openai_helper.summarize and handle errors
-      match state.openai_helper.summarize(&results, k) {
+      match state
+        .openai_helper
+        .summarize(results.get_messages().as_slice(), k)
+      {
         Some(summary) => {
           let response = SummarizeQueryResponse { summary, results };
 
@@ -634,23 +637,23 @@ async fn summarize(
     }
     Err(coredb_error) => {
       match coredb_error {
-        CoreDBError::SearchLogsError(search_logs_error) => {
+        CoreDBError::QueryError(search_logs_error) => {
           // Handle the error and return an appropriate status code and error message.
           match search_logs_error {
-            SearchLogsError::JsonParseError(_) => {
+            QueryError::JsonParseError(_) => {
               Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
             }
-            SearchLogsError::SegmentSearchError(_) => Err((
+            QueryError::TimeOutError(_) => Err((
               StatusCode::INTERNAL_SERVER_ERROR,
               "Internal server error".to_string(),
             )),
-            SearchLogsError::SegmentError(_) => Err((
-              StatusCode::INTERNAL_SERVER_ERROR,
-              "Internal server error".to_string(),
-            )),
-            SearchLogsError::NoQueryProvided => {
+            QueryError::NoQueryProvided => {
               Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
             }
+            _ => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
           }
         }
         _ => Err((
@@ -720,26 +723,29 @@ async fn search_metrics(
     }
     Err(coredb_error) => {
       let (status_code, error_type, error_message) = match coredb_error {
-        CoreDBError::SearchMetricsError(search_metrics_error) => match search_metrics_error {
-          SearchMetricsError::JsonParseError(_) => {
+        CoreDBError::QueryError(search_metrics_error) => match search_metrics_error {
+          QueryError::JsonParseError(_) => {
             (StatusCode::BAD_REQUEST, "bad_data", "Invalid JSON input")
           }
-          SearchMetricsError::SegmentSearchError(_) | SearchMetricsError::SegmentError(_) => (
+          QueryError::SearchMetricsError(_) | QueryError::CoreDBError(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
           ),
-          SearchMetricsError::NoQueryProvided => {
-            (StatusCode::BAD_REQUEST, "bad_data", "No query provided")
-          }
-          SearchMetricsError::AstError(AstError::TimeOutError(_)) => (
+          QueryError::NoQueryProvided => (StatusCode::BAD_REQUEST, "bad_data", "No query provided"),
+          QueryError::TimeOutError(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "timeout",
             "Query timed out at {}",
           ),
-          SearchMetricsError::AstError(_) => {
+          QueryError::UnsupportedQuery(_) => {
             (StatusCode::BAD_REQUEST, "bad_data", "Unsupported Query")
           }
+          _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+          ),
         },
         _ => (
           StatusCode::INTERNAL_SERVER_ERROR,
@@ -835,14 +841,14 @@ mod tests {
   use tower::Service;
   use urlencoding::encode;
 
-  use coredb::index_manager::index::Index;
   use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
   use coredb::storage_manager::storage::Storage;
   use coredb::storage_manager::storage::StorageType;
-  use coredb::utils::error::AstError;
+  use coredb::utils::error::QueryError;
   use coredb::utils::io::get_joined_path;
   use coredb::utils::tokenize::FIELD_DELIMITER;
+  use coredb::{index_manager::index::Index, request_manager::query_dsl_object::QueryDSLObject};
 
   use super::*;
 
@@ -928,7 +934,7 @@ mod tests {
     config_dir_path: &str,
     search_text: &str,
     query: LogsQuery,
-    log_messages_expected: Vec<LogMessage>,
+    log_messages_expected: QueryDSLObject,
   ) -> Result<(), CoreDBError> {
     let query_start_time = query
       .start_time
@@ -964,10 +970,16 @@ mod tests {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
       .await
       .unwrap();
-    let log_messages_received: Vec<LogMessage> = serde_json::from_slice(&body).unwrap();
+    let log_messages_received: QueryDSLObject = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(log_messages_expected.len(), log_messages_received.len());
-    assert_eq!(log_messages_expected, log_messages_received);
+    assert_eq!(
+      log_messages_expected.get_messages().len(),
+      log_messages_received.get_messages().len()
+    );
+    assert_eq!(
+      log_messages_expected.get_messages(),
+      log_messages_received.get_messages()
+    );
 
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
@@ -985,8 +997,14 @@ mod tests {
 
     match log_messages_result {
       Ok(log_messages_received) => {
-        assert_eq!(log_messages_expected.len(), log_messages_received.len());
-        assert_eq!(log_messages_expected, log_messages_received);
+        assert_eq!(
+          log_messages_expected.get_messages().len(),
+          log_messages_received.get_messages().len()
+        );
+        assert_eq!(
+          log_messages_expected.get_messages(),
+          log_messages_received.get_messages()
+        );
       }
       Err(search_logs_error) => {
         error!("Error in search_logs: {:?}", search_logs_error);
@@ -1094,7 +1112,7 @@ mod tests {
           .as_str()
           .expect("Expected error field in response");
         error!("Error response from Prometheus: {} - {}", error_type, error);
-        return Err(CoreDBError::AstError(AstError::CoreDBError(format!(
+        return Err(CoreDBError::QueryError(QueryError::CoreDBError(format!(
           "Error from Prometheus: {} - {}",
           error_type, error
         ))));
@@ -1196,8 +1214,8 @@ mod tests {
 
     // **Part 1**: Test insertion and search of log messages
     let num_log_messages = 100;
-    let mut log_messages_expected = Vec::new();
-    for _ in 0..num_log_messages {
+    let mut log_messages_expected = QueryDSLObject::new();
+    for i in 0..num_log_messages {
       let time = Utc::now().timestamp_millis() as u64;
 
       let mut log = HashMap::new();
@@ -1224,13 +1242,19 @@ mod tests {
       fields.insert("field34".to_owned(), "value3 value4".to_owned());
       let text = "value1 value2 value3 value4";
       let log_message_expected = LogMessage::new_with_fields_and_text(time, &fields, text);
-      log_messages_expected.push(log_message_expected);
-    } // end for
+
+      log_messages_expected
+        .take_messages()
+        .push(QueryLogMessage::new_with_params(i, log_message_expected));
+    } // end for)
 
     // Sort the expected log messages in reverse chronological order.
-    log_messages_expected.sort();
+    log_messages_expected.take_messages().sort();
 
     let search_query = &format!("value1 field34{}value4", FIELD_DELIMITER);
+
+    let mut query_object = QueryDSLObject::new();
+    query_object.set_messages(log_messages_expected.take_messages());
 
     let query = LogsQuery {
       start_time: None,
@@ -1257,7 +1281,7 @@ mod tests {
       config_dir_path,
       search_query,
       query_too_old,
-      Vec::new(),
+      QueryDSLObject::new(),
     )
     .await?;
 

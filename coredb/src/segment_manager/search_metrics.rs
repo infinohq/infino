@@ -6,7 +6,7 @@ use crate::metric::constants::{MetricsQueryCondition, LABEL_SEPARATOR};
 use crate::metric::metric_point::MetricPoint;
 use crate::metric::time_series::TimeSeries;
 use crate::segment_manager::segment::Segment;
-use crate::utils::error::SearchMetricsError;
+use crate::utils::error::QueryError;
 
 impl Segment {
   /// Get the unique label names for this segment.
@@ -91,7 +91,7 @@ impl Segment {
     condition: &MetricsQueryCondition,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<MetricPoint>, SearchMetricsError> {
+  ) -> Result<Vec<MetricPoint>, QueryError> {
     debug!(
       "Searching metrics db with {:?} {:?} {} {}",
       labels, condition, range_start_time, range_end_time

@@ -11,14 +11,14 @@ use pest::iterators::Pairs;
 
 use crate::index_manager::metadata::Metadata;
 use crate::index_manager::segment_summary::SegmentSummary;
-use crate::log::log_message::LogMessage;
 use crate::request_manager::promql;
 use crate::request_manager::promql_object::PromQLObject;
 use crate::request_manager::query_dsl;
+use crate::request_manager::query_dsl_object::QueryDSLObject;
 use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
-use crate::utils::error::{CoreDBError, SearchMetricsError};
+use crate::utils::error::CoreDBError;
 use crate::utils::io;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex, TokioRwLock};
@@ -298,13 +298,13 @@ impl Index {
     ast: &Pairs<'_, query_dsl::Rule>,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, CoreDBError> {
+  ) -> Result<QueryDSLObject, CoreDBError> {
     debug!(
       "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
       ast, range_start_time, range_end_time
     );
 
-    let mut retval = Vec::new();
+    let mut retval = QueryDSLObject::new();
 
     // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
     let segment_numbers = self
@@ -320,20 +320,20 @@ impl Index {
         Some(segment) => segment
           .search_logs(&ast.clone(), range_start_time, range_end_time)
           .await
-          .unwrap_or_else(|_| Vec::new()),
+          .unwrap_or_else(|_| QueryDSLObject::new()),
         None => {
           let segment = self.refresh_segment(segment_number).await?;
           segment
             .search_logs(ast, range_start_time, range_end_time)
             .await
-            .unwrap_or_else(|_| Vec::new())
+            .unwrap_or_else(|_| QueryDSLObject::new())
         }
       };
 
-      retval.append(&mut results);
+      retval.take_messages().append(&mut results.take_messages());
     }
 
-    retval.sort();
+    retval.take_messages().sort();
 
     Ok(retval)
   }
@@ -354,12 +354,11 @@ impl Index {
     // Now start the search
     let mut results = self
       .traverse_promql_ast(&ast.clone(), timeout, range_start_time, range_end_time)
-      .await
-      .map_err(SearchMetricsError::AstError)?;
+      .await?;
 
     // Note that PromQL results are explicitly unsorted but we sort here
     // to be consistent with search_logs.
-    results.sort();
+    results.take_vector().sort();
 
     Ok(results)
   }

@@ -5,4 +5,5 @@
 pub mod promql;
 pub mod promql_object;
 pub mod query_dsl;
+pub mod query_dsl_object;
 pub mod time_series;

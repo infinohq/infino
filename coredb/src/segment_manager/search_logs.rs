@@ -2,21 +2,173 @@
 // https://www.elastic.co/licensing/elastic-license
 
 /// Search a segment for matching document IDs
-use std::collections::HashSet;
+use std::{
+  cmp::Ordering,
+  collections::{BTreeMap, HashMap, VecDeque},
+};
 
-use crate::log::constants::BLOCK_SIZE_FOR_LOG_MESSAGES;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_block::PostingsBlock;
 use crate::log::postings_block_compressed::PostingsBlockCompressed;
 use crate::request_manager::query_dsl::Rule;
-
 use crate::segment_manager::segment::Segment;
-use crate::utils::error::{AstError, SegmentSearchError};
+use crate::utils::error::QueryError;
+use crate::{
+  log::constants::BLOCK_SIZE_FOR_LOG_MESSAGES, request_manager::query_dsl_object::QueryDSLObject,
+};
+
+use chrono::{TimeZone, Utc};
 
 use log::debug;
 use pest::iterators::Pairs;
+use std::str;
+
+use regex::bytes::Regex;
+use serde::{Deserialize, Serialize};
+
+enum RangeOperator {
+  GreaterThanOrEqual,
+  LessThanOrEqual,
+  GreaterThan,
+  LessThan,
+}
+
+impl RangeOperator {
+  fn from_str(op: &str) -> Option<Self> {
+    match op {
+      "gte" => Some(Self::GreaterThanOrEqual),
+      "lte" => Some(Self::LessThanOrEqual),
+      "gt" => Some(Self::GreaterThan),
+      "lt" => Some(Self::LessThan),
+      _ => None,
+    }
+  }
+}
+
+// These come from different index structures or computation,
+// but we pull them together in memory for query processing
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct QueryLogMessage {
+  #[serde(rename = "_id")]
+  id: u32,
+
+  #[serde(skip_serializing)]
+  message: LogMessage,
+}
+
+impl QueryLogMessage {
+  /// Creates a new empty `QueryLogMessage`.
+  pub fn new() -> Self {
+    QueryLogMessage {
+      id: 0,
+      message: LogMessage::new(0, ""),
+    }
+  }
+
+  /// Creates a new `QueryDocIds` with the given labels and metric points.
+  pub fn new_with_params(id: u32, message: LogMessage) -> Self {
+    QueryLogMessage { id, message }
+  }
+
+  /// Gets the doc_id
+  pub fn get_id(&self) -> u32 {
+    self.id
+  }
+
+  /// Sets the doc_id.
+  pub fn set_id(&mut self, id: u32) {
+    self.id = id;
+  }
+
+  /// Gets a reference to the doc_ids
+  pub fn get_message(&self) -> &LogMessage {
+    &self.message
+  }
+
+  /// Sets the doc_ids.
+  pub fn set_message(&mut self, message: LogMessage) {
+    self.message = message;
+  }
+
+  /// Take for vector - getter to allow the message to be
+  /// transferred out of the object and comply with Rust's ownership rules
+  pub fn take_message(&mut self) -> LogMessage {
+    std::mem::take(&mut self.message)
+  }
+}
+
+impl Default for QueryLogMessage {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+// Implement PartialEq manually to compare based on id
+impl PartialEq for QueryLogMessage {
+  fn eq(&self, other: &Self) -> bool {
+    self.id == other.id
+  }
+}
+
+impl PartialOrd for QueryLogMessage {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for QueryLogMessage {
+  fn cmp(&self, other: &Self) -> Ordering {
+    self
+      .id
+      .cmp(&other.id)
+      .then_with(|| self.message.cmp(&other.message))
+  }
+}
+
+impl Eq for QueryLogMessage {}
 
 impl Segment {
+  // **** Leaf Query Support ****
+
+  /// Search the index for a set of terms
+  pub async fn search_inverted_index(
+    &self,
+    terms: Vec<String>,
+    term_operator: &str,
+  ) -> Result<Vec<u32>, QueryError> {
+    // Extract the terms and perform the search
+    let mut results = Vec::new();
+
+    // Get postings lists for the query terms
+    let (postings_lists, last_block_list, initial_values_list, shortest_list_index) = self
+      .get_postings_lists(&terms)
+      .map_err(|e| QueryError::TraverseError(format!("Error getting postings lists: {:?}", e)))?;
+
+    if postings_lists.is_empty() {
+      debug!("No posting list found. Returning empty handed.");
+      return Ok(Vec::new());
+    }
+
+    // Now get the doc IDs in the posting lists
+    if term_operator == "OR" {
+      self
+        .get_matching_doc_ids_with_logical_or(&postings_lists, &last_block_list, &mut results)
+        .map_err(|e| QueryError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
+    } else {
+      self
+        .get_matching_doc_ids_with_logical_and(
+          &postings_lists,
+          &last_block_list,
+          &initial_values_list,
+          shortest_list_index,
+          &mut results,
+        )
+        .map_err(|e| QueryError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
+    }
+
+    Ok(results)
+  }
+
   /// Get the posting lists belonging to a set of matching terms in the query
   #[allow(clippy::type_complexity)]
   pub fn get_postings_lists(
@@ -29,7 +181,7 @@ impl Segment {
       Vec<Vec<u32>>,
       usize,
     ),
-    AstError,
+    QueryError,
   > {
     let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
     let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
@@ -41,7 +193,7 @@ impl Segment {
       let postings_list = match self.get_postings_list(term) {
         Some(postings_list_ref) => postings_list_ref,
         None => {
-          return Err(AstError::PostingsListError(format!(
+          return Err(QueryError::PostingsListError(format!(
             "Postings list not found for term: {}",
             term
           )))
@@ -83,8 +235,8 @@ impl Segment {
     last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
     initial_values_list: &[Vec<u32>],
     shortest_list_index: usize,
-    result_set: &mut HashSet<u32>,
-  ) -> Result<(), AstError> {
+    results: &mut Vec<u32>,
+  ) -> Result<(), QueryError> {
     let accumulator = &mut Vec::new();
 
     if postings_lists.is_empty() {
@@ -95,7 +247,7 @@ impl Segment {
     let first_posting_blocks = &postings_lists[shortest_list_index];
     for posting_block in first_posting_blocks {
       let posting_block = PostingsBlock::try_from(posting_block).map_err(|_| {
-        AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
+        QueryError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
       })?;
       let mut log_message_ids = posting_block.get_log_message_ids();
       accumulator.append(&mut log_message_ids);
@@ -146,7 +298,7 @@ impl Segment {
             if posting_index < posting_list.len() {
               _posting_block = PostingsBlock::try_from(&posting_list[posting_index])
                 .map_err(|_| {
-                  AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
+                  QueryError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
                 })?
                 .get_log_message_ids();
             } else {
@@ -238,7 +390,7 @@ impl Segment {
       *accumulator = temp_result_set;
     }
 
-    result_set.extend(accumulator.iter().cloned());
+    results.append(&mut *accumulator);
 
     Ok(())
   }
@@ -249,10 +401,8 @@ impl Segment {
     &self,
     postings_lists: &[Vec<PostingsBlockCompressed>],
     last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
-    result_set: &mut HashSet<u32>,
-  ) -> Result<(), AstError> {
-    let mut accumulator = Vec::new();
-
+    results: &mut Vec<u32>,
+  ) -> Result<(), QueryError> {
     if postings_lists.is_empty() {
       debug!("No postings lists. Returning");
       return Ok(());
@@ -263,17 +413,15 @@ impl Segment {
 
       for posting_block in postings_list {
         let posting_block = PostingsBlock::try_from(posting_block).map_err(|_| {
-          AstError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
+          QueryError::DocMatchingError("Failed to convert to PostingsBlock".to_string())
         })?;
         let log_message_ids = posting_block.get_log_message_ids();
-        accumulator.append(&mut log_message_ids.clone());
+        results.append(&mut log_message_ids.clone());
       }
 
       let last_block_log_message_ids = last_block_list[i].get_log_message_ids();
-      accumulator.append(&mut last_block_log_message_ids.clone());
+      results.append(&mut last_block_log_message_ids.clone());
     }
-
-    result_set.extend(accumulator.iter().cloned());
 
     Ok(())
   }
@@ -284,29 +432,878 @@ impl Segment {
     ast: &Pairs<'_, Rule>,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, SegmentSearchError> {
-    let matching_document_ids = self
-      .traverse_query_dsl_ast(&ast.clone())
-      .await
-      .map_err(SegmentSearchError::AstError)?;
+  ) -> Result<QueryDSLObject, QueryError> {
+    let mut results = QueryDSLObject::new();
 
-    // Since matching_document_ids is a HashSet, no need to dedup
-    let matching_document_ids_vec: Vec<u32> = matching_document_ids.into_iter().collect();
+    let matching_document_ids = self
+      .traverse_query_dsl_ast(ast)
+      .await
+      .map_err(|_| QueryError::SearchLogsError("Could not process the query".to_string()))?;
 
     // Get the log messages and return with the query results
     let log_messages = self
-      .get_log_messages_from_ids(&matching_document_ids_vec, range_start_time, range_end_time)
-      .map_err(SegmentSearchError::LogError)?;
+      .get_log_messages_from_ids(
+        &matching_document_ids.get_ids(),
+        range_start_time,
+        range_end_time,
+      )
+      .map_err(|_| {
+        QueryError::SearchLogsError("Could not get log messages from the ids".to_string())
+      })?;
 
-    Ok(log_messages)
+    results.set_execution_time(matching_document_ids.get_execution_time());
+    results.set_messages(log_messages);
+
+    Ok(results)
   }
+
+  /// Match the exact phrase in log messages from the given log IDs in parallel.
+  /// If the field name is provided, match the phrase in that field; otherwise, match in the text.
+  pub fn get_exact_phrase_matches(
+    &self,
+    doc_ids: &[u32],
+    field_name: Option<&str>,
+    phrase_text: &str,
+  ) -> Vec<u32> {
+    let matching_document_ids: Vec<_> = doc_ids
+      .iter()
+      .filter_map(|log_id| {
+        if let Some(log_message) = self.get_forward_map().get(log_id) {
+          let log_message = log_message.value();
+          let text_to_search = match field_name {
+            Some(field) => log_message
+              .get_fields()
+              .get(field)
+              .map_or("", String::as_str),
+            None => log_message.get_text(),
+          };
+
+          if text_to_search.contains(phrase_text) {
+            Some(*log_id)
+          } else {
+            None
+          }
+        } else {
+          None
+        }
+      })
+      .collect();
+
+    matching_document_ids
+  }
+
+  /// Match documents with a boolean prefix in a specified field.
+  pub fn get_bool_prefix_matches(
+    &self,
+    doc_ids: &[u32],
+    field_name: &str,
+    prefix_text: &str,
+  ) -> Vec<u32> {
+    doc_ids
+      .iter()
+      .filter_map(|&log_id| {
+        self.get_forward_map().get(&log_id).and_then(|log_message| {
+          let log_message = log_message.value();
+          log_message
+            .get_fields()
+            .get(field_name)
+            .and_then(|field_value| {
+              if field_value.starts_with(prefix_text) {
+                Some(log_id)
+              } else {
+                None
+              }
+            })
+        })
+      })
+      .collect()
+  }
+
+  /// Match documents based on multiple conditions across different fields.
+  pub fn get_multi_match(
+    &self,
+    doc_ids: &[u32],
+    conditions: &[(String, String)], // Each tuple contains (field_name, text_to_match)
+  ) -> Vec<u32> {
+    doc_ids
+      .iter()
+      .filter_map(|&log_id| {
+        if let Some(log_message) = self.get_forward_map().get(&log_id) {
+          let log_message = log_message.value();
+          for (field_name, text_to_match) in conditions {
+            if let Some(field_value) = log_message.get_fields().get(field_name) {
+              if field_value.contains(text_to_match) {
+                return Some(log_id);
+              }
+            }
+          }
+          None
+        } else {
+          None
+        }
+      })
+      .collect()
+  }
+
+  pub fn range_query(&self, doc_ids: &[u32], field_name: &str, range: &str) -> Vec<u32> {
+    // Parse the range string
+    let re = Regex::new(r"(?P<op>[gte|lte|gt|lt]+)\[(?P<value>[^\]]+)\]").unwrap();
+    let captures = re.captures(range.as_bytes()).unwrap();
+    let op_bytes = captures.name("op").unwrap().as_bytes();
+    let op_str = str::from_utf8(op_bytes).unwrap();
+    let value = captures
+      .name("value")
+      .and_then(|m| str::from_utf8(m.as_bytes()).ok())
+      .and_then(|s| s.parse::<f64>().ok())
+      .unwrap();
+
+    // Convert operator string to enum
+    let op = RangeOperator::from_str(op_str).unwrap();
+
+    // Filter document IDs based on range
+    doc_ids
+      .iter()
+      .filter_map(|&log_id| {
+        if let Some(log_message) = self.get_forward_map().get(&log_id) {
+          let log_message = log_message.value();
+          if let Some(field_value) = log_message.get_fields().get(field_name) {
+            let field_value = field_value.parse::<f64>().unwrap();
+            match op {
+              RangeOperator::GreaterThanOrEqual => {
+                if field_value >= value {
+                  return Some(log_id);
+                }
+              }
+              RangeOperator::LessThanOrEqual => {
+                if field_value <= value {
+                  return Some(log_id);
+                }
+              }
+              RangeOperator::GreaterThan => {
+                if field_value > value {
+                  return Some(log_id);
+                }
+              }
+              RangeOperator::LessThan => {
+                if field_value < value {
+                  return Some(log_id);
+                }
+              }
+            }
+          }
+        }
+        None
+      })
+      .collect()
+  }
+
+  pub fn regexp(&self, doc_ids: &[u32], field_name: &str, regexp: &str) -> Vec<u32> {
+    // Compile the regular expression pattern
+    let re = Regex::new(regexp).unwrap();
+
+    // Filter document IDs based on regex match
+    doc_ids
+      .iter()
+      .filter_map(|&log_id| {
+        if let Some(log_message) = self.get_forward_map().get(&log_id) {
+          let log_message = log_message.value();
+          if let Some(field_value) = log_message.get_fields().get(field_name) {
+            if re.is_match(field_value.as_bytes()) {
+              // Convert to byte slice here
+              return Some(log_id);
+            }
+          }
+        }
+        None
+      })
+      .collect()
+  }
+
+  pub fn wildcard(&self, doc_ids: &[u32], field_name: &str, wildcard: &str) -> Vec<u32> {
+    // Convert the wildcard pattern to a regex pattern
+    let wildcard_pattern = wildcard
+      .replace(".", "\\.")
+      .replace("*", ".*")
+      .replace("?", ".");
+
+    // Compile the regex pattern
+    let re = Regex::new(&wildcard_pattern).unwrap();
+
+    // Filter document IDs based on wildcard match
+    doc_ids
+      .iter()
+      .filter_map(|&log_id| {
+        if let Some(log_message) = self.get_forward_map().get(&log_id) {
+          let log_message = log_message.value();
+          if let Some(field_value) = log_message.get_fields().get(field_name) {
+            if re.is_match(field_value.as_bytes()) {
+              // Convert to byte slice here
+              return Some(log_id);
+            }
+          }
+        }
+        None
+      })
+      .collect()
+  }
+
+  // *** Metrics Aggregation Query Support ***
+
+  /// Compute the average value for a specified field across documents in doc_ids.
+  /// Includes an option to specify how missing values should be treated.
+  pub fn avg(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+    treat_missing_as_zero: bool,
+  ) -> Result<f64, QueryError> {
+    let mut sum = 0.0;
+    let mut count = 0;
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+
+        match log_message.get_fields().get(field_name) {
+          Some(field_value_str) => match field_value_str.parse::<f64>() {
+            Ok(field_value) => {
+              sum += field_value;
+              count += 1;
+            }
+            Err(_) => {
+              return Err(QueryError::CoreDBError(format!(
+                "Could not parse field value for field '{}'",
+                field_name
+              )))
+            }
+          },
+          None if treat_missing_as_zero => count += 1, // Treat missing as zero, effectively adding 0 to the sum and incrementing the count
+          None => (),                                  // Skip missing values
+        }
+      }
+    }
+
+    if count == 0 {
+      Err(QueryError::SearchLogsError(format!(
+        "No valid data found for field '{}'",
+        field_name
+      )))
+    } else {
+      Ok(sum / count as f64)
+    }
+  }
+
+  /// Compute the maximum value for a specified field across documents in doc_ids.
+  fn min(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<f64, QueryError> {
+    let mut min_value: Option<f64> = None;
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+
+        if let Some(field_value_str) = log_message.get_fields().get(field_name) {
+          match field_value_str.parse::<f64>() {
+            Ok(field_value) => {
+              min_value = Some(match min_value {
+                Some(current_max) => f64::min(current_max, field_value),
+                None => field_value,
+              });
+            }
+            Err(_) => {
+              return Err(QueryError::CoreDBError(format!(
+                "Could not parse field value for field '{}'",
+                field_name
+              )));
+            }
+          }
+        }
+      }
+    }
+
+    min_value.ok_or_else(|| {
+      QueryError::SearchLogsError(format!("No valid data found for field '{}'", field_name))
+    })
+  }
+
+  /// Compute the maximum value for a specified field across documents in doc_ids.
+  fn max(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<f64, QueryError> {
+    let mut max_value: Option<f64> = None;
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+
+        if let Some(field_value_str) = log_message.get_fields().get(field_name) {
+          match field_value_str.parse::<f64>() {
+            Ok(field_value) => {
+              max_value = Some(match max_value {
+                Some(current_max) => f64::max(current_max, field_value),
+                None => field_value,
+              });
+            }
+            Err(_) => {
+              return Err(QueryError::CoreDBError(format!(
+                "Could not parse field value for field '{}'",
+                field_name
+              )));
+            }
+          }
+        }
+      }
+    }
+
+    max_value.ok_or_else(|| {
+      QueryError::SearchLogsError(format!("No valid data found for field '{}'", field_name))
+    })
+  }
+
+  pub fn sum(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<f64, QueryError> {
+    let mut total_sum = 0.0;
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+        if let Some(field_value_str) = log_message.get_fields().get(field_name) {
+          match field_value_str.parse::<f64>() {
+            Ok(field_value) => total_sum += field_value,
+            Err(_) => return Err(QueryError::SearchLogsError(field_name.to_string())),
+          }
+        }
+      }
+    }
+
+    Ok(total_sum)
+  }
+
+  /// Computes statistics (count, min, max, sum, avg) for a specified field across documents.
+  fn stats(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+  ) -> Result<(u64, f64, f64, f64, f64), QueryError> {
+    let mut count = 0;
+    let mut sum = 0.0;
+    let mut min_value: Option<f64> = None;
+    let mut max_value: Option<f64> = None;
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        if let Some(field_value_str) = log_message.value().get_fields().get(field_name) {
+          if let Ok(field_value) = field_value_str.parse::<f64>() {
+            sum += field_value;
+            count += 1;
+            min_value = Some(min_value.map_or(field_value, |min| f64::min(min, field_value)));
+            max_value = Some(max_value.map_or(field_value, |max| f64::max(max, field_value)));
+          }
+        }
+      }
+    }
+
+    let avg = if count > 0 {
+      Some(sum / count as f64)
+    } else {
+      None
+    };
+    Ok((
+      count,
+      sum,
+      min_value.unwrap(),
+      max_value.unwrap(),
+      avg.unwrap(),
+    ))
+  }
+
+  fn cardinality(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<usize, QueryError> {
+    let mut unique_values = Vec::new();
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        if let Some(field_value) = log_message.value().get_fields().get(field_name) {
+          // Clone the value so it's owned by unique_values
+          unique_values.push(field_value.clone());
+        }
+      }
+    }
+
+    Ok(unique_values.len())
+  }
+
+  /// Counts the number of values for a specified field across documents.
+  fn value_count(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<usize, QueryError> {
+    let mut count = 0;
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        if log_message.value().get_fields().contains_key(field_name) {
+          count += 1;
+        }
+      }
+    }
+    Ok(count)
+  }
+
+  pub fn percentile(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+    percentiles: Vec<u64>, // Percentiles requested, as values between 0 and 100.
+  ) -> Result<BTreeMap<u64, f64>, QueryError> {
+    let mut values = Vec::new();
+
+    // Collecting values from documents
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        if let Some(field_value_str) = log_message.value().get_fields().get(field_name) {
+          match field_value_str.parse::<f64>() {
+            Ok(field_value) => values.push(field_value),
+            Err(_) => {
+              return Err(QueryError::CoreDBError(format!(
+                "Could not parse field value for field '{}'",
+                field_name
+              )))
+            }
+          }
+        }
+      }
+    }
+
+    // Sorting values to calculate percentiles
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut results = BTreeMap::new();
+    for percentile in percentiles {
+      let pos = (percentile as f64 / 100.0) * (values.len() as f64 - 1.0) + 1.0;
+      let lower = values[(pos.floor() as usize) - 1];
+      let upper = values[pos.ceil() as usize - 1];
+      let value = lower + (upper - lower) * (pos - pos.floor());
+
+      results.insert(percentile, value);
+    }
+
+    Ok(results)
+  }
+
+  /// Compute extended statistics for a specified field across documents in doc_ids.
+  pub fn extended_stats(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+  ) -> Result<HashMap<String, f64>, QueryError> {
+    let mut values = Vec::new();
+
+    // Collecting values from documents
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        if let Some(field_value_str) = log_message.value().get_fields().get(field_name) {
+          match field_value_str.parse::<f64>() {
+            Ok(field_value) => values.push(field_value),
+            Err(_) => {
+              return Err(QueryError::CoreDBError(format!(
+                "Could not parse field value for field '{}'",
+                field_name
+              )))
+            }
+          }
+        }
+      }
+    }
+
+    let count = values.len() as f64;
+    let sum: f64 = values.iter().sum();
+    let avg = sum / count;
+    let min = values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+    let max = values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let variance = values
+      .iter()
+      .map(|&value| (value - avg).powi(2))
+      .sum::<f64>()
+      / count;
+    let std_deviation = variance.sqrt();
+
+    let results = HashMap::from([
+      ("count".to_string(), count),
+      ("sum".to_string(), sum),
+      ("avg".to_string(), avg),
+      ("min".to_string(), min),
+      ("max".to_string(), max),
+      ("variance".to_string(), variance),
+      ("std_deviation".to_string(), std_deviation),
+    ]);
+
+    Ok(results)
+  }
+
+  // *** Bucket Aggregation Query Support ***
+
+  /// Compute terms aggregation with additional parameters for inclusion and exclusion of terms.
+  pub fn terms(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+    size: Option<usize>, // Maximum number of terms to include in the result.
+    min_doc_count: Option<usize>, // Minimum count to include a term in the result.
+    order: Option<&str>, // "asc" or "desc" for ordering by count.
+    include: Option<Vec<String>>, // Terms to include.
+    exclude: Option<Vec<String>>, // Terms to exclude.
+  ) -> Result<HashMap<String, usize>, QueryError> {
+    let mut counts = HashMap::new();
+
+    // Convert include and exclude vectors to hash sets for efficient lookup.
+    let include_set = include.map(|v| v.into_iter().collect::<Vec<_>>());
+    let exclude_set = exclude.map(|v| v.into_iter().collect::<Vec<_>>());
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+        if let Some(field_value) = log_message.get_fields().get(field_name) {
+          // Check against include and exclude sets.
+          let included = include_set
+            .as_ref()
+            .map_or(true, |set| set.contains(field_value));
+          let excluded = exclude_set
+            .as_ref()
+            .map_or(false, |set| set.contains(field_value));
+
+          if included && !excluded {
+            *counts.entry(field_value.clone()).or_insert(0) += 1;
+          }
+        }
+      }
+    }
+
+    // Apply min_doc_count filter.
+    if let Some(min_count) = min_doc_count {
+      counts.retain(|_, &mut count| count >= min_count);
+    }
+
+    // Apply sorting based on the order parameter.
+    let mut sorted_counts: Vec<_> = counts.into_iter().collect();
+    match order {
+      Some("asc") => sorted_counts.sort_by(|a, b| a.1.cmp(&b.1)),
+      Some("desc") => sorted_counts.sort_by(|a, b| b.1.cmp(&a.1)),
+      _ => (), // No sorting or invalid value, leave as is.
+    }
+
+    // Apply size limit.
+    let limited_counts: HashMap<String, usize> = if let Some(limit) = size {
+      sorted_counts.into_iter().take(limit).collect()
+    } else {
+      sorted_counts.into_iter().collect()
+    };
+
+    if limited_counts.is_empty() {
+      Err(QueryError::SearchLogsError(
+        "No valid terms found based on the provided criteria".to_string(),
+      ))
+    } else {
+      Ok(limited_counts)
+    }
+  }
+
+  /// Compute a histogram of the specified numeric field across documents in doc_ids.
+  /// Buckets are determined by the specified interval.
+  pub fn histogram(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+    interval: f64,
+  ) -> Result<BTreeMap<String, usize>, QueryError> {
+    let mut histogram = BTreeMap::new();
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+
+        if let Some(field_value_str) = log_message.get_fields().get(field_name) {
+          match field_value_str.parse::<f64>() {
+            Ok(field_value) => {
+              let bucket = ((field_value / interval).floor() * interval).to_string(); // Convert bucket to string for BTreeMap
+              *histogram.entry(bucket).or_insert(0) += 1;
+            }
+            Err(_) => {
+              return Err(QueryError::CoreDBError(format!(
+                "Could not parse field value for field '{}'",
+                field_name
+              )))
+            }
+          }
+        }
+      }
+    }
+
+    if histogram.is_empty() {
+      Err(QueryError::SearchLogsError(format!(
+        "No valid data found for field '{}'",
+        field_name
+      )))
+    } else {
+      Ok(histogram)
+    }
+  }
+
+  pub fn date_histogram(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+    interval: chrono::Duration,
+  ) -> Result<BTreeMap<String, usize>, QueryError> {
+    let mut histogram = BTreeMap::new();
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+
+        if let Some(field_value_str) = log_message.get_fields().get(field_name) {
+          if let Ok(timestamp) = field_value_str.parse::<i64>() {
+            // Convert timestamp to DateTime<Utc>
+            if let Some(datetime_utc) = Utc.timestamp_opt(timestamp, 0).single() {
+              // Calculate the lower bound of the interval containing the datetime
+              let lower_bound = datetime_utc - interval;
+              // Calculate the upper bound of the interval containing the datetime
+              let upper_bound = datetime_utc + interval;
+
+              // Determine which interval the datetime falls into
+              let rounded_datetime = if datetime_utc < lower_bound {
+                lower_bound
+              } else if datetime_utc >= upper_bound {
+                upper_bound
+              } else {
+                datetime_utc
+              };
+
+              // Convert rounded datetime to string for BTreeMap
+              let bucket = rounded_datetime.to_rfc3339();
+
+              *histogram.entry(bucket).or_insert(0) += 1;
+            } else {
+              return Err(QueryError::CoreDBError(format!(
+                "Invalid timestamp: {}",
+                timestamp
+              )));
+            }
+          } else {
+            return Err(QueryError::CoreDBError(format!(
+              "Could not parse date field value for field '{}'",
+              field_name
+            )));
+          }
+        }
+      }
+    }
+
+    if histogram.is_empty() {
+      Err(QueryError::SearchLogsError(format!(
+        "No valid data found for date field '{}'",
+        field_name
+      )))
+    } else {
+      Ok(histogram)
+    }
+  }
+
+  fn set_of_terms(
+    &self,
+    doc_ids: &Vec<u32>,
+    field_name: &str,
+    size: Option<usize>, // Maximum number of terms to include in the result
+    min_doc_count: Option<usize>, // Minimum count to include a term in the result
+    order: Option<&str>, // "asc" or "desc" for ordering by count
+  ) -> Result<HashMap<String, usize>, QueryError> {
+    let mut term_counts = HashMap::new();
+
+    for &doc_id in doc_ids {
+      if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+        let log_message = log_message.value();
+        if let Some(term) = log_message.get_fields().get(field_name) {
+          *term_counts.entry(term.clone()).or_insert(0) += 1;
+        }
+      }
+    }
+
+    // Apply min_doc_count filter
+    if let Some(min_count) = min_doc_count {
+      term_counts.retain(|_, &mut count| count >= min_count);
+    }
+
+    // Convert to BTreeMap for optional sorting
+    let mut sorted_counts: BTreeMap<_, _> = term_counts.into_iter().collect();
+
+    // Apply ordering
+    if let Some(order) = order {
+      let mut items: Vec<_> = sorted_counts.into_iter().collect();
+      if order == "desc" {
+        items.sort_by(|a, b| b.1.cmp(&a.1));
+      } else {
+        items.sort_by(|a, b| a.1.cmp(&b.1));
+      }
+      sorted_counts = items.into_iter().collect();
+    }
+
+    // Apply size limit
+    let limited_counts: HashMap<String, usize> = if let Some(size) = size {
+      sorted_counts.into_iter().take(size).collect()
+    } else {
+      sorted_counts.into_iter().collect()
+    };
+
+    if limited_counts.is_empty() {
+      Err(QueryError::SearchLogsError(format!(
+        "No terms found for field '{}'",
+        field_name
+      )))
+    } else {
+      Ok(limited_counts)
+    }
+  }
+
+  // *** Pipeline Aggregation Query Support ***
+
+  /// Compute the average value for a specified field across buckets produced by a parent aggregation.
+  fn avg_bucket(
+    &self,
+    buckets: &HashMap<String, Vec<u32>>,
+    field_name: &str,
+  ) -> Result<HashMap<String, f64>, QueryError> {
+    let mut averages = HashMap::new();
+
+    for (bucket_key, doc_ids) in buckets {
+      let mut sum = 0.0;
+      let mut count = 0;
+
+      for &doc_id in doc_ids {
+        if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+          let log_message = log_message.value();
+
+          if let Some(field_value_str) = log_message.get_fields().get(field_name) {
+            match field_value_str.parse::<f64>() {
+              Ok(field_value) => {
+                sum += field_value;
+                count += 1;
+              }
+              Err(_) => {
+                return Err(QueryError::SearchLogsError(format!(
+                  "Could not parse field value for field '{}' in document ID {}",
+                  field_name, doc_id
+                )));
+              }
+            }
+          }
+        }
+      }
+
+      if count > 0 {
+        averages.insert(bucket_key.clone(), sum / count as f64);
+      } else {
+        // Optionally handle the case where a bucket has no valid data
+        averages.insert(bucket_key.clone(), 0.0);
+      }
+    }
+
+    Ok(averages)
+  }
+
+  /// Compute the sum of values for a specified field across buckets produced by a parent aggregation.
+  fn sum_bucket(
+    &self,
+    buckets: &HashMap<String, Vec<u32>>,
+    field_name: &str,
+  ) -> Result<HashMap<String, f64>, QueryError> {
+    let mut sums = HashMap::new();
+
+    for (bucket_key, doc_ids) in buckets {
+      let mut sum = 0.0;
+
+      for &doc_id in doc_ids {
+        if let Some(log_message) = self.get_forward_map().get(&doc_id) {
+          let log_message = log_message.value();
+
+          if let Some(field_value_str) = log_message.get_fields().get(field_name) {
+            match field_value_str.parse::<f64>() {
+              Ok(field_value) => {
+                sum += field_value;
+              }
+              Err(_) => {
+                return Err(QueryError::SearchLogsError(format!(
+                  "Could not parse field value for field '{}' in document ID {}",
+                  field_name, doc_id
+                )));
+              }
+            }
+          }
+        }
+      }
+
+      sums.insert(bucket_key.clone(), sum);
+    }
+
+    Ok(sums)
+  }
+
+  fn cumulative_sum(
+    &self,
+    buckets: &HashMap<String, Vec<u32>>,
+    field_name: &str,
+  ) -> Result<HashMap<String, f64>, QueryError> {
+    let mut cumulative_sum = 0.0;
+    let mut cumulative_sums = HashMap::new();
+
+    // Assuming buckets are sorted by key (e.g., timestamp or other numeric key)
+    for (bucket_key, doc_ids) in buckets.iter() {
+      let sum_for_bucket: f64 = doc_ids
+        .iter()
+        .filter_map(|&doc_id| {
+          self.get_forward_map().get(&doc_id).and_then(|log_message| {
+            log_message
+              .value()
+              .get_fields()
+              .get(field_name)
+              .and_then(|value_str| value_str.parse::<f64>().ok())
+          })
+        })
+        .sum();
+
+      cumulative_sum += sum_for_bucket;
+      cumulative_sums.insert(bucket_key.clone(), cumulative_sum);
+    }
+
+    Ok(cumulative_sums)
+  }
+
+  pub fn moving_avg(
+    &self,
+    buckets: &HashMap<String, Vec<u32>>,
+    field_name: &str,
+    window_size: usize,
+  ) -> Result<HashMap<String, f64>, QueryError> {
+    let mut moving_averages = HashMap::new();
+    let mut values_queue: VecDeque<f64> = VecDeque::new();
+    let mut sum = 0.0;
+
+    for (bucket_key, doc_ids) in buckets.iter() {
+      let value = self.avg(doc_ids, field_name, true)?;
+      // Adjustments as per the context
+      sum += value;
+      values_queue.push_back(value);
+      if values_queue.len() > window_size {
+        sum -= values_queue.pop_front().unwrap();
+      }
+      let avg = sum / values_queue.len() as f64;
+      moving_averages.insert(bucket_key.clone(), avg);
+    }
+
+    Ok(moving_averages)
+  }
+
+  // TODO: Interval queries need intervals stored in the index. We need to decide if / how to support this.
+  // TODO: Span queries need spans stored in the index. We need to decide if / how to support this.
 }
 
 // TODO: We should probably test read locks.
 #[cfg(test)]
 mod tests {
+  use std::collections::HashMap;
+
   use super::*;
   use crate::{log::postings_list::PostingsList, segment_manager::segment::Segment};
+  use std::vec::Vec;
 
   fn create_mock_compressed_block(
     initial: u32,
@@ -389,7 +1386,7 @@ mod tests {
     let segment = create_mock_segment();
     let terms = vec!["unknown_term".to_string()];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(matches!(result, Err(QueryError::PostingsListError(_))));
   }
 
   #[test]
@@ -405,7 +1402,7 @@ mod tests {
     let segment = Segment::new();
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(matches!(result, Err(QueryError::PostingsListError(_))));
   }
 
   #[test]
@@ -448,7 +1445,7 @@ mod tests {
     let segment = create_mock_segment();
     let terms = vec!["unknown1".to_string(), "unknown2".to_string()];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(matches!(result, Err(QueryError::PostingsListError(_))));
   }
 
   #[test]
@@ -456,7 +1453,7 @@ mod tests {
     let segment = create_mock_segment();
     let terms = vec!["term1".to_string(), "unknown".to_string()];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(matches!(result, Err(QueryError::PostingsListError(_))));
   }
 
   #[test]
@@ -468,7 +1465,7 @@ mod tests {
       "term2".to_string(),
     ];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(matches!(result, Err(QueryError::PostingsListError(_))));
   }
 
   #[test]
@@ -489,7 +1486,7 @@ mod tests {
     let segment = create_mock_segment();
     let terms = vec!["".to_string(), "123".to_string(), "!@#".to_string()];
     let result = segment.get_postings_lists(&terms);
-    assert!(matches!(result, Err(AstError::PostingsListError(_))));
+    assert!(matches!(result, Err(QueryError::PostingsListError(_))));
   }
 
   #[test]
@@ -509,7 +1506,7 @@ mod tests {
     let postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
     let last_block_list: Vec<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> = Vec::new();
     let initial_values_list: Vec<Vec<u32>> = Vec::new();
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
 
     let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
@@ -536,7 +1533,7 @@ mod tests {
     let (postings_lists, last_block_list, initial_values_list, shortest_list_index) =
       result.unwrap();
 
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
     let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
       &last_block_list,
@@ -560,7 +1557,7 @@ mod tests {
       result.unwrap();
 
     assert_eq!(postings_lists.len(), 2);
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
     let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
       &last_block_list,
@@ -582,7 +1579,7 @@ mod tests {
     let postings_lists = vec![];
     let last_block_list = vec![];
     let initial_values_list = vec![];
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
 
     let result = segment.get_matching_doc_ids_with_logical_and(
       &postings_lists,
@@ -606,7 +1603,7 @@ mod tests {
       .get_postings_lists(&["term1".to_string(), "term2".to_string()])
       .unwrap();
 
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
     let result = segment.get_matching_doc_ids_with_logical_or(
       &postings_lists,
       &last_block_list,
@@ -619,7 +1616,7 @@ mod tests {
       "Accumulator should not be empty for non-empty postings lists"
     );
     // Check for uniqueness of document IDs
-    let unique_ids: std::collections::HashSet<_> = accumulator.iter().collect();
+    let unique_ids: Vec<_> = accumulator.iter().collect();
     assert_eq!(
       unique_ids.len(),
       accumulator.len(),
@@ -631,7 +1628,7 @@ mod tests {
   fn test_get_matching_doc_ids_with_logical_or_empty_lists() {
     let segment = create_mock_segment();
 
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
     let result = segment.get_matching_doc_ids_with_logical_or(&[], &[], &mut accumulator);
 
     assert!(result.is_ok());
@@ -647,7 +1644,7 @@ mod tests {
     let (postings_lists, last_block_list, _, _) =
       segment.get_postings_lists(&["term1".to_string()]).unwrap();
 
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
     let result = segment.get_matching_doc_ids_with_logical_or(
       &postings_lists,
       &last_block_list,
@@ -660,7 +1657,7 @@ mod tests {
       !accumulator.is_empty(),
       "Accumulator should not be empty for a single non-empty postings list"
     );
-    let unique_ids: std::collections::HashSet<_> = accumulator.iter().collect();
+    let unique_ids: Vec<_> = accumulator.iter().collect();
     assert_eq!(
       unique_ids.len(),
       accumulator.len(),
@@ -675,7 +1672,7 @@ mod tests {
       .get_postings_lists(&["term1".to_string(), "term2".to_string()])
       .unwrap();
 
-    let mut accumulator: HashSet<u32> = HashSet::new();
+    let mut accumulator: Vec<u32> = Vec::new();
     let result = segment.get_matching_doc_ids_with_logical_or(
       &postings_lists,
       &last_block_list,
@@ -683,11 +1680,54 @@ mod tests {
     );
 
     assert!(result.is_ok());
-    let unique_ids: std::collections::HashSet<_> = accumulator.iter().collect();
+    let unique_ids: Vec<_> = accumulator.iter().collect();
     assert_eq!(
       unique_ids.len(),
       accumulator.len(),
       "Document IDs should be unique after deduplication"
     );
+  }
+
+  #[test]
+  fn test_match_exact_phrase() {
+    let segment = Segment::new();
+
+    segment
+      .append_log_message(1001, &HashMap::new(), "log 1")
+      .unwrap();
+    segment
+      .append_log_message(1002, &HashMap::new(), "log 2")
+      .unwrap();
+    segment
+      .append_log_message(1003, &HashMap::new(), "log 3")
+      .unwrap();
+
+    // Get all log message IDs from the forward map.
+    let all_log_ids: Vec<u32> = segment
+      .get_forward_map()
+      .iter()
+      .map(|entry| *entry.key())
+      .collect();
+
+    // Test matching exact phrase in text.
+    let log_ids_text = segment.get_exact_phrase_matches(&all_log_ids, None, "log 2");
+    assert_eq!(log_ids_text, Vec::from_iter(vec![1]));
+
+    // Test matching exact phrase in a specific field.
+    let mut fields = HashMap::new();
+    fields.insert("field_name".to_string(), "log 3".to_string());
+    segment
+      .append_log_message(1004, &fields, "some message")
+      .unwrap();
+
+    let all_log_ids_with_fields: Vec<u32> = segment
+      .get_forward_map()
+      .iter()
+      .map(|entry| *entry.key())
+      .collect();
+
+    let log_ids_field =
+      segment.get_exact_phrase_matches(&all_log_ids_with_fields, Some("field_name"), "log 3");
+    assert_eq!(log_ids_field, Vec::from_iter(vec![3]));
   }
 }
