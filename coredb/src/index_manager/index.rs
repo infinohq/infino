@@ -54,11 +54,11 @@ pub struct Index {
   /// Directory where the index is serialized.
   index_dir_path: String,
 
-  /// Mutex for locking the directory where the index is committed / read from, so that two threads
-  /// don't write the directory at the same time.
+  /// Mutex for locking the directory where the index is committed / refreshed from, so that two threads
+  /// don't write the directory at the same time, or an index isn't refreshed while it's being committed.
   /// Essentially, this mutex serializes the commit() and refresh() operations on this index.
-  // Use TokioMutex, as it needs to be held across await points.
-  index_dir_lock: Arc<TokioMutex<thread::ThreadId>>,
+  /// Use TokioMutex, as it needs to be held across await points.
+  commit_refresh_lock: Arc<TokioMutex<thread::ThreadId>>,
 
   /// Memory budget for searching this index.
   search_memory_budget_bytes: u64,
@@ -154,7 +154,7 @@ impl Index {
       all_segments_summaries,
       memory_segments_map,
       index_dir_path: index_dir.to_owned(),
-      index_dir_lock,
+      commit_refresh_lock: index_dir_lock,
       search_memory_budget_bytes,
       storage,
       uncommitted_segment_numbers,
@@ -543,7 +543,7 @@ impl Index {
     // Lock to make sure only one thread calls commit at a time. If the lock isn't avilable, we simply
     // log a message and return - so that the caller, typically on a schedule, can retry on the next
     // scheduled run.
-    let lock = self.index_dir_lock.try_lock();
+    let lock = self.commit_refresh_lock.try_lock();
     let mut lock = match lock {
       Ok(lock) => lock,
       Err(_) => {
@@ -654,7 +654,7 @@ impl Index {
       all_segments_summaries: DashMap::new(),
       memory_segments_map: DashMap::new(),
       index_dir_path: index_dir_path.to_owned(),
-      index_dir_lock,
+      commit_refresh_lock: index_dir_lock,
       search_memory_budget_bytes,
       storage,
       uncommitted_segment_numbers,
