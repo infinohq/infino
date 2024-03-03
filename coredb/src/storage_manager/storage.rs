@@ -155,6 +155,7 @@ impl Storage {
     &self.storage_type
   }
 
+  /// Create a directory. Only relevant for StorageType::Local, no-op for the rest storage types.
   pub fn create_dir(&self, dir: &str) -> Result<(), CoreDBError> {
     // We only need to create the directory for local storage. For cloud storage such as
     // AWS, directories are just implied hierarchies by path separator '/'.
@@ -169,6 +170,8 @@ impl Storage {
     Ok(())
   }
 
+  /// Remove a directory. Deletes the directory for StorageType::Local, deletes all the files
+  /// with the given prefix for the remaining storage types.
   pub async fn remove_dir(&self, dir: &str) -> Result<(), CoreDBError> {
     match self.storage_type {
       StorageType::Local => {
@@ -197,7 +200,7 @@ impl Storage {
     Ok(())
   }
 
-  // Returns true if the specified path exists.
+  /// Returns true if the specified path exists.
   pub async fn check_path_exists(&self, path_str: &str) -> bool {
     let path = Path::from(path_str);
 
@@ -207,6 +210,7 @@ impl Storage {
     result.is_ok()
   }
 
+  /// Get a list of all files in the specified directory.
   pub async fn read_dir(&self, path_str: &str) -> Result<Vec<String>, CoreDBError> {
     let path = Path::from(path_str);
 
