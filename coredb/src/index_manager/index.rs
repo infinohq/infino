@@ -437,6 +437,16 @@ impl Index {
         .unwrap();
     }
 
+    // Update start and end time of the summary of the current segment.
+    {
+      // current_segment_summary is a reference in DashMap. Write this in a block so that it is dropped
+      // at the end of the block.
+      let current_segment_summary = self.all_segments_summaries.get(&current_segment_number);
+      if let Some(current_segment_summary) = current_segment_summary {
+        current_segment_summary.update_start_end_time(time);
+      }
+    }
+
     // Check if a new segment needs to be created, and if so - create it.
     self.check_and_create_new_segment().await;
 
