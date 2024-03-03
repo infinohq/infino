@@ -33,15 +33,15 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, put};
 use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
+use crossbeam::atomic::AtomicCell;
 use hyper::StatusCode;
+use lazy_static::lazy_static;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
-
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -56,6 +56,10 @@ use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
+
+lazy_static! {
+  static ref IS_SHUTDOWN: AtomicCell<bool> = AtomicCell::new(false);
+}
 
 /// Represents application state.
 struct AppState {
@@ -102,11 +106,12 @@ struct SummarizeQueryResponse {
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
 /// can be asyncronously committed), and triggers retention policy every hour
-async fn commit_in_loop(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
+async fn commit_in_loop(state: Arc<AppState>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let policy_interval_ms = 3600000; // 1hr in ms
-  let mut is_shutdown = false;
   loop {
+    let is_shutdown = IS_SHUTDOWN.load();
+
     // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
     // commit the current segment only when the server is shutting down.
     let result = state.coredb.commit(is_shutdown).await;
@@ -136,16 +141,9 @@ async fn commit_in_loop(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
       error!("Error committing to coredb: {}", e);
     }
 
-    let shutdown = shutdown_flag.lock().await;
-    if *shutdown {
-      // Received shutdown signal - set the is_shutdown flag.
-      is_shutdown = true;
-    }
-    drop(shutdown); // Explicitly drop the lock before sleeping
-
     // Sleep for some time before committing again.
     sleep(Duration::from_millis(100)).await;
-  }
+  } // end loop {..}
 }
 
 /// Axum application for Infino server.
@@ -153,7 +151,7 @@ async fn app(
   config_dir_path: &str,
   image_name: &str,
   image_tag: &str,
-) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
+) -> (Router, JoinHandle<()>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -195,11 +193,7 @@ async fn app(
 
   // Start a thread to periodically commit coredb.
   info!("Spawning new thread to periodically commit");
-  let commit_thread_shutdown_flag = Arc::new(Mutex::new(false));
-  let commit_thread_handle = tokio::spawn(commit_in_loop(
-    shared_state.clone(),
-    commit_thread_shutdown_flag.clone(),
-  ));
+  let commit_thread_handle = tokio::spawn(commit_in_loop(shared_state.clone()));
 
   // Build our application with a route
   let router: Router = Router::new()
@@ -222,12 +216,7 @@ async fn app(
     .with_state(shared_state.clone())
     .layer(TraceLayer::new_for_http());
 
-  (
-    router,
-    commit_thread_handle,
-    commit_thread_shutdown_flag,
-    shared_state,
-  )
+  (router, commit_thread_handle, shared_state)
 }
 
 async fn run_server() {
@@ -239,8 +228,7 @@ async fn run_server() {
   let image_tag = "3";
 
   // Create app.
-  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) =
-    app(config_dir_path, image_name, image_tag).await;
+  let (app, commit_thread_handle, shared_state) = app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -271,11 +259,9 @@ async fn run_server() {
       .expect("Could not stop rabbitmq container");
   }
 
+  // Set the flag to indicate the commit thread to shutdown, and wait for it to finish.
+  IS_SHUTDOWN.store(true);
   info!("Shutting down commit thread and waiting for it to finish...");
-
-  // Signal the commit thread to shutdown, wake it up, and wait for it to finish.
-  let mut commit_thread_shutdown_flag_lock = commit_thread_shutdown_flag.lock().await;
-  *commit_thread_shutdown_flag_lock = true;
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
@@ -1180,7 +1166,7 @@ mod tests {
     );
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Check whether the / works.
     let response = app
@@ -1371,7 +1357,7 @@ mod tests {
     );
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Create an index.
     let index_name = "test_index";
