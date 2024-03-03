@@ -54,6 +54,10 @@ pub struct Index {
   /// Directory where the index is serialized.
   index_dir_path: String,
 
+  /// Mutex for locking new segment creation - so that only one thread creates a new segment at a time.
+  /// Use TokioMutex, as it needs to be held across await points.
+  create_new_segment_lock: Arc<TokioMutex<thread::ThreadId>>,
+
   /// Mutex for locking the directory where the index is committed / refreshed from, so that two threads
   /// don't write the directory at the same time, or an index isn't refreshed while it's being committed.
   /// Essentially, this mutex serializes the commit() and refresh() operations on this index.
@@ -145,7 +149,10 @@ impl Index {
     let memory_segments_map = DashMap::new();
     memory_segments_map.insert(current_segment_number, segment);
 
-    let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
+    let commit_refresh_lock: Arc<TokioMutex<thread::ThreadId>> =
+      Arc::new(TokioMutex::new(thread::current().id()));
+    let create_new_segment_lock: Arc<TokioMutex<thread::ThreadId>> =
+      Arc::new(TokioMutex::new(thread::current().id()));
 
     let uncommitted_segment_numbers = DashMap::new();
 
@@ -154,7 +161,8 @@ impl Index {
       all_segments_summaries,
       memory_segments_map,
       index_dir_path: index_dir.to_owned(),
-      commit_refresh_lock: index_dir_lock,
+      commit_refresh_lock,
+      create_new_segment_lock,
       search_memory_budget_bytes,
       storage,
       uncommitted_segment_numbers,
@@ -296,6 +304,21 @@ impl Index {
     if num_log_messages < 100_000 && num_metric_points < 1_000_000 {
       return;
     }
+
+    // Lock to make sure only one thread creates a new segment at a time. If the lock isn't avilable, we simply
+    // log a message and return - as it means another thread is already in the process of creating a new segment.
+    let lock = self.create_new_segment_lock.try_lock();
+    let mut lock = match lock {
+      Ok(lock) => lock,
+      Err(_) => {
+        info!(
+          "Could not acquire create new segment lock for index at path {}. Another thread likely already creating a new segment.",
+          self.index_dir_path
+        );
+        return;
+      }
+    };
+    *lock = thread::current().id();
 
     // Create a new segment since the current one has become too big.
     let new_segment = Segment::new();
@@ -643,7 +666,8 @@ impl Index {
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let (metadata, _): (Metadata, _) = storage.read(metadata_path.as_str()).await?;
 
-    let index_dir_lock = Arc::new(TokioMutex::new(thread::current().id()));
+    let commit_refresh_lock = Arc::new(TokioMutex::new(thread::current().id()));
+    let create_new_segment_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
     // No segment is uncommitted when the index is refreshed.
     let uncommitted_segment_numbers = DashMap::new();
@@ -654,7 +678,8 @@ impl Index {
       all_segments_summaries: DashMap::new(),
       memory_segments_map: DashMap::new(),
       index_dir_path: index_dir_path.to_owned(),
-      commit_refresh_lock: index_dir_lock,
+      commit_refresh_lock,
+      create_new_segment_lock,
       search_memory_budget_bytes,
       storage,
       uncommitted_segment_numbers,

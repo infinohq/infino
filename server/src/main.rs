@@ -107,7 +107,7 @@ async fn commit_in_loop(state: Arc<AppState>, shutdown_flag: Arc<Mutex<bool>>) {
   let policy_interval_ms = 3600000; // 1hr in ms
   let mut is_shutdown = false;
   loop {
-    // Commit the index to object store. Set commit_current_segment to is_shurdown -- i.e.,
+    // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
     // commit the current segment only when the server is shutting down.
     let result = state.coredb.commit(is_shutdown).await;
 
@@ -274,7 +274,8 @@ async fn run_server() {
   info!("Shutting down commit thread and waiting for it to finish...");
 
   // Signal the commit thread to shutdown, wake it up, and wait for it to finish.
-  *commit_thread_shutdown_flag.lock().await = true;
+  let mut commit_thread_shutdown_flag_lock = commit_thread_shutdown_flag.lock().await;
+  *commit_thread_shutdown_flag_lock = true;
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
