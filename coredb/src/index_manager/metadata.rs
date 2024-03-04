@@ -17,10 +17,13 @@ pub struct Metadata {
   #[serde(with = "atomic_cell_serde")]
   current_segment_number: AtomicCell<u32>,
 
-  /// Threshold size of a segment in bytes. If the size of a segment exceeds this, a new segment
-  /// will be created in the next commit operation.
+  /// Log messages threshold for creating a new segment during appends.
   #[serde(with = "atomic_cell_serde")]
-  segment_size_threshold_bytes: AtomicCell<u64>,
+  append_log_messages_threshold: AtomicCell<u32>,
+
+  /// Metric points threshold for creating a new segment during appends.
+  #[serde(with = "atomic_cell_serde")]
+  append_metric_points_threshold: AtomicCell<u32>,
 }
 
 impl Metadata {
@@ -28,12 +31,14 @@ impl Metadata {
   pub fn new(
     segment_count: u32,
     current_segment_number: u32,
-    segment_size_threshold_bytes: u64,
+    append_log_messages_threshold: u32,
+    append_metric_points_threshold: u32,
   ) -> Metadata {
     Metadata {
       segment_count: AtomicCell::new(segment_count),
       current_segment_number: AtomicCell::new(current_segment_number),
-      segment_size_threshold_bytes: AtomicCell::new(segment_size_threshold_bytes),
+      append_log_messages_threshold: AtomicCell::new(append_log_messages_threshold),
+      append_metric_points_threshold: AtomicCell::new(append_metric_points_threshold),
     }
   }
 
@@ -58,14 +63,14 @@ impl Metadata {
     self.current_segment_number.store(value);
   }
 
-  /// Get the segment size threshold in bytes.
-  pub fn get_segment_size_threshold_bytes(&self) -> u64 {
-    self.segment_size_threshold_bytes.load()
+  /// Get append log messages threshold (new segment is created during appends after reaching this threshold)
+  pub fn get_append_log_messages_threshold(&self) -> u32 {
+    self.append_log_messages_threshold.load()
   }
 
-  /// Update the current segment number to the given value.
-  pub fn update_segment_size_threshold_bytes(&self, value: u64) {
-    self.segment_size_threshold_bytes.store(value);
+  /// Get append metric points threshold (new segment is created during appends after reaching this threshold)
+  pub fn get_append_metric_points_threshold(&self) -> u32 {
+    self.append_metric_points_threshold.load()
   }
 }
 
@@ -80,17 +85,18 @@ mod tests {
     is_sync_send::<Metadata>();
 
     // Check a newly created Metadata.
-    let m: Metadata = Metadata::new(10, 5, 1000);
+    let m: Metadata = Metadata::new(10, 5, 100, 1000);
 
     assert_eq!(m.get_segment_count(), 10);
     assert_eq!(m.get_current_segment_number(), 5);
-    assert_eq!(m.get_segment_size_threshold_bytes(), 1000);
+    assert_eq!(m.get_append_log_messages_threshold(), 100);
+    assert_eq!(m.get_append_metric_points_threshold(), 1000);
   }
 
   #[test]
   pub fn test_increment_and_update() {
     // Check the increment and update operations on Metadata.
-    let m: Metadata = Metadata::new(10, 5, 1000);
+    let m: Metadata = Metadata::new(10, 5, 100, 1000);
     assert_eq!(m.fetch_increment_segment_count(), 10);
     m.update_current_segment_number(7);
     assert_eq!(m.get_segment_count(), 11);

@@ -55,8 +55,9 @@ impl CoreDB {
         let coredb_settings = settings.get_coredb_settings();
         let index_dir_path = &coredb_settings.get_index_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
-        let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+        let append_log_messages_threshold = coredb_settings.get_append_log_messages_threshold();
+        let append_metric_points_threshold = coredb_settings.get_append_metric_points_threshold();
         let storage_type = coredb_settings.get_storage_type()?;
         let storage = Storage::new(&storage_type).await?;
 
@@ -79,8 +80,9 @@ impl CoreDB {
               let index = Index::new_with_threshold_params(
                 &storage_type,
                 &default_index_dir_path,
-                segment_size_threshold_bytes,
                 search_memory_budget_bytes,
+                append_log_messages_threshold,
+                append_metric_points_threshold,
               )
               .await?;
               index_map.insert(default_index_name.to_string(), index);
@@ -106,8 +108,9 @@ impl CoreDB {
             let index = Index::new_with_threshold_params(
               &storage_type,
               &default_index_dir_path,
-              segment_size_threshold_bytes,
               search_memory_budget_bytes,
+              append_log_messages_threshold,
+              append_metric_points_threshold,
             )
             .await?;
             index_map.insert(default_index_name.to_string(), index);
@@ -274,13 +277,12 @@ impl CoreDB {
   pub async fn refresh(config_dir_path: &str) -> Result<Self, CoreDBError> {
     // Read the settings and the index directory path.
     let settings = Settings::new(config_dir_path).unwrap();
-    let index_dir_path = settings.get_coredb_settings().get_index_dir_path();
-    let default_index_name = settings.get_coredb_settings().get_default_index_name();
+    let coredb_settings = settings.get_coredb_settings();
+    let index_dir_path = coredb_settings.get_index_dir_path();
+    let default_index_name = coredb_settings.get_default_index_name();
     let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
-    let search_memory_budget_bytes = settings
-      .get_coredb_settings()
-      .get_search_memory_budget_bytes();
-    let storage_type = settings.get_coredb_settings().get_storage_type()?;
+    let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+    let storage_type = coredb_settings.get_storage_type()?;
 
     // Refresh the index.
     let index = Index::refresh(
@@ -320,23 +322,20 @@ impl CoreDB {
 
   /// Create a new index.
   pub async fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
-    let index_dir_path = self.settings.get_coredb_settings().get_index_dir_path();
-    let segment_size_threshold_bytes = self
-      .settings
-      .get_coredb_settings()
-      .get_segment_size_threshold_bytes();
-    let search_memory_budget_bytes = self
-      .settings
-      .get_coredb_settings()
-      .get_search_memory_budget_bytes();
+    let coredb_settings = self.settings.get_coredb_settings();
+    let index_dir_path = coredb_settings.get_index_dir_path();
+    let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+    let append_log_messages_threshold = coredb_settings.get_append_log_messages_threshold();
+    let append_metric_points_threshold = coredb_settings.get_append_metric_points_threshold();
     let storage_type = self.settings.get_coredb_settings().get_storage_type()?;
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
     let index = Index::new_with_threshold_params(
       &storage_type,
       &index_dir_path,
-      segment_size_threshold_bytes,
       search_memory_budget_bytes,
+      append_log_messages_threshold,
+      append_metric_points_threshold,
     )
     .await?;
 

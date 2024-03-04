@@ -29,14 +29,17 @@ const ALL_SEGMENTS_FILE_NAME: &str = "all_segments.bin";
 /// File name to store index metadata.
 const METADATA_FILE_NAME: &str = "metadata.bin";
 
-/// Default threshold for size of segment used in some tests.
-/// A new segment will be created in the next commit when a segment exceeds this size.
-#[cfg(test)]
-const DEFAULT_SEGMENT_SIZE_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024; // 256MB
-
 /// Default memory budget for search in bytes used in some tests.
 #[cfg(test)]
 const DEFAULT_SEARCH_MEMORY_BUDGET_BYTES: u64 = 1024 * 1024 * 1024; // 1GB
+
+/// Default append log messages threshold used in some tests.
+#[cfg(test)]
+const DEFAULT_APPEND_LOG_MESSAGES_THRESHOLD: u32 = 1_000;
+
+/// Default append metric points threshold used in some tests.
+#[cfg(test)]
+const DEFAULT_APPEND_METRIC_POINTS_THRESHOLD: u32 = 10_000;
 
 #[derive(Debug)]
 /// Index for storing log messages and metric points.
@@ -84,8 +87,9 @@ impl Index {
     Index::new_with_threshold_params(
       storage_type,
       index_dir_path,
-      DEFAULT_SEGMENT_SIZE_THRESHOLD_BYTES,
       DEFAULT_SEARCH_MEMORY_BUDGET_BYTES,
+      DEFAULT_APPEND_LOG_MESSAGES_THRESHOLD,
+      DEFAULT_APPEND_METRIC_POINTS_THRESHOLD,
     )
     .await
   }
@@ -97,12 +101,13 @@ impl Index {
   pub async fn new_with_threshold_params(
     storage_type: &StorageType,
     index_dir: &str,
-    segment_size_threshold_bytes: u64,
     search_memory_budget_bytes: u64,
+    append_log_messages_threshold: u32,
+    append_metric_points_threshold: u32,
   ) -> Result<Self, CoreDBError> {
     info!(
-      "Creating index - storage type {:?}, dir {}, segment size threshold in megabytes: {}",
-      storage_type, index_dir, segment_size_threshold_bytes
+      "Creating index - storage type {:?}, dir {}",
+      storage_type, index_dir
     );
 
     let storage = Storage::new(storage_type).await?;
@@ -118,9 +123,6 @@ impl Index {
       // index_dir_path has metadata file, refresh the index instead of creating new one
       match Self::refresh(storage_type, index_dir, search_memory_budget_bytes).await {
         Ok(mut index) => {
-          index
-            .metadata
-            .update_segment_size_threshold_bytes(segment_size_threshold_bytes);
           index.search_memory_budget_bytes = search_memory_budget_bytes;
           return Ok(index);
         }
@@ -135,7 +137,12 @@ impl Index {
 
     // Create an initial segment.
     let segment = Segment::new();
-    let metadata = Metadata::new(0, 0, segment_size_threshold_bytes);
+    let metadata = Metadata::new(
+      0,
+      0,
+      append_log_messages_threshold,
+      append_metric_points_threshold,
+    );
 
     // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
@@ -311,7 +318,9 @@ impl Index {
     }
 
     // Check if the current segment is full - and return if it isn't.
-    if num_log_messages < 100_000 && num_metric_points < 1_000_000 {
+    if num_log_messages < self.metadata.get_append_log_messages_threshold()
+      && num_metric_points < self.metadata.get_append_metric_points_threshold()
+    {
       return;
     }
 
@@ -839,15 +848,21 @@ mod tests {
   async fn create_index_with_thresholds<'a>(
     name: &'a str,
     storage_type: &'a StorageType,
-    segment_size: u64,
     memory_budget: u64,
+    append_log_messages_threshold: u32,
+    append_metric_points_threshold: u32,
   ) -> (Index, String) {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
-    let index =
-      Index::new_with_threshold_params(storage_type, &index_dir_path, segment_size, memory_budget)
-        .await
-        .unwrap();
+    let index = Index::new_with_threshold_params(
+      storage_type,
+      &index_dir_path,
+      memory_budget,
+      append_log_messages_threshold,
+      append_metric_points_threshold,
+    )
+    .await
+    .unwrap();
     (index, index_dir_path)
   }
 
@@ -1079,8 +1094,10 @@ mod tests {
     for _ in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
+      // TODO: fix this.
       let (index, index_dir_path) =
-        create_index_with_thresholds("test_two_segments", &storage_type, 1500, 1024 * 1024).await;
+        create_index_with_thresholds("test_two_segments", &storage_type, 1024 * 1024, 10, 100)
+          .await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
@@ -1319,11 +1336,13 @@ mod tests {
     let start_time = Utc::now().timestamp_millis() as u64;
 
     // Create a new index with a low threshold for the segment size.
+    // TODO: fix this.
     let (mut index, index_dir_path) = create_index_with_thresholds(
       "test_multiple_segments_logs",
       &storage_type,
-      1024,
       1024 * 1024,
+      10,
+      100,
     )
     .await;
 
@@ -1433,9 +1452,15 @@ mod tests {
   #[tokio::test]
   async fn test_search_logs_count() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path) =
-      create_index_with_thresholds("test_search_logs_count", &storage_type, 1024, 1024 * 1024)
-        .await;
+    // TODO: fix this.
+    let (index, _index_dir_path) = create_index_with_thresholds(
+      "test_search_logs_count",
+      &storage_type,
+      1024 * 1024,
+      10,
+      100,
+    )
+    .await;
 
     let message_prefix = "message";
     let num_message_suffixes = 20;
@@ -1478,11 +1503,13 @@ mod tests {
   #[tokio::test]
   async fn test_multiple_segments_metric_points() {
     let storage_type = StorageType::Local;
+    // TODO: fix this.
     let (mut index, index_dir_path) = create_index_with_thresholds(
       "test_multiple_segments_metric_points",
       &storage_type,
-      1024,
       1024 * 1024,
+      10,
+      100,
     )
     .await;
 
@@ -1614,15 +1641,11 @@ mod tests {
     );
     let storage_type = StorageType::Local;
 
-    let index = Index::new_with_threshold_params(
-      &storage_type,
-      &index_dir_path,
-      // This size depends on the number of log messages added in each segment in the for loop below.
-      (0.0003 * 1024.0 * 1024.0) as u64,
-      1024 * 1024,
-    )
-    .await
-    .unwrap();
+    // TODO: fix this
+    let index =
+      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100)
+        .await
+        .unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -1673,15 +1696,17 @@ mod tests {
   #[tokio::test]
   async fn test_concurrent_append(num_segments_in_memory: u64) {
     let storage_type = StorageType::Local;
-    let segment_size_threshold_bytes = 1024;
-    let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
+    // TODO: fix this.
+    let search_memory_budget_bytes = num_segments_in_memory * 10; //segment_size_threshold_bytes;
 
     // Create a new index with a low threshold for the segment size.
+    // TODO: fix this
     let (index, index_dir_path) = create_index_with_thresholds(
       "test_concurrent_append",
       &storage_type,
-      segment_size_threshold_bytes,
       search_memory_budget_bytes,
+      10,
+      100,
     )
     .await;
 
@@ -1788,8 +1813,9 @@ mod tests {
     let (index, index_dir_path) = create_index_with_thresholds(
       "test_reusing_index_when_available",
       &storage_type,
-      1024,
       1024 * 1024,
+      10,
+      100,
     )
     .await;
 
@@ -1802,9 +1828,11 @@ mod tests {
     index.commit(true).await.expect("Could not commit index");
 
     // Create one more new index using same dir location
-    let index = Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024, 1024 * 1024)
-      .await
-      .unwrap();
+    // TODO: fix this
+    let index =
+      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100)
+        .await
+        .unwrap();
 
     let query_message = r#"{
         "query": {
@@ -1840,7 +1868,7 @@ mod tests {
     let storage_type = StorageType::Local;
 
     let index =
-      Index::new_with_threshold_params(&storage_type, index_dir_path, 1024, 1024 * 1024).await;
+      Index::new_with_threshold_params(&storage_type, index_dir_path, 1024 * 1024, 10, 100).await;
     assert!(index.is_ok());
   }
 
@@ -1852,14 +1880,13 @@ mod tests {
   #[tokio::test]
   async fn test_limited_memory(num_segments_in_memory: u64) {
     let storage_type = StorageType::Local;
-    let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
-    let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
+    let search_memory_budget_bytes = num_segments_in_memory * 10; //segment_size_threshold_bytes;
     let (index, _index_dir_path) = create_index_with_thresholds(
       "test_limited_memory",
       &storage_type,
-      // This size depends on the number of log messages added in each segment in the for loop below.
-      segment_size_threshold_bytes,
       search_memory_budget_bytes,
+      10,
+      100,
     )
     .await;
 
@@ -1962,9 +1989,9 @@ mod tests {
     let (index, _index_dir_path) = create_index_with_thresholds(
       "test_delete_multiple_segments",
       &storage_type,
-      // This size depends on the number of log messages added in each segment in the for loop below.
-      segment_size_threshold_bytes,
       search_memory_budget_bytes,
+      10,
+      100,
     )
     .await;
 
