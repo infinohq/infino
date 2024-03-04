@@ -1087,6 +1087,7 @@ impl Segment {
     }
   }
 
+  #[allow(dead_code)]
   pub fn date_histogram(
     &self,
     doc_ids: &Vec<u32>,
@@ -1147,6 +1148,7 @@ impl Segment {
     }
   }
 
+  #[allow(dead_code)]
   fn set_of_terms(
     &self,
     doc_ids: &Vec<u32>,
@@ -1205,6 +1207,7 @@ impl Segment {
   // *** Pipeline Aggregation Query Support ***
 
   /// Compute the average value for a specified field across buckets produced by a parent aggregation.
+  #[allow(dead_code)]
   fn avg_bucket(
     &self,
     buckets: &HashMap<String, Vec<u32>>,
@@ -1249,6 +1252,7 @@ impl Segment {
   }
 
   /// Compute the sum of values for a specified field across buckets produced by a parent aggregation.
+  #[allow(dead_code)]
   fn sum_bucket(
     &self,
     buckets: &HashMap<String, Vec<u32>>,
@@ -1285,6 +1289,7 @@ impl Segment {
     Ok(sums)
   }
 
+  #[allow(dead_code)]
   fn cumulative_sum(
     &self,
     buckets: &HashMap<String, Vec<u32>>,
@@ -1315,6 +1320,7 @@ impl Segment {
     Ok(cumulative_sums)
   }
 
+  #[allow(dead_code)]
   pub fn moving_avg(
     &self,
     buckets: &HashMap<String, Vec<u32>>,
