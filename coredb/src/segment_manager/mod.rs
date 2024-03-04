@@ -6,6 +6,6 @@
 //! Segments are time-sharded sections of telemetry data that are indexed for fast retrieval.
 
 mod metadata;
-pub(crate) mod search_logs;
+pub mod search_logs;
 pub(crate) mod search_metrics;
 pub(super) mod segment;

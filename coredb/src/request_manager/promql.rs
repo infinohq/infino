@@ -13,7 +13,7 @@
 use super::promql_object::{AggregationOperator, FunctionOperator, PromQLObject};
 use super::time_series::QueryTimeSeries;
 use crate::metric::constants::{MetricsQueryCondition, METRIC_NAME_PREFIX};
-use crate::utils::error::{AstError, SearchMetricsError};
+use crate::utils::error::QueryError;
 use crate::utils::request::{check_query_time, parse_time_range};
 use crate::{index_manager::index::Index, metric::metric_point::MetricPoint};
 use chrono::Utc;
@@ -97,7 +97,7 @@ impl PromQLDuration {
   }
 
   /// Sets the duration based on a Prometheus duration string (e.g., "2h", "15m").
-  pub fn set_duration(&mut self, duration_str: &str) -> Result<(), AstError> {
+  pub fn set_duration(&mut self, duration_str: &str) -> Result<(), QueryError> {
     let duration = parse_time_range(duration_str)?;
     self.end_time = Utc::now().timestamp() as u64;
     self.start_time = self.end_time.saturating_sub(duration.num_seconds() as u64);
@@ -107,7 +107,7 @@ impl PromQLDuration {
 
   /// Sets the offset for the duration based on a Prometheus-style duration string (e.g., "2h", "15m").
   #[allow(dead_code)]
-  pub fn set_offset(&mut self, offset_str: &str) -> Result<(), AstError> {
+  pub fn set_offset(&mut self, offset_str: &str) -> Result<(), QueryError> {
     let duration = parse_time_range(offset_str)?;
     self.offset = duration.num_seconds() as u64;
     Ok(())
@@ -129,13 +129,11 @@ impl Default for PromQLDuration {
 
 impl Index {
   /// Parses a PromQL query from a URL query string into an AST.
-  pub fn parse_query(
-    url_query: &str,
-  ) -> Result<pest::iterators::Pairs<'_, Rule>, SearchMetricsError> {
+  pub fn parse_query(url_query: &str) -> Result<pest::iterators::Pairs<'_, Rule>, QueryError> {
     debug!("PROMQL: Parsing URL query {:?},\n", url_query);
 
     PromQLParser::parse(Rule::start, url_query)
-      .map_err(|e| SearchMetricsError::JsonParseError(e.to_string()))
+      .map_err(|e| QueryError::JsonParseError(e.to_string()))
   }
 
   /// Walk the AST using an iterator and process each node
@@ -145,7 +143,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Traversing ast {:?},\n", nodes);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -168,7 +166,7 @@ impl Index {
         Ok(mut node_results) => {
           results.set_vector(node_results.take_vector());
         }
-        Err(AstError::UnsupportedQuery(_)) => {
+        Err(QueryError::UnsupportedQuery(_)) => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
           }
@@ -193,7 +191,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     let query_start_time = Utc::now().timestamp_millis() as u64;
 
     // Initialize processing based on the node's rule
@@ -203,7 +201,7 @@ impl Index {
           .process_expression(node, timeout, range_start_time, range_end_time)
           .await
       }
-      _ => Err(AstError::UnsupportedQuery(format!(
+      _ => Err(QueryError::UnsupportedQuery(format!(
         "Unsupported rule: {:?}",
         node.as_rule()
       ))),
@@ -221,7 +219,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Expression Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -267,7 +265,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("AND Expression Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -310,7 +308,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Equality Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -356,7 +354,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Comparison Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -408,7 +406,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Term Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -454,7 +452,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Factor Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -503,7 +501,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Exponent Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -546,7 +544,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Unary Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -588,7 +586,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Leaf Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -609,7 +607,7 @@ impl Index {
                 results.set_scalar(number);
               }
               Err(_) => {
-                return Err(AstError::UnsupportedQuery(
+                return Err(QueryError::UnsupportedQuery(
                   "Could not convert scalar text to float for processing".to_string(),
                 ))
               }
@@ -654,7 +652,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Aggregation Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -727,7 +725,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Functions Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -904,7 +902,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!("Vector Node {:?},\n", root_node);
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
@@ -959,7 +957,7 @@ impl Index {
   }
 
   /// Extract the parameters for a label match: name, value, and condition
-  fn process_label(&self, node: Pair<Rule>) -> Result<PromQLSelector, AstError> {
+  fn process_label(&self, node: Pair<Rule>) -> Result<PromQLSelector, QueryError> {
     debug!("Label Node {:?},\n", node);
 
     let mut label_name: Option<&str> = None;
@@ -981,7 +979,7 @@ impl Index {
               // Handle other conditions as needed
               _ => {
                 debug!("Unsupported condition encountered");
-                return Err(AstError::UnsupportedQuery(
+                return Err(QueryError::UnsupportedQuery(
                   "Unsupported condition".to_string(),
                 ));
               }
@@ -1004,7 +1002,7 @@ impl Index {
         condition,
       ))
     } else {
-      Err(AstError::UnsupportedQuery("Incomplete label".to_string()))
+      Err(QueryError::UnsupportedQuery("Incomplete label".to_string()))
     }
   }
 
@@ -1020,7 +1018,7 @@ impl Index {
     timeout: u64,
     selectors: &mut Vec<PromQLSelector>,
     duration: &PromQLDuration,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     debug!(
       "PromQL: Searching metrics with selectors {:?} and duration {:?}\n",
       selectors, duration
@@ -1073,7 +1071,7 @@ impl Index {
     timeout: u64,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<MetricPoint>, AstError> {
+  ) -> Result<Vec<MetricPoint>, QueryError> {
     debug!(
       "PromQL: Searching segments with args {:?} {:?} {} {}",
       labels, condition, range_start_time, range_end_time
@@ -1117,12 +1115,14 @@ impl Index {
 mod tests {
   use super::*;
   use crate::storage_manager::storage::StorageType;
+  use crate::utils::config::config_test_logger;
   use chrono::Utc;
   use pest::Parser;
   use tempdir::TempDir;
 
   // Helper function to create index
   async fn create_index(name: &str, num_metric_points: u32) -> (Index, String) {
+    config_test_logger();
     let storage_type = StorageType::Local;
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
@@ -1144,7 +1144,7 @@ mod tests {
     query: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<PromQLObject, AstError> {
+  ) -> Result<PromQLObject, QueryError> {
     let _ = env_logger::builder().is_test(true).try_init();
 
     let parsed_query = PromQLParser::parse(Rule::start, query)

@@ -10,7 +10,7 @@ use crate::utils::tokenize::tokenize;
 use crate::utils::tokenize::FIELD_DELIMITER;
 
 /// Struct to represent a log message with timestamp.
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct LogMessage {
   /// Timestamp for this log message.
   time: u64,
@@ -49,6 +49,12 @@ impl LogMessage {
   /// Get the fields.
   pub fn get_fields(&self) -> &HashMap<String, String> {
     &self.fields
+  }
+
+  /// Take for vector - getter to allow the fields to be
+  /// transferred out of the object and comply with Rust's ownership rules
+  pub fn take_fields(&mut self) -> HashMap<String, String> {
+    std::mem::take(&mut self.fields)
   }
 
   /// Get the message.

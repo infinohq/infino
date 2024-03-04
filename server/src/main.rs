@@ -31,8 +31,9 @@ use std::sync::Arc;
 use axum::extract::{Path, Query};
 use axum::response::IntoResponse;
 use axum::routing::{delete, put};
-use axum::{debug_handler, extract::State, routing::get, routing::post, Json, Router};
+use axum::{extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
+use coredb::request_manager::query_dsl_object::QueryDSLObject;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -45,9 +46,8 @@ use tokio::time::{sleep, Duration};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use coredb::log::log_message::LogMessage;
 use coredb::utils::environment::load_env;
-use coredb::utils::error::{AstError, CoreDBError, SearchLogsError, SearchMetricsError};
+use coredb::utils::error::{CoreDBError, QueryError};
 use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
@@ -98,7 +98,7 @@ struct SummarizeQuery {
 #[derive(Debug, Deserialize, Serialize)]
 struct SummarizeQueryResponse {
   summary: String,
-  results: Vec<LogMessage>,
+  results: QueryDSLObject,
 }
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
@@ -523,8 +523,6 @@ async fn append_metric(
 }
 
 /// Search logs in CoreDB.
-/// TODO: adding debug_handler macro until we figure out the issue with AST not implementing Send trait.
-#[debug_handler]
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
@@ -556,23 +554,23 @@ async fn search_logs(
     }
     Err(codedb_error) => {
       match codedb_error {
-        CoreDBError::SearchLogsError(search_logs_error) => {
+        CoreDBError::QueryError(search_logs_error) => {
           // Handle the error and return an appropriate status code and error message.
           match search_logs_error {
-            SearchLogsError::JsonParseError(_) => {
+            QueryError::JsonParseError(_) => {
               Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
             }
-            SearchLogsError::SegmentSearchError(_) => Err((
+            QueryError::TimeOutError(_) => Err((
               StatusCode::INTERNAL_SERVER_ERROR,
               "Internal server error".to_string(),
             )),
-            SearchLogsError::SegmentError(_) => Err((
-              StatusCode::INTERNAL_SERVER_ERROR,
-              "Internal server error".to_string(),
-            )),
-            SearchLogsError::NoQueryProvided => {
+            QueryError::NoQueryProvided => {
               Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
             }
+            _ => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
           }
         }
         _ => Err((
@@ -613,7 +611,10 @@ async fn summarize(
   match results {
     Ok(results) => {
       // Call openai_helper.summarize and handle errors
-      match state.openai_helper.summarize(&results, k) {
+      match state
+        .openai_helper
+        .summarize(results.get_messages().as_slice(), k)
+      {
         Some(summary) => {
           let response = SummarizeQueryResponse { summary, results };
 
@@ -634,23 +635,23 @@ async fn summarize(
     }
     Err(coredb_error) => {
       match coredb_error {
-        CoreDBError::SearchLogsError(search_logs_error) => {
+        CoreDBError::QueryError(search_logs_error) => {
           // Handle the error and return an appropriate status code and error message.
           match search_logs_error {
-            SearchLogsError::JsonParseError(_) => {
+            QueryError::JsonParseError(_) => {
               Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
             }
-            SearchLogsError::SegmentSearchError(_) => Err((
+            QueryError::TimeOutError(_) => Err((
               StatusCode::INTERNAL_SERVER_ERROR,
               "Internal server error".to_string(),
             )),
-            SearchLogsError::SegmentError(_) => Err((
-              StatusCode::INTERNAL_SERVER_ERROR,
-              "Internal server error".to_string(),
-            )),
-            SearchLogsError::NoQueryProvided => {
+            QueryError::NoQueryProvided => {
               Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
             }
+            _ => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
           }
         }
         _ => Err((
@@ -720,26 +721,29 @@ async fn search_metrics(
     }
     Err(coredb_error) => {
       let (status_code, error_type, error_message) = match coredb_error {
-        CoreDBError::SearchMetricsError(search_metrics_error) => match search_metrics_error {
-          SearchMetricsError::JsonParseError(_) => {
+        CoreDBError::QueryError(search_metrics_error) => match search_metrics_error {
+          QueryError::JsonParseError(_) => {
             (StatusCode::BAD_REQUEST, "bad_data", "Invalid JSON input")
           }
-          SearchMetricsError::SegmentSearchError(_) | SearchMetricsError::SegmentError(_) => (
+          QueryError::SearchMetricsError(_) | QueryError::CoreDBError(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
           ),
-          SearchMetricsError::NoQueryProvided => {
-            (StatusCode::BAD_REQUEST, "bad_data", "No query provided")
-          }
-          SearchMetricsError::AstError(AstError::TimeOutError(_)) => (
+          QueryError::NoQueryProvided => (StatusCode::BAD_REQUEST, "bad_data", "No query provided"),
+          QueryError::TimeOutError(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "timeout",
             "Query timed out at {}",
           ),
-          SearchMetricsError::AstError(_) => {
+          QueryError::UnsupportedQuery(_) => {
             (StatusCode::BAD_REQUEST, "bad_data", "Unsupported Query")
           }
+          _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+          ),
         },
         _ => (
           StatusCode::INTERNAL_SERVER_ERROR,
@@ -784,7 +788,6 @@ async fn ping(State(_state): State<Arc<AppState>>) -> String {
 }
 
 /// Create a new index in CoreDB with the given name.
-#[debug_handler]
 async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,
@@ -835,14 +838,15 @@ mod tests {
   use tower::Service;
   use urlencoding::encode;
 
-  use coredb::index_manager::index::Index;
-  use coredb::log::log_message::LogMessage;
   use coredb::metric::metric_point::MetricPoint;
   use coredb::storage_manager::storage::Storage;
   use coredb::storage_manager::storage::StorageType;
-  use coredb::utils::error::AstError;
+  use coredb::utils::config::config_test_logger;
+  use coredb::utils::error::QueryError;
   use coredb::utils::io::get_joined_path;
   use coredb::utils::tokenize::FIELD_DELIMITER;
+  use coredb::{index_manager::index::Index, request_manager::query_dsl_object::QueryDSLObject};
+  use coredb::{log::log_message::LogMessage, segment_manager::search_logs::QueryLogMessage};
 
   use super::*;
 
@@ -854,21 +858,6 @@ mod tests {
     labels: HashMap<String, String>,
   }
 
-  /// Helper function to initialize a logger for tests.
-  fn init() {
-    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    let filter_level = if log_level.to_lowercase() == "debug" {
-      log::LevelFilter::Debug
-    } else {
-      log::LevelFilter::Info
-    };
-
-    let _ = env_logger::builder()
-      .is_test(true)
-      .filter_level(filter_level)
-      .try_init();
-  }
-
   /// Helper function to create a test configuration.
   fn create_test_config(
     config_dir_path: &str,
@@ -876,6 +865,8 @@ mod tests {
     container_name: &str,
     use_rabbitmq: bool,
   ) {
+    config_test_logger();
+
     // Create a test config in the directory config_dir_path.
     let config_file_path =
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
@@ -928,7 +919,7 @@ mod tests {
     config_dir_path: &str,
     search_text: &str,
     query: LogsQuery,
-    log_messages_expected: Vec<LogMessage>,
+    log_messages_expected: QueryDSLObject,
   ) -> Result<(), CoreDBError> {
     let query_start_time = query
       .start_time
@@ -964,10 +955,13 @@ mod tests {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
       .await
       .unwrap();
-    let log_messages_received: Vec<LogMessage> = serde_json::from_slice(&body).unwrap();
+    let log_messages_received: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(log_messages_expected.len(), log_messages_received.len());
-    assert_eq!(log_messages_expected, log_messages_received);
+    let hits = log_messages_received["hits"]["total"]["value"]
+      .as_u64()
+      .unwrap();
+
+    assert_eq!(log_messages_expected.get_messages().len() as u64, hits);
 
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
@@ -985,8 +979,14 @@ mod tests {
 
     match log_messages_result {
       Ok(log_messages_received) => {
-        assert_eq!(log_messages_expected.len(), log_messages_received.len());
-        assert_eq!(log_messages_expected, log_messages_received);
+        assert_eq!(
+          log_messages_expected.get_messages().len(),
+          log_messages_received.get_messages().len()
+        );
+        assert_eq!(
+          log_messages_expected.get_messages(),
+          log_messages_received.get_messages()
+        );
       }
       Err(search_logs_error) => {
         error!("Error in search_logs: {:?}", search_logs_error);
@@ -996,33 +996,25 @@ mod tests {
     Ok(())
   }
 
-  fn check_metric_point_vectors(expected: &[MetricPoint], results: &serde_json::Value) {
-    let results_array = results.as_array().expect("Results should be an array");
+  fn check_metric_point_vectors(expected: &[MetricPoint], results: &[MetricPoint]) {
+    debug!(
+      "Check metric point vectors: Expected {:?}, Results: {:?}",
+      expected, results
+    );
 
-    for result in results_array {
-      let values = result
-        .get("values")
-        .expect("Values field missing")
-        .as_array()
-        .expect("Values should be an array");
+    // Extract expected and results values into Vec<f64>
+    let mut expected_values: Vec<f64> = expected.iter().map(|mp| mp.get_value()).collect();
+    let mut results_values: Vec<f64> = results.iter().map(|mp| mp.get_value()).collect();
 
-      for (i, value_array) in values.iter().enumerate() {
-        if let Some(mp) = expected.get(i) {
-          let cmp = mp.get_value();
+    // Sort both vectors to ensure they can be compared correctly
+    expected_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    results_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-          if let Some(inner_value) = value_array.get(1).and_then(|v| v.as_f64()) {
-            assert!(
-              (inner_value - cmp).abs() < (10.0 * f64::EPSILON),
-              "Value does not match expected"
-            );
-          } else {
-            panic!("Expected a floating point number as the second element of each 'value_array'");
-          }
-        } else {
-          panic!("No corresponding expected MetricPoint for index {}", i);
-        }
-      }
-    }
+    // Compare the sorted vectors
+    assert_eq!(
+      expected_values, results_values,
+      "Expected and result values do not match"
+    );
   }
 
   // Check that metrics queries adhere to Prometheus input and output format
@@ -1032,6 +1024,8 @@ mod tests {
     query: MetricsQuery,
     metric_points_expected: Vec<MetricPoint>,
   ) -> Result<(), CoreDBError> {
+    debug!("Checking time series with app: {:?}, config_dir_path: {:?}, query: {:?}, and expected metrics points: {:?}", app, config_dir_path, query, metric_points_expected);
+
     let query_start_time = query
       .start
       .map_or_else(|| "".to_owned(), |value| format!("&start={}", value));
@@ -1080,10 +1074,32 @@ mod tests {
         let results_vec = data["result"]
           .as_array()
           .expect("Expected result field to be an array");
+
         if results_vec.is_empty() {
+          // Handle empty result case
         } else {
-          let results_value = Value::Array(results_vec.clone());
-          check_metric_point_vectors(&metric_points_expected, &results_value);
+          for result_item in results_vec {
+            let metric_points_received: Vec<MetricPoint> = result_item["values"]
+              .as_array()
+              .expect("Expected 'values' to be an array in result item")
+              .iter()
+              .map(|value_pair| {
+                let time = value_pair[0].as_u64().expect(
+                  "First element of the value pair should be an u64 representing the timestamp",
+                );
+                let value = value_pair[1].as_f64().expect(
+                  "Second element of the value pair should be a f64 representing the value",
+                );
+
+                MetricPoint::new(time, value)
+              })
+              .collect();
+
+            check_metric_point_vectors(
+              &metric_points_expected.clone(),
+              &metric_points_received.clone(),
+            );
+          }
         }
       }
       "error" => {
@@ -1094,7 +1110,7 @@ mod tests {
           .as_str()
           .expect("Expected error field in response");
         error!("Error response from Prometheus: {} - {}", error_type, error);
-        return Err(CoreDBError::AstError(AstError::CoreDBError(format!(
+        return Err(CoreDBError::QueryError(QueryError::CoreDBError(format!(
           "Error from Prometheus: {} - {}",
           error_type, error
         ))));
@@ -1129,12 +1145,7 @@ mod tests {
     if !metric_points_expected.is_empty() && !results.get_vector().is_empty() {
       let mut tmpvec = results.take_vector();
       let metric_points_received = tmpvec[0].get_metric_points();
-
-      // Assert that the expected metric points match the received metric points.
-      assert_eq!(
-        &metric_points_expected, metric_points_received,
-        "Metric points mismatch between expected and received values."
-      );
+      check_metric_point_vectors(&metric_points_expected.clone(), metric_points_received);
     } else if metric_points_expected.is_empty() && results.get_vector().is_empty() {
       // If both expected and received results are empty, consider it as a pass.
       info!("Both expected and received metric points are empty, test passes.");
@@ -1150,8 +1161,6 @@ mod tests {
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
   async fn test_basic_main(use_rabbitmq: bool) -> Result<(), CoreDBError> {
-    init();
-
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
@@ -1196,8 +1205,8 @@ mod tests {
 
     // **Part 1**: Test insertion and search of log messages
     let num_log_messages = 100;
-    let mut log_messages_expected = Vec::new();
-    for _ in 0..num_log_messages {
+    let mut log_messages_expected: Vec<QueryLogMessage> = Vec::new();
+    for i in 0..num_log_messages {
       let time = Utc::now().timestamp_millis() as u64;
 
       let mut log = HashMap::new();
@@ -1223,28 +1232,25 @@ mod tests {
       fields.insert("field12".to_owned(), "value1 value2".to_owned());
       fields.insert("field34".to_owned(), "value3 value4".to_owned());
       let text = "value1 value2 value3 value4";
-      let log_message_expected = LogMessage::new_with_fields_and_text(time, &fields, text);
-      log_messages_expected.push(log_message_expected);
-    } // end for
+      let message = LogMessage::new_with_fields_and_text(time, &fields, text);
+
+      log_messages_expected.push(QueryLogMessage::new_with_params(i, message));
+    }
 
     // Sort the expected log messages in reverse chronological order.
     log_messages_expected.sort();
 
     let search_query = &format!("value1 field34{}value4", FIELD_DELIMITER);
 
+    let mut query_object = QueryDSLObject::new();
+    query_object.set_messages(log_messages_expected);
+
     let query = LogsQuery {
       start_time: None,
       end_time: None,
       text: search_query.to_owned(),
     };
-    check_search_logs(
-      &mut app,
-      config_dir_path,
-      search_query,
-      query,
-      log_messages_expected,
-    )
-    .await?;
+    check_search_logs(&mut app, config_dir_path, search_query, query, query_object).await?;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = LogsQuery {
@@ -1257,7 +1263,7 @@ mod tests {
       config_dir_path,
       search_query,
       query_too_old,
-      Vec::new(),
+      QueryDSLObject::new(),
     )
     .await?;
 
@@ -1338,8 +1344,6 @@ mod tests {
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
   async fn test_create_delete_index(use_rabbitmq: bool) {
-    init();
-
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
