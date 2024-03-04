@@ -431,9 +431,10 @@ impl Index {
       metric_name, labels, time, value
     );
 
-    // TODO: change have the number of uncommitted segments in the index to be configurable.
-    if self.uncommitted_segment_numbers.len() > 10 {
-      // We have more than 10 uncommitted segments, which means that the commit thread is not keeping up.
+    if self.uncommitted_segment_numbers.len() as u32
+      > self.metadata.get_uncommitted_segments_threshold()
+    {
+      // We have too many uncommitted segments, which means that the commit thread is not keeping up.
       // We cannot append to the current segment, so we return an error to the caller, asking it to slow down.
       return Err(CoreDBError::TooManyAppendsError());
     }
@@ -1102,10 +1103,15 @@ mod tests {
     for _ in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
-      // TODO: fix this.
-      let (index, index_dir_path) =
-        create_index_with_thresholds("test_two_segments", &storage_type, 1024 * 1024, 10, 100, 10)
-          .await;
+      let (index, index_dir_path) = create_index_with_thresholds(
+        "test_two_segments",
+        &storage_type,
+        1024 * 1024,
+        1000,
+        50000,
+        10,
+      )
+      .await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path =
@@ -1115,8 +1121,8 @@ mod tests {
       let mut expected_log_messages: Vec<String> = Vec::new();
       let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
-      let original_segment_num_log_messages = if append_log { 1000 } else { 0 };
-      let original_segment_num_metric_points = if append_metric_point { 50000 } else { 0 };
+      let mut original_segment_num_log_messages = if append_log { 999 } else { 0 };
+      let mut original_segment_num_metric_points = if append_metric_point { 49999 } else { 0 };
 
       for i in 0..original_segment_num_log_messages {
         let message = format!("{} {}", message_prefix, i);
@@ -1162,21 +1168,13 @@ mod tests {
       );
       assert!(original_segment_size > 0);
 
-      {
-        // Write these in a separate block so that reference of current_segment from all_segments_map
-        // does not persist when commit() is called (and all_segments_map is updated).
-        // Otherwise, this test may deadlock.
-        let (_, current_segment_ref) = index.get_current_segment_ref();
-        let current_segment = current_segment_ref.value();
-
-        assert_eq!(index.memory_segments_map.len(), 2);
-        assert_eq!(current_segment.get_log_message_count(), 0);
-        assert_eq!(current_segment.get_metric_point_count(), 0);
-      }
-
-      // Now add a log message and/or a metric point. This will still land in the current (empty) segment in the index.
       let mut new_segment_num_log_messages = 0;
       let mut new_segment_num_metric_points = 0;
+      // Now add a log message and/or a metric point.
+      // - In case of adding only a log message or a metric point, this will not create any new segment - but will
+      //   make the original segment full.
+      // - In case of adding both log message and metric point, the log message will make the original segment
+      //   full, and the metric point will be added to a new segment.
       if append_log {
         index
           .append_log_message(
@@ -1186,7 +1184,7 @@ mod tests {
           )
           .await
           .expect("Could not append log message");
-        new_segment_num_log_messages += 1;
+        original_segment_num_log_messages += 1;
       }
       if append_metric_point {
         index
@@ -1198,7 +1196,13 @@ mod tests {
           )
           .await
           .expect("Could not append metric point");
-        new_segment_num_metric_points += 1;
+        if append_log && append_metric_point {
+          // The log addition above made the current segment full and created a new segment - so this
+          // metric point would have landed in the new segment.
+          new_segment_num_metric_points += 1;
+        } else {
+          original_segment_num_metric_points += 1;
+        }
       }
 
       // Force a commit and refresh. The index should still have only 2 segments.
@@ -1220,6 +1224,7 @@ mod tests {
         original_segment.get_metric_point_count(),
         original_segment_num_metric_points
       );
+
       assert!(original_segment_size > 0);
 
       {
@@ -1239,7 +1244,7 @@ mod tests {
       }
 
       // Add one more log message and/or a metric point. This should land in the current_segment that has
-      // only 1 log message and/or metric point.
+      // only 0 log message and/or metric point.
       if append_log {
         index
           .append_log_message(
@@ -1342,22 +1347,21 @@ mod tests {
   async fn test_multiple_segments_logs() {
     let storage_type = StorageType::Local;
     let start_time = Utc::now().timestamp_millis() as u64;
+    let commit_after = 1000;
 
     // Create a new index with a low threshold for the segment size.
-    // TODO: fix this.
     let (mut index, index_dir_path) = create_index_with_thresholds(
       "test_multiple_segments_logs",
       &storage_type,
       1024 * 1024,
-      10,
-      100,
+      commit_after,
+      10000,
       10,
     )
     .await;
 
     let message_prefix = "message";
     let num_log_messages = 10000;
-    let commit_after = 1000;
 
     // Append log messages.
     let mut num_log_messages_from_last_commit = 0;
@@ -1461,19 +1465,18 @@ mod tests {
   #[tokio::test]
   async fn test_search_logs_count() {
     let storage_type = StorageType::Local;
-    // TODO: fix this.
     let (index, _index_dir_path) = create_index_with_thresholds(
       "test_search_logs_count",
       &storage_type,
       1024 * 1024,
-      10,
-      100,
+      100000,
+      1000000,
       10,
     )
     .await;
 
     let message_prefix = "message";
-    let num_message_suffixes = 20;
+    let num_message_suffixes = 10;
 
     // Create tokens with different numeric message suffixes
     for i in 1..num_message_suffixes {
@@ -1513,7 +1516,6 @@ mod tests {
   #[tokio::test]
   async fn test_multiple_segments_metric_points() {
     let storage_type = StorageType::Local;
-    // TODO: fix this.
     let (mut index, index_dir_path) = create_index_with_thresholds(
       "test_multiple_segments_metric_points",
       &storage_type,
@@ -1652,9 +1654,9 @@ mod tests {
     );
     let storage_type = StorageType::Local;
 
-    // TODO: fix this
+    // The log_messages_threshold is set to 2, so that a new segment gets created after every 2 messages.
     let index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100, 10)
+      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 2, 100, 10)
         .await
         .unwrap();
 
@@ -1699,26 +1701,25 @@ mod tests {
       .is_empty());
   }
 
-  #[test_case(32; "search_memory_budget = 32 * segment_size_threshold")]
-  #[test_case(24; "search_memory_budget = 24 * segment_size_threshold")]
-  #[test_case(16; "search_memory_budget = 16 * segment_size_threshold")]
-  #[test_case(8; "search_memory_budget = 8 * segment_size_threshold")]
-  #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
+  #[test_case(32; "search_memory_budget = 32 * some_segment_size")]
+  #[test_case(24; "search_memory_budget = 24 * some_segment_size")]
+  #[test_case(16; "search_memory_budget = 16 * some_segment_size")]
+  #[test_case(8; "search_memory_budget = 8 * some_segment_size")]
+  #[test_case(4; "search_memory_budget = 4 * some_segment_size")]
   #[tokio::test]
   async fn test_concurrent_append(num_segments_in_memory: u64) {
     let storage_type = StorageType::Local;
-    // TODO: fix this.
-    let search_memory_budget_bytes = num_segments_in_memory * 10; //segment_size_threshold_bytes;
+    let some_segment_size_bytes = 1024;
+    let search_memory_budget_bytes = num_segments_in_memory * some_segment_size_bytes;
 
     // Create a new index with a low threshold for the segment size.
-    // TODO: fix this
     let (index, index_dir_path) = create_index_with_thresholds(
       "test_concurrent_append",
       &storage_type,
       search_memory_budget_bytes,
-      10,
+      10000,
+      100000,
       100,
-      10,
     )
     .await;
 
@@ -1841,7 +1842,6 @@ mod tests {
     index.commit(true).await.expect("Could not commit index");
 
     // Create one more new index using same dir location
-    // TODO: fix this
     let index =
       Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100, 10)
         .await
@@ -1886,20 +1886,21 @@ mod tests {
     assert!(index.is_ok());
   }
 
-  #[test_case(32; "search_memory_budget = 32 * segment_size_threshold")]
-  #[test_case(24; "search_memory_budget = 24 * segment_size_threshold")]
-  #[test_case(16; "search_memory_budget = 16 * segment_size_threshold")]
-  #[test_case(8; "search_memory_budget = 8 * segment_size_threshold")]
-  #[test_case(4; "search_memory_budget = 4 * segment_size_threshold")]
+  #[test_case(32; "search_memory_budget = 32 * some_segment_size")]
+  #[test_case(24; "search_memory_budget = 24 * some_segment_size")]
+  #[test_case(16; "search_memory_budget = 16 * some_segment_size")]
+  #[test_case(8; "search_memory_budget = 8 * some_segment_size")]
+  #[test_case(4; "search_memory_budget = 4 * some_segment_size")]
   #[tokio::test]
   async fn test_limited_memory(num_segments_in_memory: u64) {
     let storage_type = StorageType::Local;
-    let search_memory_budget_bytes = num_segments_in_memory * 10; //segment_size_threshold_bytes;
+    let some_segment_size_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
+    let search_memory_budget_bytes = num_segments_in_memory * some_segment_size_bytes;
     let (index, _index_dir_path) = create_index_with_thresholds(
       "test_limited_memory",
       &storage_type,
       search_memory_budget_bytes,
-      10,
+      2,
       100,
       10,
     )
@@ -1998,16 +1999,16 @@ mod tests {
   async fn test_delete_multiple_segments() {
     // Create 20 segments and keep 4 segments only in memory
     let num_segments_in_memory = 4;
-    let segment_size_threshold_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
-    let search_memory_budget_bytes = num_segments_in_memory * segment_size_threshold_bytes;
+    let segment_size_approx_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
+    let search_memory_budget_bytes = num_segments_in_memory * segment_size_approx_bytes;
     let storage_type = StorageType::Local;
     let (index, _index_dir_path) = create_index_with_thresholds(
       "test_delete_multiple_segments",
       &storage_type,
       search_memory_budget_bytes,
-      10,
+      2,
+      20,
       100,
-      10,
     )
     .await;
 
