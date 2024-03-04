@@ -45,14 +45,11 @@ pub enum CoreDBError {
   #[error("IO Error: {0}")]
   IOError(String),
 
-  #[error("Search Logs Error: {0}")]
-  SearchLogsError(SearchLogsError),
+  #[error("Query Error: {0}")]
+  QueryError(QueryError),
 
-  #[error("Search Metrics Error: {0}")]
-  SearchMetricsError(SearchMetricsError),
-
-  #[error("Ast Error: {0}")]
-  AstError(AstError),
+  #[error("Segment not found error: {0}")]
+  SegmentNotFoundError(u32),
 
   #[error("Segment in memory: {0}")]
   SegmentInMemory(u32),
@@ -74,7 +71,7 @@ pub enum CoreDBError {
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
-pub enum AstError {
+pub enum QueryError {
   #[error("Invalid query")]
   InvalidQuery,
 
@@ -98,66 +95,21 @@ pub enum AstError {
 
   #[error("CoreDB error: {0}")]
   TimeOutError(String),
-}
 
-#[derive(Debug, Error, Eq, PartialEq)]
-pub enum LogError {
   #[error("Log mesage not found error: {0}")]
   LogMessageNotFound(u32),
-}
 
-#[derive(Debug, Error, Eq, PartialEq)]
-pub enum SegmentSearchError {
-  #[error("Ast error: {0}")]
-  AstError(AstError),
-
-  #[error("Log error: {0}")]
-  LogError(LogError),
-}
-
-#[derive(Debug, Error, Eq, PartialEq)]
-pub enum SegmentError {
-  #[error("Segment not found error: {0}")]
-  SegmentNotFoundError(u32),
-}
-
-#[derive(Debug, Error, Eq, PartialEq)]
-pub enum SummaryError {
   #[error("External summary error: {0}")]
-  ExternalSummaryError(String),
+  ExternalQueryError(String),
 
   #[error("Search logs error: {0}")]
-  SearchLogsError(SearchLogsError),
-}
+  SearchLogsError(String),
 
-#[derive(Debug, Error, Eq, PartialEq)]
-pub enum SearchLogsError {
+  #[error("Search metrics error: {0}")]
+  SearchMetricsError(String),
+
   #[error("Json parse error: {0}")]
   JsonParseError(String),
-
-  #[error("Segment search error: {0}")]
-  SegmentSearchError(SegmentSearchError),
-
-  #[error("Segment error: {0}")]
-  SegmentError(SegmentError),
-
-  #[error("No query provided")]
-  NoQueryProvided,
-}
-
-#[derive(Debug, Error, Eq, PartialEq)]
-pub enum SearchMetricsError {
-  #[error("Json parse error: {0}")]
-  JsonParseError(String),
-
-  #[error("Segment search error: {0}")]
-  SegmentSearchError(SegmentSearchError),
-
-  #[error("Segment error: {0}")]
-  SegmentError(SegmentError),
-
-  #[error("Ast error: {0}")]
-  AstError(AstError),
 
   #[error("No query provided")]
   NoQueryProvided,
@@ -175,20 +127,14 @@ impl From<std::io::Error> for CoreDBError {
   }
 }
 
-impl From<SearchLogsError> for CoreDBError {
-  fn from(error: SearchLogsError) -> Self {
-    CoreDBError::SearchLogsError(error)
+impl From<QueryError> for CoreDBError {
+  fn from(error: QueryError) -> Self {
+    CoreDBError::QueryError(error)
   }
 }
 
-impl From<SearchMetricsError> for CoreDBError {
-  fn from(error: SearchMetricsError) -> Self {
-    CoreDBError::SearchMetricsError(error)
-  }
-}
-
-impl From<CoreDBError> for AstError {
+impl From<CoreDBError> for QueryError {
   fn from(error: CoreDBError) -> Self {
-    AstError::CoreDBError(error.to_string())
+    QueryError::CoreDBError(error.to_string())
   }
 }

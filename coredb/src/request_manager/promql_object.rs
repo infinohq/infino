@@ -238,6 +238,13 @@ impl PromQLObject {
     self.object_type = PromQLObjectType::Scalar;
   }
 
+  /// Sorter for vector
+  pub fn sort_vector(&mut self) {
+    if self.is_vector() {
+      self.vector.sort();
+    }
+  }
+
   /// Getter for execution time
   pub fn get_execution_time(&mut self) -> u64 {
     self.execution_time
@@ -1240,8 +1247,10 @@ impl Ord for PromQLObject {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::utils::config::config_test_logger;
 
   fn create_metric_points_with_times(times: &[u64], values: &[f64]) -> Vec<MetricPoint> {
+    config_test_logger();
     times
       .iter()
       .zip(values.iter())
@@ -1255,6 +1264,7 @@ mod tests {
   }
 
   fn create_time_series(values: Vec<f64>, timestamp: u64) -> QueryTimeSeries {
+    config_test_logger();
     let metric_points = values
       .iter()
       .map(|&value| MetricPoint::new(timestamp, value))

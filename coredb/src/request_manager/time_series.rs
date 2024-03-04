@@ -2,7 +2,8 @@
 // https://www.elastic.co/licensing/elastic-license
 
 // This code is intended to be the base layer for implementing
-// metrics queries in Infino. Support for any specific query languages,
+// metrics queries in Infino, which reads a vector of metric points and labels
+// from the underlying TSDB. Support for any specific query languages,
 // such as PromQL, should be built on top of this. If basic functionality
 // is missing in this layer then please feel free to expand the capabilities
 // of this layer.
@@ -856,10 +857,8 @@ impl Serialize for QueryTimeSeries {
 
     let value_str = if points.len() > 1 { "values" } else { "value" };
 
-    // Serialize the points array under a custom field name, e.g., "values".
     state.serialize_field(value_str, &points)?;
 
-    // Finish serialization.
     state.end()
   }
 }
@@ -896,10 +895,12 @@ impl Default for QueryTimeSeries {
 mod tests {
 
   use super::*;
+  use crate::utils::config::config_test_logger;
 
   use std::collections::HashMap;
 
   fn create_metric_points(times: &[u64], values: &[f64]) -> Vec<MetricPoint> {
+    config_test_logger();
     times
       .iter()
       .zip(values.iter())

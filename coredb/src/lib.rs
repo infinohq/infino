@@ -8,7 +8,7 @@ pub mod log;
 pub mod metric;
 pub(crate) mod policy_manager;
 pub mod request_manager;
-pub(crate) mod segment_manager;
+pub mod segment_manager;
 pub mod storage_manager;
 pub mod utils;
 
@@ -21,19 +21,18 @@ use pest::error::Error as PestError;
 use policy_manager::retention_policy::TimeBasedRetention;
 use request_manager::promql::Rule;
 use request_manager::promql_object::PromQLObject;
+use request_manager::query_dsl_object::QueryDSLObject;
 use storage_manager::storage::Storage;
-use utils::error::SearchLogsError;
 
 use crate::index_manager::index::Index;
-use crate::log::log_message::LogMessage;
 use crate::policy_manager::retention_policy::RetentionPolicy;
 use crate::segment_manager::segment::Segment;
 use crate::utils::config::Settings;
-use crate::utils::error::{CoreDBError, SearchMetricsError};
+use crate::utils::error::{CoreDBError, QueryError};
 
-impl From<PestError<Rule>> for SearchMetricsError {
+impl From<PestError<Rule>> for QueryError {
   fn from(error: PestError<Rule>) -> Self {
-    SearchMetricsError::JsonParseError(error.to_string())
+    QueryError::JsonParseError(error.to_string())
   }
 }
 
@@ -197,7 +196,7 @@ impl CoreDB {
     json_query: &str,
     range_start_time: u64,
     range_end_time: u64,
-  ) -> Result<Vec<LogMessage>, CoreDBError> {
+  ) -> Result<QueryDSLObject, CoreDBError> {
     debug!(
       "COREDB: Search logs for URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
       url_query, json_query, range_start_time, range_end_time
@@ -212,7 +211,7 @@ impl CoreDB {
     // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
     if is_json_empty {
       if is_url_empty {
-        return Err(SearchLogsError::NoQueryProvided.into());
+        return Err(QueryError::NoQueryProvided.into());
       } else {
         // Update json_query with the constructed query from url_query
         json_query = format!(
@@ -228,7 +227,7 @@ impl CoreDB {
     let index = self
       .index_map
       .get(self.get_default_index_name())
-      .ok_or(SearchLogsError::NoQueryProvided)?;
+      .ok_or(QueryError::NoQueryProvided)?;
 
     index
       .value()
@@ -506,8 +505,24 @@ mod tests {
         .search_logs("message", "", start, end)
         .await
         .expect("Error in search_logs");
-      assert_eq!(results.first().unwrap().get_text(), "log message 2");
-      assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
+      assert_eq!(
+        results
+          .get_messages()
+          .first()
+          .unwrap()
+          .get_message()
+          .get_text(),
+        "log message 2"
+      );
+      assert_eq!(
+        results
+          .get_messages()
+          .get(1)
+          .unwrap()
+          .get_message()
+          .get_text(),
+        "log message 1"
+      );
     }
 
     // Search for metric points.

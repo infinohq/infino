@@ -5,12 +5,11 @@
 
 use std::env;
 
+use coredb::segment_manager::search_logs::QueryLogMessage;
 use log::error;
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
-
-use coredb::log::log_message::LogMessage;
 
 pub struct OpenAIHelper {
   client: Option<Client>,
@@ -31,7 +30,7 @@ impl OpenAIHelper {
 
   /// Summarize the given logs messages (first k) and retruns the summary, or return None in
   /// case of any error.
-  pub fn summarize(&self, logs: &[LogMessage], k: u32) -> Option<String> {
+  pub fn summarize(&self, logs: &[QueryLogMessage], k: u32) -> Option<String> {
     if self.client.is_none() {
       error!("OpenAI API client is not initialized, summarization will not work");
       return None;

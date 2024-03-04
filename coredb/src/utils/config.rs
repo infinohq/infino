@@ -15,6 +15,21 @@ use crate::storage_manager::{
   storage::{CloudStorageConfig, StorageType},
 };
 
+/// Helper function to initialize a logger for tests.
+pub fn config_test_logger() {
+  let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+  let filter_level = if log_level.to_lowercase() == "debug" {
+    log::LevelFilter::Debug
+  } else {
+    log::LevelFilter::Info
+  };
+
+  let _ = env_logger::builder()
+    .is_test(true)
+    .filter_level(filter_level)
+    .try_init();
+}
+
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 
 #[derive(Debug, Deserialize)]
