@@ -33,13 +33,13 @@ const METADATA_FILE_NAME: &str = "metadata.bin";
 #[cfg(test)]
 const DEFAULT_SEARCH_MEMORY_BUDGET_BYTES: u64 = 1024 * 1024 * 1024; // 1GB
 
-/// Default append log messages threshold used in some tests.
+/// Default log messages threshold used in some tests.
 #[cfg(test)]
-const DEFAULT_APPEND_LOG_MESSAGES_THRESHOLD: u32 = 1_000;
+const DEFAULT_LOG_MESSAGES_THRESHOLD: u32 = 1_000;
 
-/// Default append metric points threshold used in some tests.
+/// Default metric points threshold used in some tests.
 #[cfg(test)]
-const DEFAULT_APPEND_METRIC_POINTS_THRESHOLD: u32 = 10_000;
+const DEFAULT_METRIC_POINTS_THRESHOLD: u32 = 10_000;
 
 #[derive(Debug)]
 /// Index for storing log messages and metric points.
@@ -88,8 +88,8 @@ impl Index {
       storage_type,
       index_dir_path,
       DEFAULT_SEARCH_MEMORY_BUDGET_BYTES,
-      DEFAULT_APPEND_LOG_MESSAGES_THRESHOLD,
-      DEFAULT_APPEND_METRIC_POINTS_THRESHOLD,
+      DEFAULT_LOG_MESSAGES_THRESHOLD,
+      DEFAULT_METRIC_POINTS_THRESHOLD,
     )
     .await
   }
@@ -102,8 +102,8 @@ impl Index {
     storage_type: &StorageType,
     index_dir: &str,
     search_memory_budget_bytes: u64,
-    append_log_messages_threshold: u32,
-    append_metric_points_threshold: u32,
+    log_messages_threshold: u32,
+    metric_points_threshold: u32,
   ) -> Result<Self, CoreDBError> {
     info!(
       "Creating index - storage type {:?}, dir {}",
@@ -137,12 +137,7 @@ impl Index {
 
     // Create an initial segment.
     let segment = Segment::new();
-    let metadata = Metadata::new(
-      0,
-      0,
-      append_log_messages_threshold,
-      append_metric_points_threshold,
-    );
+    let metadata = Metadata::new(0, 0, log_messages_threshold, metric_points_threshold);
 
     // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
@@ -318,8 +313,8 @@ impl Index {
     }
 
     // Check if the current segment is full - and return if it isn't.
-    if num_log_messages < self.metadata.get_append_log_messages_threshold()
-      && num_metric_points < self.metadata.get_append_metric_points_threshold()
+    if num_log_messages < self.metadata.get_log_messages_threshold()
+      && num_metric_points < self.metadata.get_metric_points_threshold()
     {
       return;
     }
@@ -849,8 +844,8 @@ mod tests {
     name: &'a str,
     storage_type: &'a StorageType,
     memory_budget: u64,
-    append_log_messages_threshold: u32,
-    append_metric_points_threshold: u32,
+    log_messages_threshold: u32,
+    metric_points_threshold: u32,
   ) -> (Index, String) {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
@@ -858,8 +853,8 @@ mod tests {
       storage_type,
       &index_dir_path,
       memory_budget,
-      append_log_messages_threshold,
-      append_metric_points_threshold,
+      log_messages_threshold,
+      metric_points_threshold,
     )
     .await
     .unwrap();
@@ -1972,7 +1967,7 @@ mod tests {
     index.commit(true).await.expect("Could not commit");
     let segment_number = *index.get_current_segment_ref().1.key(); // Get current cos it has been committed to.
 
-    // try to delete segment
+    // Try to delete segment - this should give an error.
     index
       .delete_segment(segment_number)
       .await

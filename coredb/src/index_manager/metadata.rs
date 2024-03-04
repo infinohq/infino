@@ -19,11 +19,11 @@ pub struct Metadata {
 
   /// Log messages threshold for creating a new segment during appends.
   #[serde(with = "atomic_cell_serde")]
-  append_log_messages_threshold: AtomicCell<u32>,
+  log_messages_threshold: AtomicCell<u32>,
 
   /// Metric points threshold for creating a new segment during appends.
   #[serde(with = "atomic_cell_serde")]
-  append_metric_points_threshold: AtomicCell<u32>,
+  metric_points_threshold: AtomicCell<u32>,
 }
 
 impl Metadata {
@@ -31,14 +31,14 @@ impl Metadata {
   pub fn new(
     segment_count: u32,
     current_segment_number: u32,
-    append_log_messages_threshold: u32,
-    append_metric_points_threshold: u32,
+    log_messages_threshold: u32,
+    metric_points_threshold: u32,
   ) -> Metadata {
     Metadata {
       segment_count: AtomicCell::new(segment_count),
       current_segment_number: AtomicCell::new(current_segment_number),
-      append_log_messages_threshold: AtomicCell::new(append_log_messages_threshold),
-      append_metric_points_threshold: AtomicCell::new(append_metric_points_threshold),
+      log_messages_threshold: AtomicCell::new(log_messages_threshold),
+      metric_points_threshold: AtomicCell::new(metric_points_threshold),
     }
   }
 
@@ -63,14 +63,14 @@ impl Metadata {
     self.current_segment_number.store(value);
   }
 
-  /// Get append log messages threshold (new segment is created during appends after reaching this threshold)
-  pub fn get_append_log_messages_threshold(&self) -> u32 {
-    self.append_log_messages_threshold.load()
+  /// Get log messages threshold (new segment is created during appends after reaching this threshold)
+  pub fn get_log_messages_threshold(&self) -> u32 {
+    self.log_messages_threshold.load()
   }
 
-  /// Get append metric points threshold (new segment is created during appends after reaching this threshold)
-  pub fn get_append_metric_points_threshold(&self) -> u32 {
-    self.append_metric_points_threshold.load()
+  /// Get metric points threshold (new segment is created during appends after reaching this threshold)
+  pub fn get_metric_points_threshold(&self) -> u32 {
+    self.metric_points_threshold.load()
   }
 }
 
@@ -89,8 +89,8 @@ mod tests {
 
     assert_eq!(m.get_segment_count(), 10);
     assert_eq!(m.get_current_segment_number(), 5);
-    assert_eq!(m.get_append_log_messages_threshold(), 100);
-    assert_eq!(m.get_append_metric_points_threshold(), 1000);
+    assert_eq!(m.get_log_messages_threshold(), 100);
+    assert_eq!(m.get_metric_points_threshold(), 1000);
   }
 
   #[test]

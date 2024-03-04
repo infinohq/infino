@@ -10,8 +10,8 @@ default_index_name = ".default"
 
 # Maximum number of log messages or metric points in a segment during appends. A new segment
 # will be created when these thresholds are reached.
-append_log_messages_threshold = 100000       # 100K
-append_metric_points_threshold = 1000000     # 1M
+log_messages_threshold = 100000       # 100K
+metric_points_threshold = 1000000     # 1M
 
 # Memory budget for searching segments. Expect the actual memory used to be higher 
 # (but proportional) to this number.

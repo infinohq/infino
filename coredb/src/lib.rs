@@ -56,8 +56,8 @@ impl CoreDB {
         let index_dir_path = &coredb_settings.get_index_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
-        let append_log_messages_threshold = coredb_settings.get_append_log_messages_threshold();
-        let append_metric_points_threshold = coredb_settings.get_append_metric_points_threshold();
+        let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
+        let append_metric_points_threshold = coredb_settings.get_metric_points_threshold();
         let storage_type = coredb_settings.get_storage_type()?;
         let storage = Storage::new(&storage_type).await?;
 
@@ -325,8 +325,8 @@ impl CoreDB {
     let coredb_settings = self.settings.get_coredb_settings();
     let index_dir_path = coredb_settings.get_index_dir_path();
     let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
-    let append_log_messages_threshold = coredb_settings.get_append_log_messages_threshold();
-    let append_metric_points_threshold = coredb_settings.get_append_metric_points_threshold();
+    let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
+    let append_metric_points_threshold = coredb_settings.get_metric_points_threshold();
     let storage_type = self.settings.get_coredb_settings().get_storage_type()?;
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);

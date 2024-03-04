@@ -23,8 +23,8 @@ pub struct CoreDBSettings {
   index_dir_path: String,
   default_index_name: String,
 
-  append_log_messages_threshold: u32,
-  append_metric_points_threshold: u32,
+  log_messages_threshold: u32,
+  metric_points_threshold: u32,
   search_memory_budget_megabytes: f32,
   retention_days: u32,
   storage_type: String,
@@ -61,12 +61,12 @@ impl CoreDBSettings {
     DEFAULT_CONFIG_FILE_NAME
   }
 
-  pub fn get_append_log_messages_threshold(&self) -> u32 {
-    self.append_log_messages_threshold
+  pub fn get_log_messages_threshold(&self) -> u32 {
+    self.log_messages_threshold
   }
 
-  pub fn get_append_metric_points_threshold(&self) -> u32 {
-    self.append_metric_points_threshold
+  pub fn get_metric_points_threshold(&self) -> u32 {
+    self.metric_points_threshold
   }
 
   pub fn get_search_memory_budget_bytes(&self) -> u64 {
@@ -220,11 +220,9 @@ mod tests {
       file
         .write_all(b"default_index_name = \".default\"\n")
         .unwrap();
+      file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file
-        .write_all(b"append_log_messages_threshold = 1000\n")
-        .unwrap();
-      file
-        .write_all(b"append_metric_points_threshold = 10000\n")
+        .write_all(b"metric_points_threshold = 10000\n")
         .unwrap();
       file
         .write_all(b"segment_size_threshold_megabytes = 1024\n")
@@ -269,8 +267,8 @@ mod tests {
       let settings = Settings::new(config_dir_path).unwrap();
       let coredb_settings = settings.get_coredb_settings();
       assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
-      assert_eq!(coredb_settings.get_append_log_messages_threshold(), 1000);
-      assert_eq!(coredb_settings.get_append_metric_points_threshold(), 10000);
+      assert_eq!(coredb_settings.get_log_messages_threshold(), 1000);
+      assert_eq!(coredb_settings.get_metric_points_threshold(), 10000);
       assert_eq!(
         coredb_settings.get_search_memory_budget_bytes(),
         4 * 1024 * 1024
@@ -288,7 +286,7 @@ mod tests {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
 
-    // Create a config where a few keys such as 'append_log_messages_threshold' are missing.
+    // Create a config where a few keys such as 'log_messages_threshold' are missing.
     let config_file_path = get_joined_path(config_dir_path, DEFAULT_CONFIG_FILE_NAME);
     {
       let mut file = File::create(config_file_path).unwrap();
