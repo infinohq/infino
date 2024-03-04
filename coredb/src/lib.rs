@@ -58,6 +58,7 @@ impl CoreDB {
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
         let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
         let append_metric_points_threshold = coredb_settings.get_metric_points_threshold();
+        let uncommitted_segments_threshold = coredb_settings.get_uncommitted_segments_threshold();
         let storage_type = coredb_settings.get_storage_type()?;
         let storage = Storage::new(&storage_type).await?;
 
@@ -83,6 +84,7 @@ impl CoreDB {
                 search_memory_budget_bytes,
                 append_log_messages_threshold,
                 append_metric_points_threshold,
+                uncommitted_segments_threshold,
               )
               .await?;
               index_map.insert(default_index_name.to_string(), index);
@@ -111,6 +113,7 @@ impl CoreDB {
               search_memory_budget_bytes,
               append_log_messages_threshold,
               append_metric_points_threshold,
+              uncommitted_segments_threshold,
             )
             .await?;
             index_map.insert(default_index_name.to_string(), index);
@@ -327,6 +330,7 @@ impl CoreDB {
     let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
     let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
     let append_metric_points_threshold = coredb_settings.get_metric_points_threshold();
+    let uncommitted_segments_threshold = coredb_settings.get_uncommitted_segments_threshold();
     let storage_type = self.settings.get_coredb_settings().get_storage_type()?;
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
@@ -336,6 +340,7 @@ impl CoreDB {
       search_memory_budget_bytes,
       append_log_messages_threshold,
       append_metric_points_threshold,
+      uncommitted_segments_threshold,
     )
     .await?;
 
@@ -419,17 +424,23 @@ mod tests {
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name_line.as_bytes()).unwrap();
+      file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file
-        .write_all(b"segment_size_threshold_megabytes = 0.1\n")
+        .write_all(b"metric_points_threshold = 10000\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 0.4\n")
+        .unwrap();
+      file
+        .write_all(b"uncommitted_segments_threshold = 10\n")
+        .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
   }
 
   #[tokio::test]
-  async fn test_basic() -> Result<(), CoreDBError> {
+  async fn test_coredb_basic() -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();

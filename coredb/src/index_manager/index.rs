@@ -41,6 +41,10 @@ const DEFAULT_LOG_MESSAGES_THRESHOLD: u32 = 1_000;
 #[cfg(test)]
 const DEFAULT_METRIC_POINTS_THRESHOLD: u32 = 10_000;
 
+/// Default uncommitted segments threshold used in some tests.
+#[cfg(test)]
+const DEFAULT_UNCOMMITTED_SEGMENTS_THRESHOLD: u32 = 10;
+
 #[derive(Debug)]
 /// Index for storing log messages and metric points.
 pub struct Index {
@@ -90,6 +94,7 @@ impl Index {
       DEFAULT_SEARCH_MEMORY_BUDGET_BYTES,
       DEFAULT_LOG_MESSAGES_THRESHOLD,
       DEFAULT_METRIC_POINTS_THRESHOLD,
+      DEFAULT_UNCOMMITTED_SEGMENTS_THRESHOLD,
     )
     .await
   }
@@ -104,6 +109,7 @@ impl Index {
     search_memory_budget_bytes: u64,
     log_messages_threshold: u32,
     metric_points_threshold: u32,
+    uncommitted_segments_threshold: u32,
   ) -> Result<Self, CoreDBError> {
     info!(
       "Creating index - storage type {:?}, dir {}",
@@ -137,11 +143,17 @@ impl Index {
 
     // Create an initial segment.
     let segment = Segment::new();
-    let metadata = Metadata::new(0, 0, log_messages_threshold, metric_points_threshold);
+    let metadata = Metadata::new(
+      0,
+      0,
+      log_messages_threshold,
+      metric_points_threshold,
+      uncommitted_segments_threshold,
+    );
 
     // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
-    metadata.update_current_segment_number(current_segment_number);
+    metadata.set_current_segment_number(current_segment_number);
 
     // Create the summary for the initial segment.
     let all_segments_summaries = DashMap::new();
@@ -347,9 +359,7 @@ impl Index {
     self.insert_new_segment(new_segment_number, new_segment);
 
     // Appends will start going to the new segment after this point.
-    self
-      .metadata
-      .update_current_segment_number(new_segment_number);
+    self.metadata.set_current_segment_number(new_segment_number);
 
     // Add the original segment number to the uncommitted segment numbers, so that it will be committed
     // by the commit thread.
@@ -370,9 +380,10 @@ impl Index {
       time, fields, message
     );
 
-    // TODO: change have the number of uncommitted segments in the index to be configurable.
-    if self.uncommitted_segment_numbers.len() > 10 {
-      // We have more than 10 uncommitted segments, which means that the commit thread is not keeping up.
+    if self.uncommitted_segment_numbers.len() as u32
+      > self.metadata.get_uncommitted_segments_threshold()
+    {
+      // We have too many uncommitted segments, which means that the commit thread is not keeping up.
       // We cannot append to the current segment, so we return an error to the caller, asking it to slow down.
       return Err(CoreDBError::TooManyAppendsError());
     }
@@ -846,6 +857,7 @@ mod tests {
     memory_budget: u64,
     log_messages_threshold: u32,
     metric_points_threshold: u32,
+    uncommitted_segments_threshold: u32,
   ) -> (Index, String) {
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
@@ -855,6 +867,7 @@ mod tests {
       memory_budget,
       log_messages_threshold,
       metric_points_threshold,
+      uncommitted_segments_threshold,
     )
     .await
     .unwrap();
@@ -1091,7 +1104,7 @@ mod tests {
       let storage = Storage::new(&storage_type).await?;
       // TODO: fix this.
       let (index, index_dir_path) =
-        create_index_with_thresholds("test_two_segments", &storage_type, 1024 * 1024, 10, 100)
+        create_index_with_thresholds("test_two_segments", &storage_type, 1024 * 1024, 10, 100, 10)
           .await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
@@ -1338,6 +1351,7 @@ mod tests {
       1024 * 1024,
       10,
       100,
+      10,
     )
     .await;
 
@@ -1454,6 +1468,7 @@ mod tests {
       1024 * 1024,
       10,
       100,
+      10,
     )
     .await;
 
@@ -1505,6 +1520,7 @@ mod tests {
       1024 * 1024,
       10,
       100,
+      10,
     )
     .await;
 
@@ -1638,7 +1654,7 @@ mod tests {
 
     // TODO: fix this
     let index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100)
+      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100, 10)
         .await
         .unwrap();
 
@@ -1702,6 +1718,7 @@ mod tests {
       search_memory_budget_bytes,
       10,
       100,
+      10,
     )
     .await;
 
@@ -1811,6 +1828,7 @@ mod tests {
       1024 * 1024,
       10,
       100,
+      10,
     )
     .await;
 
@@ -1825,7 +1843,7 @@ mod tests {
     // Create one more new index using same dir location
     // TODO: fix this
     let index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100)
+      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100, 10)
         .await
         .unwrap();
 
@@ -1863,7 +1881,8 @@ mod tests {
     let storage_type = StorageType::Local;
 
     let index =
-      Index::new_with_threshold_params(&storage_type, index_dir_path, 1024 * 1024, 10, 100).await;
+      Index::new_with_threshold_params(&storage_type, index_dir_path, 1024 * 1024, 10, 100, 10)
+        .await;
     assert!(index.is_ok());
   }
 
@@ -1882,6 +1901,7 @@ mod tests {
       search_memory_budget_bytes,
       10,
       100,
+      10,
     )
     .await;
 
@@ -1987,6 +2007,7 @@ mod tests {
       search_memory_budget_bytes,
       10,
       100,
+      10,
     )
     .await;
 

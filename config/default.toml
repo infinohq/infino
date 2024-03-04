@@ -17,6 +17,10 @@ metric_points_threshold = 1000000     # 1M
 # (but proportional) to this number.
 search_memory_budget_megabytes = 1024
 
+# Maximum number of uncommitted segments. The appends will return 413 when the commits
+# fall behind 
+max_num_uncommitted_segments = 10
+
 # Number of days to retain older older logs and metrics.
 retention_days = 30
 

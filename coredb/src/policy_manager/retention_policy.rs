@@ -75,6 +75,8 @@ mod tests {
     let ids_to_delete = policy.apply(&segment_summaries);
 
     // Verify that the segment from 10 days ago is marked for deletion, but the others are not.
-    assert_eq!(ids_to_delete, vec![0, 1]);
+    assert_eq!(ids_to_delete.len(), 2);
+    assert!(ids_to_delete.contains(&0));
+    assert!(ids_to_delete.contains(&1));
   }
 }

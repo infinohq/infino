@@ -26,6 +26,7 @@ pub struct CoreDBSettings {
   log_messages_threshold: u32,
   metric_points_threshold: u32,
   search_memory_budget_megabytes: f32,
+  uncommitted_segments_threshold: u32,
   retention_days: u32,
   storage_type: String,
   cloud_storage_bucket_name: Option<String>,
@@ -67,6 +68,10 @@ impl CoreDBSettings {
 
   pub fn get_metric_points_threshold(&self) -> u32 {
     self.metric_points_threshold
+  }
+
+  pub fn get_uncommitted_segments_threshold(&self) -> u32 {
+    self.uncommitted_segments_threshold
   }
 
   pub fn get_search_memory_budget_bytes(&self) -> u64 {
@@ -225,7 +230,7 @@ mod tests {
         .write_all(b"metric_points_threshold = 10000\n")
         .unwrap();
       file
-        .write_all(b"segment_size_threshold_megabytes = 1024\n")
+        .write_all(b"uncommitted_segments_threshold = 10\n")
         .unwrap();
       file
         .write_all(b"search_memory_budget_megabytes = 4096\n")
@@ -269,10 +274,7 @@ mod tests {
       assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
       assert_eq!(coredb_settings.get_log_messages_threshold(), 1000);
       assert_eq!(coredb_settings.get_metric_points_threshold(), 10000);
-      assert_eq!(
-        coredb_settings.get_search_memory_budget_bytes(),
-        4 * 1024 * 1024
-      );
+      assert_eq!(coredb_settings.get_uncommitted_segments_threshold(), 10);
       assert_eq!(
         coredb_settings.get_search_memory_budget_bytes(),
         4 * 1024 * 1024
