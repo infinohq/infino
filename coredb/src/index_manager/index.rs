@@ -381,7 +381,7 @@ impl Index {
     );
 
     if self.uncommitted_segment_numbers.len() as u32
-      > self.metadata.get_uncommitted_segments_threshold()
+      >= self.metadata.get_uncommitted_segments_threshold()
     {
       // We have too many uncommitted segments, which means that the commit thread is not keeping up.
       // We cannot append to the current segment, so we return an error to the caller, asking it to slow down.
@@ -432,7 +432,7 @@ impl Index {
     );
 
     if self.uncommitted_segment_numbers.len() as u32
-      > self.metadata.get_uncommitted_segments_threshold()
+      >= self.metadata.get_uncommitted_segments_threshold()
     {
       // We have too many uncommitted segments, which means that the commit thread is not keeping up.
       // We cannot append to the current segment, so we return an error to the caller, asking it to slow down.
@@ -2073,5 +2073,51 @@ mod tests {
       }
     }
     assert!(delete_count >= 16);
+  }
+
+  #[tokio::test]
+  async fn test_uncommitted_segments() {
+    let storage_type = StorageType::Local;
+    let log_messages_threshold = 1000;
+    let uncommitted_segments_threshold = 10;
+    let (index, _index_dir_path) = create_index_with_thresholds(
+      "test_uncommitted_segments",
+      &storage_type,
+      5 * 1024 * 1024,
+      log_messages_threshold,
+      10000,
+      uncommitted_segments_threshold,
+    )
+    .await;
+
+    // The below will create exactly uncommitted_segments_threshold segments.
+    let num_messages = log_messages_threshold * uncommitted_segments_threshold;
+    for i in 0..num_messages {
+      index
+        .append_log_message(i as u64, &HashMap::new(), "some message")
+        .await
+        .expect("Could not append log message");
+    }
+    assert_eq!(
+      index.uncommitted_segment_numbers.len() as u32,
+      uncommitted_segments_threshold
+    );
+
+    // The next append should result in "Too Many Appends" error.
+    let result = index
+      .append_log_message(num_messages as u64, &HashMap::new(), "some message")
+      .await;
+    match result {
+      Err(CoreDBError::TooManyAppendsError()) => {
+        // Received TooManyAppends error as expected.
+      }
+      _ => {
+        panic!("Did not receive TooManyAppends error.");
+      }
+    }
+
+    // Commit the index - this should make the number of uncommitted segments to 0.
+    index.commit(false).await.unwrap();
+    assert_eq!(index.uncommitted_segment_numbers.len() as u32, 0);
   }
 }
