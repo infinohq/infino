@@ -9,7 +9,7 @@ index_dir_path = "data"
 default_index_name = ".default"
 
 # Maximum number of log messages or metric points in a segment during appends. A new segment
-# will be created when these thresholds are reached.
+# will be created after these thresholds are reached.
 log_messages_threshold = 100000       # 100K
 metric_points_threshold = 1000000     # 1M
 
@@ -19,7 +19,7 @@ search_memory_budget_megabytes = 1024
 
 # Maximum number of uncommitted segments. The appends will return 413 when the commits
 # fall behind 
-max_num_uncommitted_segments = 10
+uncommitted_segments_threshold = 10
 
 # Number of days to retain older older logs and metrics.
 retention_days = 30

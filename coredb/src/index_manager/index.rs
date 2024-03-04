@@ -1742,13 +1742,14 @@ mod tests {
     let search_memory_budget_bytes = num_segments_in_memory * some_segment_size_bytes;
 
     // Create a new index with a low threshold for the segment size.
+    let name = &format!("test_concurrent_append_{}", num_segments_in_memory);
     let (index, index_dir_path) = create_index_with_thresholds(
-      "test_concurrent_append",
+      name,
       &storage_type,
       search_memory_budget_bytes,
+      1000,
       10000,
-      100000,
-      100,
+      200,
     )
     .await;
 
@@ -1756,24 +1757,18 @@ mod tests {
     let num_threads = 20;
     let num_appends_per_thread = 5000;
 
-    let mut commit_handles = Vec::new();
-
     // Start a thread to commit the index periodically.
     let arc_index_clone = arc_index.clone();
     let ten_millis = Duration::from_millis(10);
-    let handle = tokio::spawn(async move {
-      let rt = tokio::runtime::Runtime::new().unwrap();
-      rt.block_on(async {
-        for _ in 0..100 {
-          arc_index_clone
-            .commit(true)
-            .await
-            .expect("Could not commit index");
-          sleep(ten_millis);
-        }
-      });
+    let commit_handle = tokio::spawn(async move {
+      for _ in 0..100 {
+        arc_index_clone
+          .commit(false)
+          .await
+          .expect("Could not commit index");
+        sleep(ten_millis);
+      }
     });
-    commit_handles.push(handle);
 
     // Start threads to append to the index.
     let mut append_handles = Vec::new();
@@ -1799,15 +1794,14 @@ mod tests {
       append_handles.push(handle);
     }
 
+    commit_handle.await.unwrap();
+
     for handle in append_handles {
       handle.await.unwrap();
     }
 
-    for handle in commit_handles {
-      handle.await.unwrap();
-    }
-
     // Commit again to cover the scenario that append threads run for more time than the commit thread
+    // Commit the current segment as well (pass the argument 'true' to commit).
     arc_index
       .commit(true)
       .await

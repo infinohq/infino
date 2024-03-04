@@ -891,10 +891,14 @@ mod tests {
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name.as_bytes()).unwrap();
+      file.write_all(b"log_messages_threshold = 1000\n").unwrap();
+      file.write_all(b"metric_points_threshold = 1000\n").unwrap();
       file
-        .write_all(b"segment_size_threshold_megabytes = 0.1\n")
+        .write_all(b"uncommitted_segments_threshold = 10\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 0.4\n")
+        .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
 
@@ -962,6 +966,19 @@ mod tests {
       .unwrap();
 
     assert_eq!(log_messages_expected.get_messages().len() as u64, hits);
+
+    // Flush the index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri("/flush")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
@@ -1117,6 +1134,19 @@ mod tests {
       }
       _ => panic!("Unexpected status value in response"),
     }
+
+    // Flush the index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri("/flush")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     // Sleep for 2 seconds to simulate delay or wait for a condition.
     sleep(Duration::from_secs(2)).await;
