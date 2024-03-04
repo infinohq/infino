@@ -475,8 +475,24 @@ mod tests {
         .search_logs("message", "", start, end)
         .await
         .expect("Error in search_logs");
-      assert_eq!(results.first().unwrap().get_text(), "log message 2");
-      assert_eq!(results.get(1).unwrap().get_text(), "log message 1");
+      assert_eq!(
+        results
+          .get_messages()
+          .first()
+          .unwrap()
+          .get_message()
+          .get_text(),
+        "log message 2"
+      );
+      assert_eq!(
+        results
+          .get_messages()
+          .get(1)
+          .unwrap()
+          .get_message()
+          .get_text(),
+        "log message 1"
+      );
     }
 
     // Search for metric points.

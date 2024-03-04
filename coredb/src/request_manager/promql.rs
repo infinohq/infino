@@ -1115,12 +1115,14 @@ impl Index {
 mod tests {
   use super::*;
   use crate::storage_manager::storage::StorageType;
+  use crate::utils::config::config_test_logger;
   use chrono::Utc;
   use pest::Parser;
   use tempdir::TempDir;
 
   // Helper function to create index
   async fn create_index(name: &str, num_metric_points: u32) -> (Index, String) {
+    config_test_logger();
     let storage_type = StorageType::Local;
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);

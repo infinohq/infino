@@ -304,7 +304,7 @@ impl Index {
       ast, range_start_time, range_end_time
     );
 
-    let mut retval = QueryDSLObject::new();
+    let mut results = QueryDSLObject::new();
 
     // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
     let segment_numbers = self
@@ -316,7 +316,7 @@ impl Index {
     // If a segment isn't in memory, refresh it to memory from storage then execute the search.
     for segment_number in segment_numbers {
       let segment = self.memory_segments_map.get(&segment_number);
-      let mut results = match segment {
+      let mut segment_results = match segment {
         Some(segment) => segment
           .search_logs(&ast.clone(), range_start_time, range_end_time)
           .await
@@ -330,12 +330,19 @@ impl Index {
         }
       };
 
-      retval.take_messages().append(&mut results.take_messages());
+      debug!(
+        "Segment Results: Segment Number {}, Results: {:?}",
+        segment_number, segment_results
+      );
+
+      results.append_messages(segment_results.take_messages());
     }
 
-    retval.take_messages().sort();
+    results.sort_messages();
 
-    Ok(retval)
+    debug!("Search index logs: returning results {:?}", results);
+
+    Ok(results)
   }
 
   /// Get metric points corresponding to a promql query.
@@ -347,7 +354,7 @@ impl Index {
     range_end_time: u64,
   ) -> Result<PromQLObject, CoreDBError> {
     debug!(
-      "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
+      "Search index metrics: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
       ast, range_start_time, range_end_time
     );
 
@@ -358,7 +365,9 @@ impl Index {
 
     // Note that PromQL results are explicitly unsorted but we sort here
     // to be consistent with search_logs.
-    results.take_vector().sort();
+    results.sort_vector();
+
+    debug!("Search index metrics: returning results {:?}", results);
 
     Ok(results)
   }
@@ -680,11 +689,14 @@ mod tests {
   use super::*;
   use crate::metric::metric_point::MetricPoint;
   use crate::request_manager::query_dsl::QueryDslParser;
+  use crate::utils::config::config_test_logger;
   use crate::utils::io::get_joined_path;
   use crate::utils::sync::is_sync_send;
 
   // Helper function to create index
   async fn create_index<'a>(name: &'a str, storage_type: &'a StorageType) -> (Index, String) {
+    config_test_logger();
+
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
     let index = Index::new(storage_type, &index_dir_path).await.unwrap();
@@ -697,6 +709,8 @@ mod tests {
     segment_size: u64,
     memory_budget: u64,
   ) -> (Index, String) {
+    config_test_logger();
+
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
     let index =
@@ -848,10 +862,18 @@ mod tests {
       .expect("Error in search_logs");
 
     // Continue with assertions
-    assert_eq!(results.len(), num_log_messages - 1);
+    assert_eq!(results.get_messages().len(), num_log_messages - 1);
     let mut received_log_messages: Vec<String> = Vec::new();
     for i in 1..num_log_messages {
-      received_log_messages.push(results.get(i - 1).unwrap().get_text().to_owned());
+      received_log_messages.push(
+        results
+          .get_messages()
+          .get(i - 1)
+          .unwrap()
+          .get_message()
+          .get_text()
+          .to_owned(),
+      );
     }
     expected_log_messages.sort();
     received_log_messages.sort();
@@ -876,8 +898,16 @@ mod tests {
       .await
       .expect("Error in search_logs");
 
-    assert_eq!(results.len(), 1);
-    assert_eq!(results.first().unwrap().get_text(), "thisisunique");
+    assert_eq!(results.get_messages().len(), 1);
+    assert_eq!(
+      results
+        .get_messages()
+        .first()
+        .unwrap()
+        .get_message()
+        .get_text(),
+      "thisisunique"
+    );
   }
 
   #[tokio::test]
@@ -1215,7 +1245,7 @@ mod tests {
       .search_logs(&ast, start_time, end_time)
       .await
       .expect("Error in search_logs");
-    assert_eq!(results.len(), num_log_messages);
+    assert_eq!(results.get_messages().len(), num_log_messages);
 
     // Ensure the suffix is in exactly one log message.
     for i in 1..=num_log_messages {
@@ -1229,7 +1259,7 @@ mod tests {
         .search_logs(&ast, start_time, end_time)
         .await
         .expect("Error in search_logs");
-      assert_eq!(results.len(), 1);
+      assert_eq!(results.get_messages().len(), 1);
     }
 
     // Ensure the prefix+suffix is in exactly one log message.
@@ -1245,7 +1275,7 @@ mod tests {
         .await
         .expect("Error in search_logs");
 
-      assert_eq!(results.len(), 1);
+      assert_eq!(results.get_messages().len(), 1);
     }
   }
 
@@ -1287,7 +1317,7 @@ mod tests {
         .await
         .expect("Error in search_logs");
 
-      assert_eq!(expected_count, results.len() as u32);
+      assert_eq!(expected_count, results.get_messages().len() as u32);
     }
   }
 
@@ -1560,7 +1590,7 @@ mod tests {
       .search_logs(&ast, 0, expected_len as u64)
       .await
       .expect("Error in search_logs");
-    assert_eq!(expected_len, results.len());
+    assert_eq!(expected_len, results.get_messages().len());
 
     let ast = PromQLParser::parse(promql::Rule::start, "metric{label_name_1=label_value_1}")
       .expect("Failed to parse query");
@@ -1618,7 +1648,7 @@ mod tests {
       .await
       .expect("Error in search_logs");
 
-    assert_eq!(search_result.len(), 1);
+    assert_eq!(search_result.get_messages().len(), 1);
   }
 
   #[tokio::test]
@@ -1696,7 +1726,7 @@ mod tests {
         .search_logs(&ast, 0, u64::MAX)
         .await
         .expect("Error in search_logs");
-      assert_eq!(results.len(), 1);
+      assert_eq!(results.get_messages().len(), 1);
 
       let query_message = &format!(
         r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
@@ -1709,7 +1739,7 @@ mod tests {
         .search_logs(&ast, 0, u64::MAX)
         .await
         .expect("Error in search_logs");
-      assert_eq!(results.len(), 1);
+      assert_eq!(results.get_messages().len(), 1);
     }
   }
 

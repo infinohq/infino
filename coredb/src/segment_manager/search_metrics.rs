@@ -139,12 +139,15 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
+  use crate::utils::config::config_test_logger;
   use std::collections::HashMap;
 
   use super::*;
   use crate::metric::constants::METRIC_NAME_PREFIX;
 
   fn create_segment() -> Segment {
+    config_test_logger();
+
     let segment = Segment::new();
 
     // Create a couple of metric points.

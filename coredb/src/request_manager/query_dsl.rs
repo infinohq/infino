@@ -58,8 +58,8 @@ impl Segment {
       let processing_result = self.query_dispatcher(&node);
 
       match processing_result.await {
-        Ok(mut node_results) => {
-          results.take_ids().append(&mut node_results.take_ids());
+        Ok(node_results) => {
+          results = node_results;
         }
         Err(QueryError::UnsupportedQuery(_)) => {
           for inner_node in node.into_inner() {
@@ -71,6 +71,11 @@ impl Segment {
         }
       }
     }
+
+    debug!(
+      "QueryDSL: Returning results from traverse ast {:?}",
+      results
+    );
 
     Ok(results)
   }
@@ -124,7 +129,12 @@ impl Segment {
     let execution_time = check_query_time(timeout, query_start_time)?;
     results.set_execution_time(execution_time);
 
-    Ok(results) // Assuming `results` is defined and valid here
+    debug!(
+      "QueryDSL: Returning results from query dispatcher {:?}",
+      results
+    );
+
+    Ok(results)
   }
 
   // Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
@@ -182,6 +192,8 @@ impl Segment {
 
     let execution_time = check_query_time(timeout, query_start_time)?;
     results.set_execution_time(execution_time);
+
+    debug!("QueryDSL: Returning results from bool query {:?}", results);
 
     Ok(results)
   }
@@ -243,6 +255,11 @@ impl Segment {
     let execution_time = check_query_time(timeout, query_start_time)?;
     results.set_execution_time(execution_time);
 
+    debug!(
+      "QueryDSL: Returning results from bool subtree {:?}",
+      results
+    );
+
     Ok(results)
   }
 
@@ -288,29 +305,29 @@ impl Segment {
       }
     }
 
+    let mut results = QueryDSLDocIds::new();
+
     // "AND" is needed even though term queries only have a single term.
     // Our tokenizer breaks up query text on spaces, etc. so we need to match
     // everything in the query text if they end up as different terms.
     //
     // TODO: This is technically incorrect as the term should be an exact string match.
-    let results = if let Some(query_str) = query_text {
+    if let Some(query_str) = query_text {
       let analyzed_query = analyze_query_text(query_str, fieldname, case_insensitive).await;
       let search_results = self.search_inverted_index(analyzed_query, "AND").await?;
-
-      let mut results = QueryDSLDocIds::new();
 
       let execution_time = check_query_time(timeout, query_start_time)?;
       results.set_execution_time(execution_time);
       results.set_ids(search_results);
-
-      Ok(results)
     } else {
-      Err(QueryError::UnsupportedQuery(
+      return Err(QueryError::UnsupportedQuery(
         "Query string is missing".to_string(),
-      ))
+      ));
     };
 
-    results
+    debug!("QueryDSL: Returning results from term query {:?}", results);
+
+    Ok(results)
   }
 
   /// Terms Query Processor: https://opensearch.org/docs/latest/query-dsl/term/terms/
@@ -357,24 +374,24 @@ impl Segment {
       .flatten()
       .collect();
 
-    // Using the "OR" operator to get all the logs with any of the field elements from the logs.
-    let results = if !query_terms.is_empty() {
-      let search_results = self.search_inverted_index(query_terms, "OR").await?;
+    let mut results = QueryDSLDocIds::new();
 
-      let mut results = QueryDSLDocIds::new();
+    // Using the "OR" operator to get all the logs with any of the field elements from the logs.
+    if !query_terms.is_empty() {
+      let search_results = self.search_inverted_index(query_terms, "OR").await?;
 
       let execution_time = check_query_time(timeout, query_start_time)?;
       results.set_execution_time(execution_time);
       results.set_ids(search_results);
-
-      Ok(results)
     } else {
-      Err(QueryError::UnsupportedQuery(
+      return Err(QueryError::UnsupportedQuery(
         "No query terms found".to_string(),
-      ))
+      ));
     };
 
-    results
+    debug!("QueryDSL: Returning results from terms query {:?}", results);
+
+    Ok(results)
   }
 
   /// Match Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match/
@@ -423,26 +440,26 @@ impl Segment {
       }
     }
 
-    let results = if let Some(query_str) = query_text {
+    let mut results = QueryDSLDocIds::new();
+
+    if let Some(query_str) = query_text {
       let analyzed_query = analyze_query_text(query_str, fieldname, case_insensitive).await;
       let search_results = self
         .search_inverted_index(analyzed_query, term_operator)
         .await?;
 
-      let mut results = QueryDSLDocIds::new();
-
       let execution_time = check_query_time(timeout, query_start_time)?;
       results.set_execution_time(execution_time);
       results.set_ids(search_results);
-
-      Ok(results)
     } else {
-      Err(QueryError::UnsupportedQuery(
+      return Err(QueryError::UnsupportedQuery(
         "Query string is missing".to_string(),
-      ))
+      ));
     };
 
-    results
+    debug!("QueryDSL: Returning results from match query {:?}", results);
+
+    Ok(results)
   }
 
   /// Match Phrase Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
@@ -499,6 +516,11 @@ impl Segment {
         results.set_execution_time(execution_time);
         results.set_ids(matching_document_ids);
 
+        debug!(
+          "QueryDSL: Returning results from match phrase query {:?}",
+          results
+        );
+
         Ok(results)
       }
       (None, _) => Err(QueryError::UnsupportedQuery(
@@ -513,14 +535,19 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
+
   use std::collections::HashMap;
 
   use chrono::Utc;
+
+  use crate::utils::config::config_test_logger;
 
   use super::*;
   use pest::Parser;
 
   fn create_mock_segment() -> Segment {
+    config_test_logger();
+
     let segment = Segment::new();
 
     let log_messages = [
@@ -558,18 +585,19 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             2,
             "There should be exactly 2 logs matching the query."
           );
 
-          assert!(results
-            .iter()
-            .all(|log| log.get_message().get_text().contains("test")
-              && log.get_message().get_text().contains("log")));
+          assert!(results.get_messages().iter().all(|log| log
+            .get_message()
+            .get_text()
+            .contains("test")
+            && log.get_message().get_text().contains("log")));
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);
@@ -598,18 +626,19 @@ mod tests {
 
     // Parse the query DSL
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             2,
             "There should be exactly 2 logs matching the query."
           );
 
-          assert!(results
-            .iter()
-            .any(|log| log.get_message().get_text().contains("another")
-              || log.get_message().get_text().contains("different")));
+          assert!(results.get_messages().iter().any(|log| log
+            .get_message()
+            .get_text()
+            .contains("another")
+            || log.get_message().get_text().contains("different")));
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);
@@ -637,9 +666,10 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert!(!results
+            .get_messages()
             .iter()
             .any(|log| log.get_message().get_text().contains("excluded")));
         }
@@ -674,15 +704,15 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             2,
             "There should be exactly 2 logs matching the query."
           );
 
-          assert!(results.iter().all(|log| {
+          assert!(results.get_messages().iter().all(|log| {
             log.get_message().get_text().contains("log")
               && (log.get_message().get_text().contains("test")
                 || !log.get_message().get_text().contains("different"))
@@ -713,15 +743,16 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             2,
             "There should be exactly 2 logs matching the query."
           );
 
           assert!(results
+            .get_messages()
             .iter()
             .all(|log| log.get_message().get_text().contains("log")));
         }
@@ -750,15 +781,15 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             1,
             "There should be exactly 1 log matching the query."
           );
 
-          for log in results {
+          for log in results.get_messages() {
             let key_field_value = log.get_message().get_fields().get("key");
 
             assert!(
@@ -793,15 +824,15 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             2,
             "There should be exactly 2 logs matching the query."
           );
 
-          for log in results.iter() {
+          for log in results.get_messages().iter() {
             assert!(
               log.get_message().get_text().contains("test")
                 && log.get_message().get_text().contains("log"),
@@ -834,15 +865,15 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             2,
             "Default OR on terms should have 2 logs matching the query."
           );
 
-          for log in results.iter() {
+          for log in results.get_messages().iter() {
             assert!(
               log.get_message().get_text().contains("another")
                 || log.get_message().get_text().contains("different"),
@@ -876,9 +907,10 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert!(results
+            .get_messages()
             .iter()
             .all(|log| log.get_message().get_text().contains("log")));
         }
@@ -908,9 +940,10 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert!(results
+            .get_messages()
             .iter()
             .all(|log| log.get_message().get_text().contains("field1~field1value")));
         }
@@ -941,9 +974,9 @@ mod tests {
     "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
-          assert!(results.iter().all(|log| log
+          assert!(results.get_messages().iter().all(|log| log
             .get_message()
             .get_text()
             .contains("field1~field1value")
@@ -983,15 +1016,15 @@ mod tests {
     }"#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
-      Ok(ast) => match segment.search_logs(&ast, 0, 0, u64::MAX).await {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
         Ok(results) => {
           assert_eq!(
-            results.len(),
+            results.get_messages().len(),
             2,
             "There should be exactly 2 logs matching the query."
           );
 
-          for log in results.iter() {
+          for log in results.get_messages().iter() {
             assert!(
               log.get_message().get_text().contains("another")
                 || log.get_message().get_text().contains("different"),

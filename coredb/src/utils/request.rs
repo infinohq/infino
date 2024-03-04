@@ -50,6 +50,8 @@ pub fn check_query_time(timeout: u64, query_start_time: u64) -> Result<u64, Quer
 }
 
 /// Parses a date string to a bucket key based on the specified interval.
+// TODO: come back to this. This is not yet used.
+#[allow(dead_code)]
 fn parse_date_string_to_bucket_key(date_str: &str, interval: &str) -> Result<String, QueryError> {
   let date = DateTime::parse_from_rfc3339(date_str)
     .map_err(|_| QueryError::SearchLogsError("Failed to parse date string".to_string()))?;

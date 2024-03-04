@@ -895,10 +895,12 @@ impl Default for QueryTimeSeries {
 mod tests {
 
   use super::*;
+  use crate::utils::config::config_test_logger;
 
   use std::collections::HashMap;
 
   fn create_metric_points(times: &[u64], values: &[f64]) -> Vec<MetricPoint> {
+    config_test_logger();
     times
       .iter()
       .zip(values.iter())

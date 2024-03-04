@@ -24,7 +24,7 @@ use pest::iterators::Pairs;
 use std::str;
 
 use regex::bytes::Regex;
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 enum RangeOperator {
   GreaterThanOrEqual,
@@ -47,7 +47,7 @@ impl RangeOperator {
 
 // These come from different index structures or computation,
 // but we pull them together in memory for query processing
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct QueryLogMessage {
   #[serde(rename = "_id")]
   id: u32,
@@ -103,10 +103,9 @@ impl Default for QueryLogMessage {
   }
 }
 
-// Implement PartialEq manually to compare based on id
 impl PartialEq for QueryLogMessage {
   fn eq(&self, other: &Self) -> bool {
-    self.id == other.id
+    self.get_id() == other.get_id()
   }
 }
 
@@ -118,16 +117,78 @@ impl PartialOrd for QueryLogMessage {
 
 impl Ord for QueryLogMessage {
   fn cmp(&self, other: &Self) -> Ordering {
-    self
-      .id
-      .cmp(&other.id)
-      .then_with(|| self.message.cmp(&other.message))
+    // Sort in reverse chronological order by time.
+    other
+      .get_message()
+      .get_time()
+      .cmp(&self.get_message().get_time())
   }
 }
 
 impl Eq for QueryLogMessage {}
 
+impl Serialize for QueryLogMessage {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let log_message = &self.message;
+    let mut map = serializer.serialize_map(None)?;
+
+    map.serialize_entry("_index", &"your_index_name_here")?;
+    map.serialize_entry("_id", &self.id)?;
+    map.serialize_entry("_score", &1.0)?;
+
+    let mut source = HashMap::new();
+    source.insert("timestamp", log_message.get_time().to_string());
+    source.insert("text", log_message.get_text().to_owned());
+    let fields = log_message.get_fields().to_owned();
+    for (key, value) in &fields {
+      source.insert(key, value.clone());
+    }
+
+    map.serialize_entry("_source", &source)?;
+
+    map.end()
+  }
+}
+
 impl Segment {
+  /// Search the segment for the given query.
+  pub async fn search_logs(
+    &self,
+    ast: &Pairs<'_, Rule>,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<QueryDSLObject, QueryError> {
+    debug!("Search index logs: Searching log for {:?}", ast);
+
+    let mut results = QueryDSLObject::new();
+
+    let matching_document_ids = self
+      .traverse_query_dsl_ast(ast)
+      .await
+      .map_err(|_| QueryError::SearchLogsError("Could not process the query".to_string()))?;
+
+    // Get the log messages and return with the query results
+    let log_messages = self
+      .get_log_messages_from_ids(
+        matching_document_ids.get_ids(),
+        range_start_time,
+        range_end_time,
+      )
+      .map_err(|_| {
+        QueryError::SearchLogsError("Could not get log messages from the ids".to_string())
+      })?;
+
+    results.set_execution_time(matching_document_ids.get_execution_time());
+    results.set_messages(log_messages);
+
+    debug!("Search index logs: Returning results {:?}", results);
+
+    Ok(results)
+  }
+
   // **** Leaf Query Support ****
 
   /// Search the index for a set of terms
@@ -136,6 +197,11 @@ impl Segment {
     terms: Vec<String>,
     term_operator: &str,
   ) -> Result<Vec<u32>, QueryError> {
+    debug!(
+      "Search inverted index: Searching inverted index for {:?} using {:?}",
+      terms, term_operator
+    );
+
     // Extract the terms and perform the search
     let mut results = Vec::new();
 
@@ -165,6 +231,8 @@ impl Segment {
         )
         .map_err(|e| QueryError::TraverseError(format!("Error matching doc IDs: {:?}", e)))?;
     }
+
+    debug!("Search inverted index: Returning results {:?}", results);
 
     Ok(results)
   }
@@ -426,37 +494,6 @@ impl Segment {
     Ok(())
   }
 
-  /// Search the segment for the given query.
-  pub async fn search_logs(
-    &self,
-    ast: &Pairs<'_, Rule>,
-    range_start_time: u64,
-    range_end_time: u64,
-  ) -> Result<QueryDSLObject, QueryError> {
-    let mut results = QueryDSLObject::new();
-
-    let matching_document_ids = self
-      .traverse_query_dsl_ast(ast)
-      .await
-      .map_err(|_| QueryError::SearchLogsError("Could not process the query".to_string()))?;
-
-    // Get the log messages and return with the query results
-    let log_messages = self
-      .get_log_messages_from_ids(
-        &matching_document_ids.get_ids(),
-        range_start_time,
-        range_end_time,
-      )
-      .map_err(|_| {
-        QueryError::SearchLogsError("Could not get log messages from the ids".to_string())
-      })?;
-
-    results.set_execution_time(matching_document_ids.get_execution_time());
-    results.set_messages(log_messages);
-
-    Ok(results)
-  }
-
   /// Match the exact phrase in log messages from the given log IDs in parallel.
   /// If the field name is provided, match the phrase in that field; otherwise, match in the text.
   pub fn get_exact_phrase_matches(
@@ -545,7 +582,7 @@ impl Segment {
       .collect()
   }
 
-  pub fn range_query(&self, doc_ids: &[u32], field_name: &str, range: &str) -> Vec<u32> {
+  pub fn get_range_matches(&self, doc_ids: &[u32], field_name: &str, range: &str) -> Vec<u32> {
     // Parse the range string
     let re = Regex::new(r"(?P<op>[gte|lte|gt|lt]+)\[(?P<value>[^\]]+)\]").unwrap();
     let captures = re.captures(range.as_bytes()).unwrap();
@@ -597,7 +634,7 @@ impl Segment {
       .collect()
   }
 
-  pub fn regexp(&self, doc_ids: &[u32], field_name: &str, regexp: &str) -> Vec<u32> {
+  pub fn get_regexp_matches(&self, doc_ids: &[u32], field_name: &str, regexp: &str) -> Vec<u32> {
     // Compile the regular expression pattern
     let re = Regex::new(regexp).unwrap();
 
@@ -619,12 +656,17 @@ impl Segment {
       .collect()
   }
 
-  pub fn wildcard(&self, doc_ids: &[u32], field_name: &str, wildcard: &str) -> Vec<u32> {
+  pub fn get_wildcard_matches(
+    &self,
+    doc_ids: &[u32],
+    field_name: &str,
+    wildcard: &str,
+  ) -> Vec<u32> {
     // Convert the wildcard pattern to a regex pattern
     let wildcard_pattern = wildcard
-      .replace(".", "\\.")
-      .replace("*", ".*")
-      .replace("?", ".");
+      .replace('.', "\\.")
+      .replace('*', ".*")
+      .replace('?', ".");
 
     // Compile the regex pattern
     let re = Regex::new(&wildcard_pattern).unwrap();
@@ -694,6 +736,7 @@ impl Segment {
   }
 
   /// Compute the maximum value for a specified field across documents in doc_ids.
+  #[allow(dead_code)]
   fn min(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<f64, QueryError> {
     let mut min_value: Option<f64> = None;
 
@@ -726,6 +769,7 @@ impl Segment {
   }
 
   /// Compute the maximum value for a specified field across documents in doc_ids.
+  #[allow(dead_code)]
   fn max(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<f64, QueryError> {
     let mut max_value: Option<f64> = None;
 
@@ -776,6 +820,7 @@ impl Segment {
   }
 
   /// Computes statistics (count, min, max, sum, avg) for a specified field across documents.
+  #[allow(dead_code)]
   fn stats(
     &self,
     doc_ids: &Vec<u32>,
@@ -813,6 +858,7 @@ impl Segment {
     ))
   }
 
+  #[allow(dead_code)]
   fn cardinality(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<usize, QueryError> {
     let mut unique_values = Vec::new();
     for &doc_id in doc_ids {
@@ -828,6 +874,7 @@ impl Segment {
   }
 
   /// Counts the number of values for a specified field across documents.
+  #[allow(dead_code)]
   fn value_count(&self, doc_ids: &Vec<u32>, field_name: &str) -> Result<usize, QueryError> {
     let mut count = 0;
     for &doc_id in doc_ids {
@@ -934,6 +981,7 @@ impl Segment {
   // *** Bucket Aggregation Query Support ***
 
   /// Compute terms aggregation with additional parameters for inclusion and exclusion of terms.
+  #[allow(clippy::too_many_arguments)]
   pub fn terms(
     &self,
     doc_ids: &Vec<u32>,
@@ -1299,6 +1347,7 @@ impl Segment {
 // TODO: We should probably test read locks.
 #[cfg(test)]
 mod tests {
+  use crate::utils::config::config_test_logger;
   use std::collections::HashMap;
 
   use super::*;
@@ -1333,6 +1382,8 @@ mod tests {
   }
 
   fn create_mock_segment() -> Segment {
+    config_test_logger();
+
     let segment = Segment::new();
 
     segment.insert_in_terms("term1", 1);

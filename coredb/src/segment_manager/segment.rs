@@ -454,10 +454,13 @@ mod tests {
   use crate::metric::metric_point::MetricPoint;
   use crate::request_manager::query_dsl::{QueryDslParser, Rule};
   use crate::storage_manager::storage::StorageType;
+  use crate::utils::config::config_test_logger;
   use crate::utils::sync::{is_sync_send, thread};
   use pest::iterators::Pairs;
 
   fn create_term_test_node(term: &str) -> Result<Pairs<Rule>, Box<pest::error::Error<Rule>>> {
+    config_test_logger();
+
     let test_string = term;
     let result = QueryDslParser::parse(Rule::start, test_string);
 
@@ -483,7 +486,7 @@ mod tests {
         error!("Error in search_logs: {:?}", err);
       } else {
         let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
-        assert!(results.is_empty());
+        assert!(results.get_messages().is_empty());
       }
     } else {
       error!("Error parsing the query.");
@@ -502,7 +505,7 @@ mod tests {
         error!("Error in search_logs: {:?}", err);
       } else {
         let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
-        assert!(results.is_empty());
+        assert!(results.get_messages().is_empty());
       }
     } else {
       error!("Error parsing the query.");
@@ -620,9 +623,14 @@ mod tests {
         .await;
       match &results {
         Ok(logs) => {
-          assert_eq!(logs.len(), 1);
+          assert_eq!(logs.get_messages().len(), 1);
           assert_eq!(
-            logs.first().unwrap().get_text(),
+            logs
+              .get_messages()
+              .first()
+              .unwrap()
+              .get_message()
+              .get_text(),
             "this is my 1st log message"
           );
         }
@@ -643,7 +651,7 @@ mod tests {
         .await;
       match results {
         Ok(logs) => {
-          assert!(logs.is_empty());
+          assert!(logs.get_messages().is_empty());
         }
         Err(err) => {
           error!("Error in search_logs for 'blah': {:?}", err);
@@ -840,8 +848,9 @@ mod tests {
         // Sort the actual results.
         let results = segment.search_logs(&query_node, 0, u64::MAX).await.unwrap();
         let mut actual_results: Vec<String> = results
+          .get_messages()
           .iter()
-          .map(|log| log.get_text().to_owned())
+          .map(|log| log.get_message().get_text().to_owned())
           .collect();
         actual_results.sort();
 
