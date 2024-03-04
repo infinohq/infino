@@ -1,14 +1,27 @@
 [coredb]
-# Storage configuration.
+### Storage configuration.
 storage_type = "local"                # can be "local", "aws", "gcp" or "azure"
 cloud_storage_bucket_name = "dev-infino-data"   # only relevant if storage type is "aws", "gcp", or "azure"
 index_dir_path = "data"
 # "cloud_storage_region" can be used to set a region for the cloud provider
 
-# Index configuration.
+### Index configuration.
 default_index_name = ".default"
-segment_size_threshold_megabytes = 256
-memory_budget_megabytes = 1024
+
+# Maximum number of log messages or metric points in a segment during appends. A new segment
+# will be created after these thresholds are reached.
+log_messages_threshold = 100000       # 100K
+metric_points_threshold = 1000000     # 1M
+
+# Memory budget for searching segments. Expect the actual memory used to be higher 
+# (but proportional) to this number.
+search_memory_budget_megabytes = 1024
+
+# Maximum number of uncommitted segments. The appends will return 413 when the commits
+# fall behind 
+uncommitted_segments_threshold = 10
+
+# Number of days to retain older older logs and metrics.
 retention_days = 30
 
 [server]

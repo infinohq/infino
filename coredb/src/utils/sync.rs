@@ -20,6 +20,7 @@ pub(crate) use parking_lot::RwLock;
 
 // Tokio Mutex and RwLock - needed when we need lock to be Send + Sync.
 pub(crate) use tokio::sync::Mutex as TokioMutex;
+#[allow(unused_imports)]
 pub(crate) use tokio::sync::RwLock as TokioRwLock;
 
 // A call to this function will compile only if T is Send + Sync.

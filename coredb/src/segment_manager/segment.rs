@@ -19,7 +19,6 @@ use crate::utils::error::CoreDBError;
 use crate::utils::error::QueryError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
-use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, RwLock, TokioMutex};
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
@@ -57,7 +56,7 @@ pub struct Segment {
   time_series_map: TimeSeriesMap,
 
   // Mutex for only one thread to commit this segment at a time.
-  commit_lock: TokioMutex<thread::ThreadId>,
+  commit_lock: TokioMutex<()>,
 }
 
 impl Segment {
@@ -70,7 +69,7 @@ impl Segment {
       inverted_map: InvertedMap::new(),
       labels: DashMap::new(),
       time_series_map: TimeSeriesMap::new(),
-      commit_lock: TokioMutex::new(thread::current().id()),
+      commit_lock: TokioMutex::new(()),
     }
   }
 
@@ -262,8 +261,7 @@ impl Segment {
 
   pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
     // Acquire a lock - so that only one thread can commit at a time.
-    let mut lock = self.commit_lock.lock().await;
-    *lock = thread::current().id();
+    let _lock = self.commit_lock.lock().await;
 
     // Function to serialize a component to a given path.
     async fn serialize_component<T: serde::Serialize>(
@@ -354,7 +352,7 @@ impl Segment {
     let (labels, labels_size): (DashMap<String, u32>, _) = storage.read(&labels_path).await?;
     let (time_series_map, time_series_map_size): (TimeSeriesMap, _) =
       storage.read(&time_series_map_path).await?;
-    let commit_lock = TokioMutex::new(thread::current().id());
+    let commit_lock = TokioMutex::new(());
 
     let total_size = metadata_size
       + terms_size
@@ -417,6 +415,8 @@ impl Segment {
   }
 
   /// Update the start and end time of this segment.
+  // Note: Changing logic of this function may need corresponding change in
+  // SegmentSummary::update_start_end_time.
   fn update_start_end_time(&self, time: u64) {
     // Update start and end timestamps.
     if time > self.metadata.get_end_time() {

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use chrono::DateTime;
 use clap::{arg, Command};
@@ -127,13 +128,22 @@ fn get_args() -> (String, i64, String, bool) {
 }
 
 async fn index_logs_batch(client: &Client, append_url: &str, logs_batch: &Vec<ApacheLogEntry>) {
-  let response = client
-    .post(append_url)
-    .header("Content-Type", "application/json")
-    .body(Body::from(serde_json::to_string(&logs_batch).unwrap()))
-    .send()
-    .await;
-  assert_eq!(response.as_ref().unwrap().status(), 200);
+  loop {
+    let response = client
+      .post(append_url)
+      .header("Content-Type", "application/json")
+      .body(Body::from(serde_json::to_string(&logs_batch).unwrap()))
+      .send()
+      .await;
+    let status = response.as_ref().unwrap().status();
+    if status == 429 {
+      println!("Too many requests, sleeping for 1s");
+      thread::sleep(std::time::Duration::from_millis(1000));
+    } else {
+      assert_eq!(response.as_ref().unwrap().status(), 200);
+      break;
+    }
+  }
 }
 
 /// Helper function to index max_docs from file using Infino API.
@@ -178,8 +188,18 @@ async fn index(
       let timestamp = log.date;
       let fields = log.get_fields_map();
       let text = fields.values().cloned().collect::<Vec<String>>().join(" ");
-      coredb.append_log_message(timestamp, &fields, &text);
-      continue;
+      loop {
+        let result = coredb.append_log_message(timestamp, &fields, &text).await;
+        if result.is_err() {
+          println!(
+            "Received error from CoreDB, retrying after sleeping: {}",
+            result.err().unwrap()
+          );
+          thread::sleep(Duration::from_secs(1));
+        } else {
+          break;
+        }
+      }
     }
 
     // Index the log entries in batches using Infino REST API.
@@ -201,10 +221,11 @@ async fn index(
     println!("Indexed last batch {}", batch_count);
   }
 
-  let elapsed = now.elapsed().as_micros();
+  let elapsed = now.elapsed().as_secs_f64();
+  let throughout = max_docs as f64 / elapsed;
   println!(
-    "Infino REST time required for insertion: {} microseconds",
-    elapsed
+    "Infino REST time required for insertion: {:.2} seconds, throughput {:.2} docs/seconds",
+    elapsed, throughout
   );
 
   Ok(())

@@ -54,8 +54,10 @@ impl CoreDB {
         let coredb_settings = settings.get_coredb_settings();
         let index_dir_path = &coredb_settings.get_index_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
-        let segment_size_threshold_bytes = coredb_settings.get_segment_size_threshold_bytes();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+        let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
+        let append_metric_points_threshold = coredb_settings.get_metric_points_threshold();
+        let uncommitted_segments_threshold = coredb_settings.get_uncommitted_segments_threshold();
         let storage_type = coredb_settings.get_storage_type()?;
         let storage = Storage::new(&storage_type).await?;
 
@@ -78,8 +80,10 @@ impl CoreDB {
               let index = Index::new_with_threshold_params(
                 &storage_type,
                 &default_index_dir_path,
-                segment_size_threshold_bytes,
                 search_memory_budget_bytes,
+                append_log_messages_threshold,
+                append_metric_points_threshold,
+                uncommitted_segments_threshold,
               )
               .await?;
               index_map.insert(default_index_name.to_string(), index);
@@ -105,8 +109,10 @@ impl CoreDB {
             let index = Index::new_with_threshold_params(
               &storage_type,
               &default_index_dir_path,
-              segment_size_threshold_bytes,
               search_memory_budget_bytes,
+              append_log_messages_threshold,
+              append_metric_points_threshold,
+              uncommitted_segments_threshold,
             )
             .await?;
             index_map.insert(default_index_name.to_string(), index);
@@ -133,7 +139,12 @@ impl CoreDB {
   }
 
   /// Append a log message.
-  pub fn append_log_message(&self, time: u64, fields: &HashMap<String, String>, text: &str) {
+  pub async fn append_log_message(
+    &self,
+    time: u64,
+    fields: &HashMap<String, String>,
+    text: &str,
+  ) -> Result<(), CoreDBError> {
     debug!(
       "Appending log message in CoreDB: time {}, fields {:?}, text {}",
       time, fields, text
@@ -143,17 +154,18 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .append_log_message(time, fields, text);
+      .append_log_message(time, fields, text)
+      .await
   }
 
   /// Append a metric point.
-  pub fn append_metric_point(
+  pub async fn append_metric_point(
     &self,
     metric_name: &str,
     labels: &HashMap<String, String>,
     time: u64,
     value: f64,
-  ) {
+  ) -> Result<(), CoreDBError> {
     debug!(
       "Appending metric point in CoreDB: time {}, value {}, labels {:?}, name {}",
       time, value, labels, metric_name
@@ -163,7 +175,8 @@ impl CoreDB {
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .append_metric_point(metric_name, labels, time, value);
+      .append_metric_point(metric_name, labels, time, value)
+      .await
   }
 
   /// Search the log messages for given query and range.
@@ -251,13 +264,13 @@ impl CoreDB {
   }
 
   /// Commit the index to disk.
-  pub async fn commit(&self) -> Result<(), CoreDBError> {
+  pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
     self
       .index_map
       .get(self.get_default_index_name())
       .unwrap()
       .value()
-      .commit()
+      .commit(commit_current_segment)
       .await
   }
 
@@ -266,13 +279,12 @@ impl CoreDB {
   pub async fn refresh(config_dir_path: &str) -> Result<Self, CoreDBError> {
     // Read the settings and the index directory path.
     let settings = Settings::new(config_dir_path).unwrap();
-    let index_dir_path = settings.get_coredb_settings().get_index_dir_path();
-    let default_index_name = settings.get_coredb_settings().get_default_index_name();
+    let coredb_settings = settings.get_coredb_settings();
+    let index_dir_path = coredb_settings.get_index_dir_path();
+    let default_index_name = coredb_settings.get_default_index_name();
     let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
-    let search_memory_budget_bytes = settings
-      .get_coredb_settings()
-      .get_search_memory_budget_bytes();
-    let storage_type = settings.get_coredb_settings().get_storage_type()?;
+    let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+    let storage_type = coredb_settings.get_storage_type()?;
 
     // Refresh the index.
     let index = Index::refresh(
@@ -312,23 +324,22 @@ impl CoreDB {
 
   /// Create a new index.
   pub async fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
-    let index_dir_path = self.settings.get_coredb_settings().get_index_dir_path();
-    let segment_size_threshold_bytes = self
-      .settings
-      .get_coredb_settings()
-      .get_segment_size_threshold_bytes();
-    let search_memory_budget_bytes = self
-      .settings
-      .get_coredb_settings()
-      .get_search_memory_budget_bytes();
+    let coredb_settings = self.settings.get_coredb_settings();
+    let index_dir_path = coredb_settings.get_index_dir_path();
+    let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
+    let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
+    let append_metric_points_threshold = coredb_settings.get_metric_points_threshold();
+    let uncommitted_segments_threshold = coredb_settings.get_uncommitted_segments_threshold();
     let storage_type = self.settings.get_coredb_settings().get_storage_type()?;
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
     let index = Index::new_with_threshold_params(
       &storage_type,
       &index_dir_path,
-      segment_size_threshold_bytes,
       search_memory_budget_bytes,
+      append_log_messages_threshold,
+      append_metric_points_threshold,
+      uncommitted_segments_threshold,
     )
     .await?;
 
@@ -365,10 +376,11 @@ impl CoreDB {
     let temp_reference = self.index_map.get(default_index_name).unwrap();
     let index = temp_reference.value();
 
-    let all_segments_summaries_vec = index.get_all_segments_summaries().await?;
-    let segment_ids_to_delete = self
-      .get_retention_policy()
-      .apply(all_segments_summaries_vec);
+    // TODO: this does not need to read all_segments_summaries from disk - can use the one already
+    // in memory in Index::all_segments_summaries()
+    let all_segments_summaries = index.get_all_segments_summaries().await?;
+
+    let segment_ids_to_delete = self.get_retention_policy().apply(&all_segments_summaries);
 
     let mut deletion_futures: FuturesUnordered<_> = segment_ids_to_delete
       .into_iter()
@@ -411,17 +423,23 @@ mod tests {
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name_line.as_bytes()).unwrap();
+      file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file
-        .write_all(b"segment_size_threshold_megabytes = 0.1\n")
+        .write_all(b"metric_points_threshold = 10000\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 0.4\n")
+        .unwrap();
+      file
+        .write_all(b"uncommitted_segments_threshold = 10\n")
+        .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
   }
 
   #[tokio::test]
-  async fn test_basic() -> Result<(), CoreDBError> {
+  async fn test_coredb_basic() -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
@@ -437,32 +455,44 @@ mod tests {
     let start = Utc::now().timestamp_millis() as u64;
 
     // Add a few log messages.
-    coredb.append_log_message(
-      Utc::now().timestamp_millis() as u64,
-      &HashMap::new(),
-      "log message 1",
-    );
-    coredb.append_log_message(
-      Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
-      &HashMap::new(),
-      "log message 2",
-    );
+    coredb
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        "log message 1",
+      )
+      .await
+      .expect("Could not append log message");
+    coredb
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
+        &HashMap::new(),
+        "log message 2",
+      )
+      .await
+      .expect("Could not append log message");
 
     // Add a few metric points.
-    coredb.append_metric_point(
-      "some_metric",
-      &HashMap::new(),
-      Utc::now().timestamp_millis() as u64,
-      1.0,
-    );
-    coredb.append_metric_point(
-      "some_metric",
-      &HashMap::new(),
-      Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
-      2.0,
-    );
+    coredb
+      .append_metric_point(
+        "some_metric",
+        &HashMap::new(),
+        Utc::now().timestamp_millis() as u64,
+        1.0,
+      )
+      .await
+      .expect("Could not append metric point");
+    coredb
+      .append_metric_point(
+        "some_metric",
+        &HashMap::new(),
+        Utc::now().timestamp_millis() as u64 + 1, // Add a +1 to make the test predictable.
+        2.0,
+      )
+      .await
+      .expect("Could not append metric point");
 
-    coredb.commit().await.expect("Could not commit");
+    coredb.commit(true).await.expect("Could not commit");
     let coredb = CoreDB::refresh(config_dir_path).await?;
 
     let end = Utc::now().timestamp_millis() as u64;

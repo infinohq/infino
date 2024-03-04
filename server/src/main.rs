@@ -34,15 +34,15 @@ use axum::routing::{delete, put};
 use axum::{extract::State, routing::get, routing::post, Json, Router};
 use chrono::Utc;
 use coredb::request_manager::query_dsl_object::QueryDSLObject;
+use crossbeam::atomic::AtomicCell;
 use hyper::StatusCode;
+use lazy_static::lazy_static;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
-
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -57,6 +57,10 @@ use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
 use crate::utils::shutdown::shutdown_signal;
 
+lazy_static! {
+  static ref IS_SHUTDOWN: AtomicCell<bool> = AtomicCell::new(false);
+}
+
 /// Represents application state.
 struct AppState {
   // The queue will be created only if use_rabbitmq = yes is specified in server config.
@@ -64,7 +68,6 @@ struct AppState {
   coredb: CoreDB,
   settings: Settings,
   openai_helper: OpenAIHelper,
-  commit_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -103,15 +106,20 @@ struct SummarizeQueryResponse {
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
 /// can be asyncronously committed), and triggers retention policy every hour
-async fn commit_in_loop(
-  state: Arc<AppState>,
-  notify: Arc<Notify>,
-  shutdown_flag: Arc<Mutex<bool>>,
-) {
+async fn commit_in_loop(state: Arc<AppState>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let policy_interval_ms = 3600000; // 1hr in ms
   loop {
-    let result = state.coredb.commit().await;
+    let is_shutdown = IS_SHUTDOWN.load();
+
+    // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
+    // commit the current segment only when the server is shutting down.
+    let result = state.coredb.commit(is_shutdown).await;
+
+    if is_shutdown {
+      info!("Received shutdown in commit thread. Exiting...");
+      break;
+    }
 
     let current_time = Utc::now().timestamp_millis() as u64;
     // TODO: make trigger policy interval configurable
@@ -129,27 +137,13 @@ async fn commit_in_loop(
       last_trigger_policy_time = current_time;
     }
 
-    let shutdown = shutdown_flag.lock().await;
-    if *shutdown {
-      info!("Received shutdown in commit thread. Exiting...");
-      break;
-    }
-    drop(shutdown); // Explicitly drop the lock before awaiting
-
     if let Err(e) = result {
       error!("Error committing to coredb: {}", e);
     }
 
-    // Park the task until another thread calls notify.notify_one().
-    tokio::select! {
-        _ = notify.notified() => {
-            info!("Commit thread waking up as it was notified");
-        }
-        _ = sleep(Duration::from_millis(policy_interval_ms)) => {
-            info!("Commit thread waking up as it timed out. Timeout is {} ms", policy_interval_ms);
-        }
-    }
-  }
+    // Sleep for some time before committing again.
+    sleep(Duration::from_millis(100)).await;
+  } // end loop {..}
 }
 
 /// Axum application for Infino server.
@@ -157,8 +151,7 @@ async fn app(
   config_dir_path: &str,
   image_name: &str,
   image_tag: &str,
-  commit_notify: Arc<Notify>,
-) -> (Router, JoinHandle<()>, Arc<Mutex<bool>>, Arc<AppState>) {
+) -> (Router, JoinHandle<()>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -196,17 +189,11 @@ async fn app(
     coredb,
     settings,
     openai_helper,
-    commit_notify: commit_notify.clone(),
   });
 
   // Start a thread to periodically commit coredb.
   info!("Spawning new thread to periodically commit");
-  let commit_thread_shutdown_flag = Arc::new(Mutex::new(false));
-  let commit_thread_handle = tokio::spawn(commit_in_loop(
-    shared_state.clone(),
-    commit_notify.clone(),
-    commit_thread_shutdown_flag.clone(),
-  ));
+  let commit_thread_handle = tokio::spawn(commit_in_loop(shared_state.clone()));
 
   // Build our application with a route
   let router: Router = Router::new()
@@ -229,12 +216,7 @@ async fn app(
     .with_state(shared_state.clone())
     .layer(TraceLayer::new_for_http());
 
-  (
-    router,
-    commit_thread_handle,
-    commit_thread_shutdown_flag,
-    shared_state,
-  )
+  (router, commit_thread_handle, shared_state)
 }
 
 async fn run_server() {
@@ -245,16 +227,8 @@ async fn run_server() {
   let image_name = "rabbitmq";
   let image_tag = "3";
 
-  let commit_notify = Arc::new(Notify::new());
-
   // Create app.
-  let (app, commit_thread_handle, commit_thread_shutdown_flag, shared_state) = app(
-    config_dir_path,
-    image_name,
-    image_tag,
-    commit_notify.clone(),
-  )
-  .await;
+  let (app, commit_thread_handle, shared_state) = app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -285,11 +259,9 @@ async fn run_server() {
       .expect("Could not stop rabbitmq container");
   }
 
+  // Set the flag to indicate the commit thread to shutdown, and wait for it to finish.
+  IS_SHUTDOWN.store(true);
   info!("Shutting down commit thread and waiting for it to finish...");
-
-  // Signal the commit thread to shutdown, wake it up, and wait for it to finish.
-  *commit_thread_shutdown_flag.lock().await = true;
-  commit_notify.notify_one();
   commit_thread_handle
     .await
     .expect("Error while completing the commit thread");
@@ -429,10 +401,25 @@ async fn append_log(
       }
     }
 
-    state.coredb.append_log_message(timestamp, &fields, &text);
+    let result = state
+      .coredb
+      .append_log_message(timestamp, &fields, &text)
+      .await;
+
+    if let Err(error) = result {
+      match error {
+        CoreDBError::TooManyAppendsError() => {
+          // Handle the TooManyAppendsError specifically
+          return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
+        }
+        _ => {
+          // Catch-all for other errors
+          println!("An unexpected error occurred.");
+        }
+      }
+    }
   }
 
-  state.commit_notify.notify_one();
   Ok(())
 }
 
@@ -511,14 +498,27 @@ async fn append_metric(
           continue;
         }
 
-        state
+        let result = state
           .coredb
-          .append_metric_point(key, &labels, timestamp, value_f64);
+          .append_metric_point(key, &labels, timestamp, value_f64)
+          .await;
+
+        if let Err(error) = result {
+          match error {
+            CoreDBError::TooManyAppendsError() => {
+              // Handle the TooManyAppendsError specifically
+              return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
+            }
+            _ => {
+              // Catch-all for other errors
+              println!("An unexpected error occurred.");
+            }
+          }
+        }
       }
     }
   }
 
-  state.commit_notify.notify_one();
   Ok(())
 }
 
@@ -764,7 +764,7 @@ async fn search_metrics(
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
-  let result = state.coredb.commit().await;
+  let result = state.coredb.commit(true).await;
 
   match result {
     Ok(result) => Ok(result),
@@ -891,10 +891,14 @@ mod tests {
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name.as_bytes()).unwrap();
+      file.write_all(b"log_messages_threshold = 1000\n").unwrap();
+      file.write_all(b"metric_points_threshold = 1000\n").unwrap();
       file
-        .write_all(b"segment_size_threshold_megabytes = 0.1\n")
+        .write_all(b"uncommitted_segments_threshold = 10\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 0.4\n").unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 0.4\n")
+        .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
 
@@ -962,6 +966,19 @@ mod tests {
       .unwrap();
 
     assert_eq!(log_messages_expected.get_messages().len() as u64, hits);
+
+    // Flush the index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri("/flush")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
@@ -1118,6 +1135,19 @@ mod tests {
       _ => panic!("Unexpected status value in response"),
     }
 
+    // Flush the index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri("/flush")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
     // Sleep for 2 seconds to simulate delay or wait for a condition.
     sleep(Duration::from_secs(2)).await;
 
@@ -1175,7 +1205,7 @@ mod tests {
     );
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3", Arc::new(Notify::new())).await;
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Check whether the / works.
     let response = app
@@ -1361,7 +1391,7 @@ mod tests {
     );
 
     // Create the app.
-    let (mut app, _, _, _) = app(config_dir_path, "rabbitmq", "3", Arc::new(Notify::new())).await;
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Create an index.
     let index_name = "test_index";

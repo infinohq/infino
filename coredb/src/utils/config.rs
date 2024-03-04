@@ -37,11 +37,11 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 pub struct CoreDBSettings {
   index_dir_path: String,
   default_index_name: String,
-  segment_size_threshold_megabytes: f32,
 
-  // This has to be greater than 4*segment_size_threshold_megabytes. Otherwise,
-  // a ConfigError is raised while parsing.
-  memory_budget_megabytes: f32,
+  log_messages_threshold: u32,
+  metric_points_threshold: u32,
+  search_memory_budget_megabytes: f32,
+  uncommitted_segments_threshold: u32,
   retention_days: u32,
   storage_type: String,
   cloud_storage_bucket_name: Option<String>,
@@ -77,18 +77,20 @@ impl CoreDBSettings {
     DEFAULT_CONFIG_FILE_NAME
   }
 
-  pub fn get_segment_size_threshold_bytes(&self) -> u64 {
-    (self.segment_size_threshold_megabytes * 1024.0 * 1024.) as u64
+  pub fn get_log_messages_threshold(&self) -> u32 {
+    self.log_messages_threshold
   }
 
-  pub fn get_memory_budget_bytes(&self) -> u64 {
-    (self.memory_budget_megabytes * 1024.0 * 1024.0) as u64
+  pub fn get_metric_points_threshold(&self) -> u32 {
+    self.metric_points_threshold
+  }
+
+  pub fn get_uncommitted_segments_threshold(&self) -> u32 {
+    self.uncommitted_segments_threshold
   }
 
   pub fn get_search_memory_budget_bytes(&self) -> u64 {
-    // Search memory budget is total memory budget, minus the size of one segment (typically for insertions).
-    ((self.memory_budget_megabytes - self.segment_size_threshold_megabytes) * 1024.0 * 1024.0)
-      as u64
+    (self.search_memory_budget_megabytes * 1024.0 * 1024.0) as u64
   }
 
   pub fn get_retention_days(&self) -> u32 {
@@ -191,15 +193,6 @@ impl Settings {
     // Deserialize (and thus freeze) the entire configuration.
     let settings: Settings = config.try_deserialize()?;
 
-    // Run validation checks.
-    if settings.coredb.memory_budget_megabytes
-      < 4.0 * settings.coredb.segment_size_threshold_megabytes
-    {
-      return Err(ConfigError::Message(
-        "Memory budget should be at least 4 times the segment size threshold".to_owned(),
-      ));
-    }
-
     if settings.coredb.storage_type != "local"
       && settings.coredb.cloud_storage_bucket_name.is_none()
     {
@@ -247,10 +240,16 @@ mod tests {
       file
         .write_all(b"default_index_name = \".default\"\n")
         .unwrap();
+      file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file
-        .write_all(b"segment_size_threshold_megabytes = 1024\n")
+        .write_all(b"metric_points_threshold = 10000\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 4096\n").unwrap();
+      file
+        .write_all(b"uncommitted_segments_threshold = 10\n")
+        .unwrap();
+      file
+        .write_all(b"search_memory_budget_megabytes = 4096\n")
+        .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
     }
@@ -260,16 +259,8 @@ mod tests {
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
     assert_eq!(coredb_settings.get_default_index_name(), ".default");
     assert_eq!(
-      coredb_settings.get_segment_size_threshold_bytes(),
-      1024 * 1024 * 1024
-    );
-    assert_eq!(
-      coredb_settings.get_memory_budget_bytes(),
-      4096 * 1024 * 1024
-    );
-    assert_eq!(
       coredb_settings.get_search_memory_budget_bytes(),
-      (4096 - 1024) * 1024 * 1024
+      4096 * 1024 * 1024
     );
 
     assert_eq!(coredb_settings.get_retention_days(), 30);
@@ -290,21 +281,18 @@ mod tests {
         let mut file = File::create(config_file_path).unwrap();
         file.write_all(b"[coredb]\n").unwrap();
         file
-          .write_all(b"segment_size_threshold_megabytes=1\n")
+          .write_all(b"search_memory_budget_megabytes=4\n")
           .unwrap();
-        file.write_all(b"memory_budget_megabytes=4\n").unwrap();
       }
       let settings = Settings::new(config_dir_path).unwrap();
       let coredb_settings = settings.get_coredb_settings();
       assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
-      assert_eq!(
-        coredb_settings.get_segment_size_threshold_bytes(),
-        1024 * 1024
-      );
-      assert_eq!(coredb_settings.get_memory_budget_bytes(), 4 * 1024 * 1024);
+      assert_eq!(coredb_settings.get_log_messages_threshold(), 1000);
+      assert_eq!(coredb_settings.get_metric_points_threshold(), 10000);
+      assert_eq!(coredb_settings.get_uncommitted_segments_threshold(), 10);
       assert_eq!(
         coredb_settings.get_search_memory_budget_bytes(),
-        3 * 1024 * 1024
+        4 * 1024 * 1024
       );
       assert_eq!(coredb_settings.get_default_index_name(), ".default");
     }
@@ -315,7 +303,7 @@ mod tests {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
 
-    // Create a config where the memory budget is too low.
+    // Create a config where a few keys such as 'log_messages_threshold' are missing.
     let config_file_path = get_joined_path(config_dir_path, DEFAULT_CONFIG_FILE_NAME);
     {
       let mut file = File::create(config_file_path).unwrap();
@@ -327,9 +315,8 @@ mod tests {
         .write_all(b"default_index_name = \".default\"\n")
         .unwrap();
       file
-        .write_all(b"segment_size_threshold_megabytes = 1024\n")
+        .write_all(b"search_memory_budget_megabytes = 2048\n")
         .unwrap();
-      file.write_all(b"memory_budget_megabytes = 2048\n").unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
     }

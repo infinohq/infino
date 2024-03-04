@@ -4,6 +4,10 @@ use std::time::Duration;
 
 #[test]
 fn test_cargo_run_infino() {
+  // Note that running this test creates an empty index infino/server/data/.default
+  // In case the index format changes, this test may fail and the above index needs to be
+  // manually cleaned up.
+
   // Set the config directory path.
   std::env::set_var("INFINO_CONFIG_DIR_PATH", "../config");
 
