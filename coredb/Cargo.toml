@@ -37,7 +37,6 @@ unicode-segmentation = "1.10.1"
 zstd = "0.13.0"
 
 [dev-dependencies]
-env_logger = "*"
 rand = "0.8.5"
 tempfile = "*"
 tempdir = "*"

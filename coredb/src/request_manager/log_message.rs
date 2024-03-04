@@ -1,12 +1,6 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
-// This code is intended to be the base layer for implementing
-// metrics queries in Infino. Support for any specific query languages,
-// such as PromQL, should be built on top of this. If basic functionality
-// is missing in this layer then please feel free to expand the capabilities
-// of this layer.
-
 use crate::log::log_message::LogMessage;
 use serde::{Deserialize, Serialize};
 
