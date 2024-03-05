@@ -335,7 +335,7 @@ impl Segment {
   }
 
   /// Read the segment from the specified directory.
-  pub async fn refresh(storage: &Storage, dir: &str) -> Result<(Segment, u64), CoreDBError> {
+  pub async fn refresh(storage: &Storage, dir: &str) -> Result<Segment, CoreDBError> {
     let metadata_path = get_joined_path(dir, METADATA_FILE_NAME);
     let terms_path = get_joined_path(dir, TERMS_FILE_NAME);
     let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
@@ -343,23 +343,13 @@ impl Segment {
     let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
     let time_series_map_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
 
-    let (metadata, metadata_size): (Metadata, _) = storage.read(&metadata_path).await?;
-    let (terms, terms_size): (DashMap<String, u32>, _) = storage.read(&terms_path).await?;
-    let (inverted_map, inverted_map_size): (InvertedMap, _) =
-      storage.read(&inverted_map_path).await?;
-    let (forward_map, forward_map_size): (DashMap<u32, LogMessage>, _) =
-      storage.read(&forward_map_path).await?;
-    let (labels, labels_size): (DashMap<String, u32>, _) = storage.read(&labels_path).await?;
-    let (time_series_map, time_series_map_size): (TimeSeriesMap, _) =
-      storage.read(&time_series_map_path).await?;
+    let metadata: Metadata = storage.read(&metadata_path).await?;
+    let terms: DashMap<String, u32> = storage.read(&terms_path).await?;
+    let inverted_map: InvertedMap = storage.read(&inverted_map_path).await?;
+    let forward_map: DashMap<u32, LogMessage> = storage.read(&forward_map_path).await?;
+    let labels: DashMap<String, u32> = storage.read(&labels_path).await?;
+    let time_series_map: TimeSeriesMap = storage.read(&time_series_map_path).await?;
     let commit_lock = TokioMutex::new(());
-
-    let total_size = metadata_size
-      + terms_size
-      + inverted_map_size
-      + forward_map_size
-      + labels_size
-      + time_series_map_size;
 
     let segment = Segment {
       metadata,
@@ -371,7 +361,7 @@ impl Segment {
       commit_lock,
     };
 
-    Ok((segment, total_size))
+    Ok(segment)
   }
 
   /// Return the log messages within the given time range corresponding to the given log message ids.
@@ -551,7 +541,7 @@ mod tests {
     assert!(uncompressed_original_segment_size > 0);
     assert!(compressed_original_segment_size > 0);
 
-    let (from_disk_segment, from_disk_segment_size) = Segment::refresh(&storage, segment_dir_path)
+    let from_disk_segment = Segment::refresh(&storage, segment_dir_path)
       .await
       .expect("Error while refreshing segment");
 
@@ -566,6 +556,7 @@ mod tests {
     );
 
     // Verify that the segment size from disk is almost the same as the original segment size.
+    let from_disk_segment_size = from_disk_segment.get_uncompressed_size();
     assert!(i64::abs((from_disk_segment_size - uncompressed_original_segment_size) as i64) < 32);
 
     // Test metadata.

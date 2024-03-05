@@ -607,7 +607,7 @@ impl Index {
       ));
     }
 
-    let (all_segments_summaries, _): (DashMap<u32, SegmentSummary>, _) =
+    let all_segments_summaries: DashMap<u32, SegmentSummary> =
       self.storage.read(&all_segments_file).await?;
 
     info!(
@@ -707,7 +707,7 @@ impl Index {
       "Loading segment with segment number {} and path {}",
       segment_number, segment_dir_path
     );
-    let (segment, _) = Segment::refresh(&self.storage, &segment_dir_path).await?;
+    let segment = Segment::refresh(&self.storage, &segment_dir_path).await?;
 
     Ok(segment)
   }
@@ -724,7 +724,7 @@ impl Index {
 
     // Read metadata.
     let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
-    let (metadata, _): (Metadata, _) = storage.read(metadata_path.as_str()).await?;
+    let metadata: Metadata = storage.read(metadata_path.as_str()).await?;
 
     let commit_refresh_lock = Arc::new(TokioMutex::new(thread::current().id()));
     let create_new_segment_lock = Arc::new(TokioMutex::new(thread::current().id()));
@@ -1183,10 +1183,9 @@ mod tests {
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      let (original_segment, original_segment_size) =
-        Segment::refresh(&storage, &original_segment_path)
-          .await
-          .expect("Could not refresh segment");
+      let original_segment = Segment::refresh(&storage, &original_segment_path)
+        .await
+        .expect("Could not refresh segment");
       assert_eq!(
         original_segment.get_log_message_count(),
         original_segment_num_log_messages
@@ -1195,7 +1194,7 @@ mod tests {
         original_segment.get_metric_point_count(),
         original_segment_num_metric_points
       );
-      assert!(original_segment_size > 0);
+      assert!(original_segment.get_uncompressed_size() > 0);
 
       let mut new_segment_num_log_messages = 0;
       let mut new_segment_num_metric_points = 0;
@@ -1239,10 +1238,9 @@ mod tests {
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .unwrap();
-      let (mut original_segment, original_segment_size) =
-        Segment::refresh(&storage, &original_segment_path)
-          .await
-          .expect("Could not refresh segment");
+      let mut original_segment = Segment::refresh(&storage, &original_segment_path)
+        .await
+        .expect("Could not refresh segment");
       assert_eq!(index.memory_segments_map.len(), 2);
 
       assert_eq!(
@@ -1254,7 +1252,7 @@ mod tests {
         original_segment_num_metric_points
       );
 
-      assert!(original_segment_size > 0);
+      assert!(original_segment.get_uncompressed_size() > 0);
 
       {
         // Write these in a separate block so that reference of current_segment from all_segments_map
@@ -1303,7 +1301,7 @@ mod tests {
       let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
-      (original_segment, _) = Segment::refresh(&storage, &original_segment_path)
+      original_segment = Segment::refresh(&storage, &original_segment_path)
         .await
         .expect("Could not refresh segment");
 

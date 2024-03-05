@@ -127,6 +127,12 @@ impl From<std::io::Error> for CoreDBError {
   }
 }
 
+impl From<serde_json::Error> for CoreDBError {
+  fn from(error: serde_json::Error) -> Self {
+    CoreDBError::IOError(error.to_string())
+  }
+}
+
 impl From<QueryError> for CoreDBError {
   fn from(error: QueryError) -> Self {
     CoreDBError::QueryError(error)
