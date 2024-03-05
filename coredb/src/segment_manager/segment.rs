@@ -266,39 +266,30 @@ impl Segment {
     // Function to serialize a component to a given path.
     async fn serialize_component<T: serde::Serialize>(
       component: &T,
-      path: String,
+      dir: &str,
+      file_path: &str,
       storage: &Storage,
-    ) -> (u64, u64) {
-      // TODO: handle the error gracefully.
-      storage
-        .write(component, &path)
-        .await
-        .unwrap_or_else(|_| panic!("Could not write to file {}", path))
+    ) -> Result<(u64, u64), CoreDBError> {
+      let path = get_joined_path(dir, file_path);
+      let retval = storage.write(component, &path).await?;
+      Ok(retval)
     }
 
-    // Serialize each of the components of a segment. Run these concurrently in the same task using tokio::join.
+    // Run serialization tasks concurrently using tokio::join!
     let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = tokio::join!(
-      serialize_component(&self.terms, get_joined_path(dir, TERMS_FILE_NAME), storage),
-      serialize_component(
-        &self.inverted_map,
-        get_joined_path(dir, INVERTED_MAP_FILE_NAME),
-        storage
-      ),
-      serialize_component(
-        &self.forward_map,
-        get_joined_path(dir, FORWARD_MAP_FILE_NAME),
-        storage
-      ),
-      serialize_component(
-        &self.labels,
-        get_joined_path(dir, LABELS_FILE_NAME),
-        storage
-      ),
-      serialize_component(
-        &self.time_series_map,
-        get_joined_path(dir, TIME_SERIES_FILE_NAME),
-        storage
-      ),
+      serialize_component(&self.terms, dir, TERMS_FILE_NAME, storage),
+      serialize_component(&self.inverted_map, dir, INVERTED_MAP_FILE_NAME, storage),
+      serialize_component(&self.forward_map, dir, FORWARD_MAP_FILE_NAME, storage),
+      serialize_component(&self.labels, dir, LABELS_FILE_NAME, storage),
+      serialize_component(&self.time_series_map, dir, TIME_SERIES_FILE_NAME, storage)
+    );
+
+    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = (
+      terms_result?,
+      inverted_map_result?,
+      forward_map_result?,
+      labels_result?,
+      time_series_result?,
     );
 
     // Calculate uncompressed and compressed segment size.
@@ -322,9 +313,9 @@ impl Segment {
     self
       .metadata
       .update_segment_size(uncompressed_segment_size, compressed_segment_size);
-    storage
-      .write(&self.metadata, &get_joined_path(dir, METADATA_FILE_NAME))
-      .await?;
+
+    // Seriazlize the metadata to disk.
+    serialize_component(&self.metadata, dir, METADATA_FILE_NAME, storage).await?;
 
     debug!(
       "Serialized segment to {} bytes uncompressed, {} bytes compressed",
