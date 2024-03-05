@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
 use object_store::azure::MicrosoftAzureBuilder;
@@ -124,30 +123,36 @@ impl Storage {
     to_write: &T,
     file_path: &str,
   ) -> Result<(u64, u64), CoreDBError> {
-    let input = serde_json::to_string(&to_write).unwrap();
-    let input = input.as_bytes();
-    let uncomepressed_length = input.len() as u64;
+    // Serialize the to_write input in memory.
+    let mut serialized_data = Vec::new(); // Serialize directly to a Vec<u8>
+    serde_json::to_writer(&mut serialized_data, &to_write)?;
+    let uncompressed_length = serialized_data.len() as u64;
 
-    let mut output = Vec::new();
+    // Compress the serialized input.
+    let compressed_data = zstd::encode_all(&serialized_data[..], COMPRESSION_LEVEL)?;
+    let compressed_length = compressed_data.len() as u64;
 
-    zstd::stream::copy_encode(input, &mut output, COMPRESSION_LEVEL).unwrap();
-    let output = Bytes::from(output);
-
-    let compressed_length = output.len() as u64;
+    // Write the compressed input to object store.
     let path = Path::from(file_path);
-    self.object_store.put(&path, output).await?;
+    self.object_store.put(&path, compressed_data.into()).await?;
 
-    Ok((uncomepressed_length, compressed_length))
+    Ok((uncompressed_length, compressed_length))
   }
 
-  /// Read the map from the given file. Returns the map and the number of bytes read after decompression.
-  pub async fn read<T: DeserializeOwned>(&self, file_path: &str) -> Result<(T, u64), CoreDBError> {
+  /// Reads the given file and returns an object of type T after decompression.
+  pub async fn read<T: DeserializeOwned>(&self, file_path: &str) -> Result<T, CoreDBError> {
+    // Read the compressed data from the object store.
     let path = Path::from(file_path);
     let get_result = self.object_store.get(&path).await?;
-    let bytes = get_result.bytes().await?;
-    let data = zstd::decode_all(&bytes[..])?;
-    let retval: T = serde_json::from_slice(&data).unwrap();
-    Ok((retval, data.len() as u64))
+    let compressed_data = get_result.bytes().await?;
+
+    // Set up the decoder for streaming decompression.
+    let mut decoder = zstd::stream::Decoder::new(&compressed_data[..])?;
+
+    // Deserialize directly from the decompressed stream.
+    let retval: T = serde_json::from_reader(&mut decoder)?;
+
+    Ok(retval)
   }
 
   #[cfg(test)]
@@ -323,15 +328,13 @@ mod tests {
     assert!(uncompressed > 0);
     assert!(compressed > 0);
 
-    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage
+    let received: BTreeMap<String, u32> = storage
       .read(file_path)
       .await
       .expect("Could not read from storage");
     for i in 1..=num_keys {
       assert!(received.get(&format!("{prefix}{i}")).unwrap() == &i);
     }
-    // The number of bytes read is uncompressed - so it should be equal to the uncompressed number of bytes written.
-    assert!(num_bytes_read == uncompressed);
   }
 
   #[test_case(StorageType::Local; "with local storage")]
@@ -377,7 +380,7 @@ mod tests {
     assert!(uncompressed > 0);
     assert!(compressed > 0);
 
-    let (received, num_bytes_read): (Vec<_>, _) = storage
+    let received: Vec<_> = storage
       .read(file_path)
       .await
       .expect("Could not read from storage");
@@ -385,8 +388,6 @@ mod tests {
     for i in 1..=num_keys {
       assert!(received.contains(&format!("{prefix}{i}")));
     }
-    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
-    assert!(num_bytes_read == uncompressed);
   }
 
   #[test_case(StorageType::Local; "with local storage")]
@@ -426,14 +427,11 @@ mod tests {
     assert!(uncompressed > 0);
     assert!(compressed > 0);
 
-    let (received, num_bytes_read): (BTreeMap<String, u32>, _) = storage
+    let received: BTreeMap<String, u32> = storage
       .read(file_path)
       .await
       .expect("Could not read from storage");
     assert!(received.is_empty());
-
-    // The number of bytes read is uncompressed - so it should be greater than or equal to the number of bytes written uncompressed.
-    assert!(num_bytes_read == uncompressed);
   }
 
   #[test_case(StorageType::Local; "with local storage")]
