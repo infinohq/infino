@@ -275,27 +275,35 @@ impl Segment {
       Ok(retval)
     }
 
-    let terms_result = serialize_component(&self.terms, dir, TERMS_FILE_NAME, storage).await?;
-    let inverted_map_result =
-      serialize_component(&self.inverted_map, dir, INVERTED_MAP_FILE_NAME, storage).await?;
-    let forward_map_result =
-      serialize_component(&self.forward_map, dir, FORWARD_MAP_FILE_NAME, storage).await?;
-    let labels_result = serialize_component(&self.labels, dir, LABELS_FILE_NAME, storage).await?;
-    let time_series_result =
-      serialize_component(&self.time_series_map, dir, TIME_SERIES_FILE_NAME, storage).await?;
+    // Run serialization tasks concurrently using tokio::join!
+    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = tokio::join!(
+      serialize_component(&self.terms, dir, TERMS_FILE_NAME, storage),
+      serialize_component(&self.inverted_map, dir, INVERTED_MAP_FILE_NAME, storage),
+      serialize_component(&self.forward_map, dir, FORWARD_MAP_FILE_NAME, storage),
+      serialize_component(&self.labels, dir, LABELS_FILE_NAME, storage),
+      serialize_component(&self.time_series_map, dir, TIME_SERIES_FILE_NAME, storage)
+    );
+
+    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = (
+      terms_result?,
+      inverted_map_result?,
+      forward_map_result?,
+      labels_result?,
+      time_series_result?,
+    );
 
     // Calculate uncompressed and compressed segment size.
     let (uncompressed_segment_size, compressed_segment_size) = (
-      &terms_result.0
-        + &inverted_map_result.0
-        + &forward_map_result.0
-        + &labels_result.0
-        + &time_series_result.0,
-      &terms_result.1
-        + &inverted_map_result.1
-        + &forward_map_result.1
-        + &labels_result.1
-        + &time_series_result.1,
+      terms_result.0
+        + inverted_map_result.0
+        + forward_map_result.0
+        + labels_result.0
+        + time_series_result.0,
+      terms_result.1
+        + inverted_map_result.1
+        + forward_map_result.1
+        + labels_result.1
+        + time_series_result.1,
     );
 
     // Update the metadata with segment size.
