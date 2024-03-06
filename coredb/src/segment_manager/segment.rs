@@ -22,11 +22,7 @@ use crate::utils::range::is_overlap;
 use crate::utils::sync::{Arc, RwLock, TokioMutex};
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
-const TERMS_FILE_NAME: &str = "terms.bin";
-const INVERTED_MAP_FILE_NAME: &str = "inverted_map.bin";
-const FORWARD_MAP_FILE_NAME: &str = "forward_map.bin";
-const LABELS_FILE_NAME: &str = "labels.bin";
-const TIME_SERIES_FILE_NAME: &str = "time_series.bin";
+const SEGMENT_FILE_NAME: &str = "segment.bin";
 
 /// A segment with inverted map (term-ids to log-message-ids) as well
 /// as forward map (log-message-ids to log messages).
@@ -275,36 +271,16 @@ impl Segment {
       Ok(retval)
     }
 
-    // Run serialization tasks concurrently using tokio::join!
-    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = tokio::join!(
-      serialize_component(&self.terms, dir, TERMS_FILE_NAME, storage),
-      serialize_component(&self.inverted_map, dir, INVERTED_MAP_FILE_NAME, storage),
-      serialize_component(&self.forward_map, dir, FORWARD_MAP_FILE_NAME, storage),
-      serialize_component(&self.labels, dir, LABELS_FILE_NAME, storage),
-      serialize_component(&self.time_series_map, dir, TIME_SERIES_FILE_NAME, storage)
+    let combined = (
+      &self.terms,
+      &self.inverted_map,
+      &self.forward_map,
+      &self.labels,
+      &self.time_series_map,
     );
 
-    let (terms_result, inverted_map_result, forward_map_result, labels_result, time_series_result) = (
-      terms_result?,
-      inverted_map_result?,
-      forward_map_result?,
-      labels_result?,
-      time_series_result?,
-    );
-
-    // Calculate uncompressed and compressed segment size.
-    let (uncompressed_segment_size, compressed_segment_size) = (
-      terms_result.0
-        + inverted_map_result.0
-        + forward_map_result.0
-        + labels_result.0
-        + time_series_result.0,
-      terms_result.1
-        + inverted_map_result.1
-        + forward_map_result.1
-        + labels_result.1
-        + time_series_result.1,
-    );
+    let (uncompressed_segment_size, compressed_segment_size) =
+      serialize_component(&combined, dir, "segment.bin", storage).await?;
 
     // Update the metadata with segment size.
     let (uncompressed_metadata_size, compressed_metadata_size) = self.metadata.get_metadata_size();
@@ -328,18 +304,17 @@ impl Segment {
   /// Read the segment from the specified directory.
   pub async fn refresh(storage: &Storage, dir: &str) -> Result<Segment, CoreDBError> {
     let metadata_path = get_joined_path(dir, METADATA_FILE_NAME);
-    let terms_path = get_joined_path(dir, TERMS_FILE_NAME);
-    let inverted_map_path = get_joined_path(dir, INVERTED_MAP_FILE_NAME);
-    let forward_map_path = get_joined_path(dir, FORWARD_MAP_FILE_NAME);
-    let labels_path = get_joined_path(dir, LABELS_FILE_NAME);
-    let time_series_map_path = get_joined_path(dir, TIME_SERIES_FILE_NAME);
+    let segment_path = get_joined_path(dir, SEGMENT_FILE_NAME);
 
     let metadata: Metadata = storage.read(&metadata_path).await?;
-    let terms: DashMap<String, u32> = storage.read(&terms_path).await?;
-    let inverted_map: InvertedMap = storage.read(&inverted_map_path).await?;
-    let forward_map: DashMap<u32, LogMessage> = storage.read(&forward_map_path).await?;
-    let labels: DashMap<String, u32> = storage.read(&labels_path).await?;
-    let time_series_map: TimeSeriesMap = storage.read(&time_series_map_path).await?;
+    #[allow(clippy::type_complexity)]
+    let (terms, inverted_map, forward_map, labels, time_series_map): (
+      DashMap<String, u32>,
+      InvertedMap,
+      DashMap<u32, LogMessage>,
+      DashMap<String, u32>,
+      TimeSeriesMap,
+    ) = storage.read(&segment_path).await?;
     let commit_lock = TokioMutex::new(());
 
     let segment = Segment {

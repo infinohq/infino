@@ -5,13 +5,13 @@ use crate::utils::{
   error::QueryError,
   tokenize::{tokenize, FIELD_DELIMITER},
 };
-use chrono::{DateTime, Datelike, Duration, Utc};
+use chrono::{DateTime, Datelike, Duration, TimeDelta, Utc};
 use log::debug;
 
 /// Parses a time range string into a `Duration` object, handling Prometheus-style units.
 pub fn parse_time_range(s: &str) -> Result<Duration, QueryError> {
   if s.is_empty() {
-    return Ok(Duration::seconds(0));
+    return Ok(TimeDelta::try_seconds(0).unwrap());
   }
 
   let units = s.chars().last().ok_or(QueryError::UnsupportedQuery(
@@ -22,11 +22,11 @@ pub fn parse_time_range(s: &str) -> Result<Duration, QueryError> {
     .map_err(|_| QueryError::UnsupportedQuery("Invalid number in duration".to_string()))?;
 
   match units {
-    's' => Ok(Duration::seconds(value)),
-    'm' => Ok(Duration::minutes(value)),
-    'h' => Ok(Duration::hours(value)),
-    'd' => Ok(Duration::days(value)),
-    'w' => Ok(Duration::weeks(value)),
+    's' => Ok(TimeDelta::try_seconds(value).unwrap()),
+    'm' => Ok(TimeDelta::try_minutes(value).unwrap()),
+    'h' => Ok(TimeDelta::try_hours(value).unwrap()),
+    'd' => Ok(TimeDelta::try_days(value).unwrap()),
+    'w' => Ok(TimeDelta::try_weeks(value).unwrap()),
     _ => Err(QueryError::UnsupportedQuery(format!(
       "Unsupported duration unit: {:?}",
       s

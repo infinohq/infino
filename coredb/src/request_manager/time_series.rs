@@ -9,7 +9,7 @@
 // of this layer.
 
 use crate::metric::metric_point::MetricPoint;
-use chrono::{Datelike, TimeZone, Timelike, Utc};
+use chrono::{Datelike, TimeDelta, TimeZone, Timelike, Utc};
 use regex::Regex;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -166,7 +166,7 @@ impl QueryTimeSeries {
         // Calculating the start of the next month to get the last day of the current month
         if let Some(next_month_start) = Utc
           .with_ymd_and_hms(year_for_next_month, next_month, 1, 0, 0, 0)
-          .map(|dt| dt - chrono::Duration::days(1))
+          .map(|dt| dt - TimeDelta::try_days(1).unwrap())
           .latest()
         {
           let days = next_month_start.day();
