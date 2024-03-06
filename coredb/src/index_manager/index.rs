@@ -252,7 +252,7 @@ impl Index {
 
     if memory_evicted_so_far > 0 {
       info!(
-        "Evicted {} bytes of segments  to meet the memory budget.",
+        "Evicted {} bytes of segments to meet the memory budget",
         memory_evicted_so_far
       );
     }
