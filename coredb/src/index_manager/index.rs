@@ -224,10 +224,9 @@ impl Index {
 
     // More efficient sort for primitive data types.
     // We are sorting by the end times, so that oldest segments will be deallocated first.
-    let memory_to_evict = memory_consumed - self.search_memory_budget_bytes;
-
     segment_data.sort_unstable_by_key(|k| k.2);
 
+    let memory_to_evict = memory_consumed - self.search_memory_budget_bytes;
     let current_segment_number = self.metadata.get_current_segment_number();
     let mut memory_evicted_so_far = 0;
 
