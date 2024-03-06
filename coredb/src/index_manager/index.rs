@@ -205,73 +205,56 @@ impl Index {
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
   /// within the search_memory_budget_bytes.
   fn shrink_to_fit(&self) {
-    // Create a vector that has each segment's number, uncompressed size and end time.
-    let mut segment_data: Vec<(u32, u64, u64)> = Vec::new();
-    let mut memory_consumed = 0;
-    for entry in self.memory_segments_map.iter() {
-      let segment_number = *entry.key();
+    // Reserve the initial capacity to improve memory allocation efficiency.
+    let mut segment_data: Vec<(u32, u64, u64)> = Vec::with_capacity(self.memory_segments_map.len());
+
+    let mut memory_consumed: u64 = 0;
+    for entry in &self.memory_segments_map {
+      let segment_number = entry.key();
       let segment = entry.value();
       let uncompressed_size = segment.get_uncompressed_size();
       let end_time = segment.get_end_time();
-      segment_data.push((segment_number, uncompressed_size, end_time));
+      segment_data.push((*segment_number, uncompressed_size, end_time));
       memory_consumed += uncompressed_size;
     }
 
     if memory_consumed <= self.search_memory_budget_bytes {
-      // We are within the memory budget - no eviction needed.
-      return;
+      return; // Early exit if we are already under budget.
     }
 
-    // Find out the memory to evict (from the older segments), so that we'll still be
-    // within the memory budget.
+    // More efficient sort for primitive data types.
+    // We are sorting by the end times, so that oldest segments will be deallocated first.
+    segment_data.sort_unstable_by_key(|k| k.2);
+
     let memory_to_evict = memory_consumed - self.search_memory_budget_bytes;
-
-    info!(
-      "Need to evict segments upto size: {} bytes",
-      memory_to_evict
-    );
-
-    // Sort this vector by end time in ascending order (i.e., oldest segments first).
-    segment_data.sort_by_key(|&(_, _, end_time)| end_time);
-
-    // Counter to track memory evicted so far.
+    let current_segment_number = self.metadata.get_current_segment_number();
     let mut memory_evicted_so_far = 0;
 
-    // Iterate and evict the oldest segments first.
-    for segment in segment_data {
-      let segment_number = segment.0;
-      let uncompressed_size = segment.1;
-
-      // Do not evict the current segment - as it would be needed for inserts.
-      let current_segment_number = self.metadata.get_current_segment_number();
+    for (segment_number, uncompressed_size, _) in segment_data {
+      // Skip current or uncommitted segments, as these aren't yet written to object store.
       if segment_number == current_segment_number
         || self
           .uncommitted_segment_numbers
           .contains_key(&segment_number)
       {
-        debug!(
-          "Not evicting the segment with segment_number {} as it is the current segment or is in the uncommitted segment numbers",
-          segment_number
-        );
         continue;
       }
 
-      // We already evicted enough memory - stop evicting.
       if memory_evicted_so_far >= memory_to_evict {
-        debug!(
-          "Already evicted {} bytes of memory, greather than or equal to {}. Not evicting further.",
-          memory_evicted_so_far, memory_to_evict
-        );
-        break;
+        break; // Stop if we have evicted enough.
       }
 
-      // Evict the segment with segment_number from memory_segments_map.
       if let Some((_, segment)) = self.memory_segments_map.remove(&segment_number) {
-        info!("Evicting segment with segment_number {}", segment_number);
-        // Drop the segment to free the memory.
-        drop(segment);
-        memory_evicted_so_far += uncompressed_size;
+        memory_evicted_so_far += uncompressed_size; // Update evicted memory.
+        drop(segment); // Explicitly drop to signify memory release.
       }
+    }
+
+    if memory_evicted_so_far > 0 {
+      info!(
+        "Evicted {} bytes of segments to meet the memory budget",
+        memory_evicted_so_far
+      );
     }
   }
 
