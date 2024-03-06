@@ -5,19 +5,20 @@ docker-img-tag ?= infinohq/infino:latest
 
 .PHONY: docs docker-build docker-run docker-push docker-build-multiarch build-os-plugin clean-os-plugin clean-all
 
-ifdef debug
-	$(info in debug mode, used for building non-optimized binaries...)
-  release :=
+ifdef dev
+	$(info in dev mode, used for building non-optimized binaries...)
+	release :=
 else
  	$(info in release mode, used for building optimized binaries...)
-  release :=--release
+	release :=--release
 endif
 
+# Use 'make run dev' to run dev binary, or 'make run' to run release binary
 run:
 	echo "Running $(prog) server..."
 	cargo run $(release) --bin $(prog)
 
-run-debug:
+run-debug-log:
 	echo "Running $(prog) server in debug mode..."
 	RUST_LOG=debug cargo run $(release) --bin $(prog)
 
