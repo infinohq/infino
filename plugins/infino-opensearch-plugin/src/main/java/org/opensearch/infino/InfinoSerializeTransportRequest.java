@@ -83,11 +83,11 @@ public class InfinoSerializeTransportRequest {
     private static final String defaultInfinoEndpoint = "http://localhost:3000";
 
     /**
-     * Constructor
+     * Constructor. Takes a request and serializes it to the protected member
+     * {@code finalUrl}.
      *
-     * Takes a request and serializes to the protected member, finalUrl.
-     *
-     * @param request - the request to be serialized.
+     * @param request The request to be serialized.
+     * @throws IOException If an I/O error occurs during the serialization process.
      */
     public InfinoSerializeTransportRequest(TransportRequest request) throws IOException {
         if (request instanceof IndexRequest) {
@@ -112,6 +112,17 @@ public class InfinoSerializeTransportRequest {
         }
     }
 
+    /**
+     * Parses a {@link SearchRequest} to configure the necessary parameters for a
+     * search operation.
+     * This includes setting the index name, endpoint URL, operation type, HTTP
+     * method, and optionally
+     * adjusting the index type for metrics.
+     *
+     * @param searchRequest The {@link SearchRequest} to be parsed.
+     * @throws IOException If there is an error serializing the search request body
+     *                     to JSON.
+     */
     private void parseRequest(SearchRequest searchRequest) throws IOException {
         setIndexName(searchRequest.indices()[0]);
         setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
@@ -129,6 +140,17 @@ public class InfinoSerializeTransportRequest {
         }
     }
 
+    /**
+     * Parses an {@link IndexRequest} to configure the necessary parameters for an
+     * index operation.
+     * This includes setting the index name, endpoint URL, operation type, HTTP
+     * method, and optionally
+     * adjusting the index type for metrics.
+     *
+     * @param indexRequest The {@link IndexRequest} to be parsed.
+     * @throws IOException If there is an error serializing the index request body
+     *                     to JSON.
+     */
     private void parseRequest(IndexRequest indexRequest) throws IOException {
         setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setIndexName(indexRequest.indices()[0]);
@@ -146,6 +168,17 @@ public class InfinoSerializeTransportRequest {
         }
     }
 
+    /**
+     * Parses a {@link CreateIndexRequest} to configure the necessary parameters for
+     * a create index operation.
+     * This includes setting the index name, endpoint URL, operation type, HTTP
+     * method, and optionally
+     * adjusting the index type for metrics.
+     *
+     * @param createIndexRequest The {@link CreateIndexRequest} to be parsed.
+     * @throws IOException If there is an error serializing the create index request
+     *                     body to JSON.
+     */
     private void parseRequest(CreateIndexRequest createIndexRequest) throws IOException {
         setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setIndexName(createIndexRequest.indices()[0]);
@@ -163,6 +196,16 @@ public class InfinoSerializeTransportRequest {
         }
     }
 
+    /**
+     * Parses a {@link DeleteIndexRequest} to configure the necessary parameters for
+     * a delete index operation.
+     * This includes setting the index name, endpoint URL, operation type, and HTTP
+     * method.
+     *
+     * @param deleteIndexRequest The {@link DeleteIndexRequest} to be parsed.
+     * @throws IOException If there is an error serializing the delete index request
+     *                     body to JSON.
+     */
     private void parseRequest(DeleteIndexRequest deleteIndexRequest) throws IOException {
         setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setOperation(InfinoOperation.DELETE_INDEX);
@@ -196,8 +239,8 @@ public class InfinoSerializeTransportRequest {
 
     /**
      * Sets the index type.
-     *
-     * @return void
+     * 
+     * @param indexType - the index type.
      */
     protected void setIndexType(InfinoIndexType indexType) {
         this.indexType = indexType;
@@ -213,9 +256,9 @@ public class InfinoSerializeTransportRequest {
     }
 
     /**
-     * Sets the index name.
-     *
-     * @return void
+     * Sets the method name.
+     * 
+     * @param method - the HTTP method.
      */
     protected void setMethod(RestRequest.Method method) {
         this.method = method;
@@ -232,8 +275,8 @@ public class InfinoSerializeTransportRequest {
 
     /**
      * Sets the Infino operation.
-     *
-     * @return void
+     * 
+     * @param operation - the operation to be performed on Infino.
      */
     protected void setOperation(InfinoOperation operation) {
         this.operation = operation;
@@ -250,8 +293,9 @@ public class InfinoSerializeTransportRequest {
 
     /**
      * Sets the request body for Search requests.
-     *
-     * @return void
+     * 
+     * @param searchRequest - the search request object
+     * @throws IOException - could not build request body
      */
     protected void setSearchBody(SearchRequest searchRequest) throws IOException {
         SearchSourceBuilder searchSourceBuilder = searchRequest.source();
@@ -266,7 +310,8 @@ public class InfinoSerializeTransportRequest {
     /**
      * Sets the request body for Index requests.
      *
-     * @return void
+     * @param indexRequest - the index request object
+     * @throws IOException - could not build request body
      */
     protected void setIndexBody(IndexRequest indexRequest) throws IOException {
         try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
@@ -280,7 +325,8 @@ public class InfinoSerializeTransportRequest {
     /**
      * Sets the request body for Create Index requests.
      *
-     * @return void
+     * @param createIndexRequest - the create index request object
+     * @throws IOException - could not build request body
      */
     protected void setCreateIndexBody(CreateIndexRequest createIndexRequest) throws IOException {
         try (XContentBuilder builder = XContentFactory.jsonBuilder().startObject()) {
@@ -310,6 +356,12 @@ public class InfinoSerializeTransportRequest {
         }
     }
 
+    /**
+     * Sets the request body for Delete Index requests.
+     *
+     * @param deleteIndexRequest - the delete index request object
+     * @throws IOException - could not build request body
+     */
     protected void setDeleteIndexBody(DeleteIndexRequest deleteIndexRequest) throws IOException {
         try (XContentBuilder builder = XContentFactory.jsonBuilder().startObject()) {
             builder.endObject();
@@ -330,8 +382,8 @@ public class InfinoSerializeTransportRequest {
 
     /**
      * Sets the index name.
-     *
-     * @return void
+     * 
+     * @param indexName - the index name string.
      */
     protected void setIndexName(String indexName) {
         this.indexName = indexName;
@@ -340,7 +392,7 @@ public class InfinoSerializeTransportRequest {
     /**
      * Sets the Infino endpoint.
      *
-     * @return void
+     * @param infinoEndpoint - the endpoint string.
      */
     protected void setEndpoint(String infinoEndpoint) {
         this.infinoEndpoint = infinoEndpoint;
@@ -461,7 +513,12 @@ public class InfinoSerializeTransportRequest {
         SUMMARIZE,
     }
 
-    // Helper method to build query strings
+    /**
+     * Helper method to build query strings.
+     *
+     * @param params Parameters to include in the query string.
+     * @return The constructed query string.
+     */
     private String buildQueryString(String... params) {
         StringBuilder queryBuilder = new StringBuilder();
         for (int i = 0; i < params.length; i += 2) {
@@ -473,7 +530,12 @@ public class InfinoSerializeTransportRequest {
         return queryBuilder.toString();
     }
 
-    // Helper method to encode URL parameters
+    /**
+     * Helper method to encode URL parameters.
+     *
+     * @param param The parameter to encode.
+     * @return The encoded parameter.
+     */
     private String encodeParam(String param) {
         try {
             return URLEncoder.encode(param, StandardCharsets.UTF_8.toString());

@@ -184,11 +184,9 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      *
      * We exponentially backoff for 429, 503, and 504 responses
      *
-     * @param request the request to execute
-     * @param client  client for executing actions on the local node
+     * @param request  the request to execute
+     * @param listener the listener for executing actions
      * @return the action to execute
-     * @throws IOException if an I/O exception occurred parsing the request and
-     *                     preparing for execution
      */
     public AsyncSender interceptTransportActions(TransportRequest request, ActionListener<TransportResponse> listener) {
 
@@ -376,8 +374,8 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      * 
      * Use reflection for dynamic imports.
      * 
-     * @param restStatus      - the RestStatus code for the response
-     * @param responseMessage - the message to be sent
+     * @param statusCode   - the RestStatus code for the response
+     * @param responseBody - the message body to be sent
      * @return HttpResponseTransportResponse - constructed response
      */
     public HttpResponseTransportResponse createTransportResponse(int statusCode, String responseBody) {
