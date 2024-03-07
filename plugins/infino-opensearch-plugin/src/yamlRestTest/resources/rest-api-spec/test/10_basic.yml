@@ -1,8 +1,34 @@
-"Test that the Infino plugin is loaded in OpenSearch":
+---
+setup:
+  - do:
+      indices.create:
+        index: test_index
+        body:
+          settings:
+            index:
+              number_of_shards: 1
+              number_of_replicas: 0
+
+---
+"Test Cat Plugins Endpoint":
   - do:
       cat.plugins:
-        local: true
         h: component
-
   - match:
       $body: /^infino-opensearch-plugin/
+
+---
+"Index and Retrieve a Document":
+  - do:
+      index:
+        index: test_index
+        id: "1"
+        body: { "field": "value" }
+  - do:
+      get:
+        index: test_index
+        id: "1"
+  - match:
+      _source:
+        field: "value"
+

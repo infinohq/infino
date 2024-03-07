@@ -34,18 +34,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.io.IOException;
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -310,7 +306,7 @@ public class InfinoRestHandler extends BaseRestHandler {
         InfinoSerializeRequestURI infinoSerializeRequestURI = null;
         HttpClient httpClient = getHttpClient();
 
-        logger.info("Serializing REST request for Infino");
+        logger.info("Infino REST Handler: Serializing REST request for Infino");
 
         // Serialize the request to a valid Infino URL
         try {
@@ -324,7 +320,8 @@ public class InfinoRestHandler extends BaseRestHandler {
         method = infinoSerializeRequestURI.getMethod();
         indexName = infinoSerializeRequestURI.getIndexName();
 
-        logger.info("Serialized REST request for Infino to " + infinoSerializeRequestURI.getFinalUrl());
+        logger.info("Infino REST Handler: Serialized REST request for Infino to "
+                + infinoSerializeRequestURI.getFinalUrl());
 
         // Create Lucene mirror index for the Infino collection if it doesn't exist
         if (method == PUT)
@@ -336,7 +333,7 @@ public class InfinoRestHandler extends BaseRestHandler {
                         HttpRequest.BodyPublishers.ofString(request.content().utf8ToString()))
                 .build();
 
-        logger.info("Sending HTTP Request to Infino: " + infinoSerializeRequestURI.getFinalUrl());
+        logger.info("Infino REST Handler: Sending HTTP Request to Infino: " + infinoSerializeRequestURI.getFinalUrl());
 
         // Send request to Infino server and create a listener to handle the response.
         // Execute the HTTP request using our own thread factory.

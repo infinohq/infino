@@ -59,18 +59,19 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.opensearch.action.admin.indices.exists.indices.IndicesExistsRequest;
-import org.opensearch.action.admin.indices.exists.indices.IndicesExistsResponse;
+import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.master.AcknowledgedResponse;
-import org.opensearch.client.node.NodeClient;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.rest.RestRequest;
+import org.opensearch.tasks.Task;
 import org.opensearch.transport.Transport.Connection;
+import org.opensearch.transport.TransportChannel;
 import org.opensearch.transport.TransportInterceptor;
 import org.opensearch.transport.TransportRequest;
+import org.opensearch.transport.TransportRequestHandler;
 import org.opensearch.transport.TransportRequestOptions;
 import org.opensearch.transport.TransportResponseHandler;
 
@@ -137,7 +138,10 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      * @return a configured InfinoSerializeTransportRequest object
      */
     protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(TransportRequest request) {
+        logger.info("initializing Transport Registration=======================================");
+
         try {
+            logger.info("Loading Transport Interceptor.");
             return new InfinoSerializeTransportRequest(request);
         } catch (IOException e) {
             logger.error("Error serializing REST URI for Infino: ", e);
@@ -173,9 +177,63 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         infinoThreadPool.shutdown();
     }
 
+    @Override
+    public <T extends TransportRequest> TransportRequestHandler<T> interceptHandler(String action,
+            String executor,
+            boolean forceExecution,
+            TransportRequestHandler<T> actualHandler) {
+
+        logger.info("Executing Infino Transport Handler with action " + action + " and executor " + executor);
+
+        return new TransportRequestHandler<T>() {
+            @Override
+            public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
+                if (shouldBeIntercepted(request)) {
+                    processTransportActions(request, new ActionListener<TransportResponse>() {
+                        @Override
+                        public void onResponse(TransportResponse response) {
+                            try {
+                                channel.sendResponse(response);
+                            } catch (IOException e) {
+                                logger.error("Failed to send response", e);
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(Exception e) {
+                            try {
+                                channel.sendResponse(e);
+                            } catch (IOException ex) {
+                                logger.error("Failed to send error response", ex);
+                            }
+                        }
+                    });
+                } else {
+                    // Forward non-intercepted requests to the actual handler
+                    actualHandler.messageReceived(request, channel, task);
+                }
+            }
+        };
+    }
+
+    /*
+     * TODO: Use the task to make this decision, not the request
+     */
+    private <T extends TransportRequest> boolean shouldBeIntercepted(T request) {
+        if ((request instanceof IndexRequest && ((IndexRequest) request).indices()[0].startsWith("infino-")) ||
+                (request instanceof SearchRequest && ((SearchRequest) request).indices()[0].startsWith("infino-")) ||
+                (request instanceof CreateIndexRequest
+                        && ((CreateIndexRequest) request).indices()[0].startsWith("infino-"))
+                ||
+                request instanceof DeleteIndexRequest
+                        && ((DeleteIndexRequest) request).indices()[0].startsWith("infino-")) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     /**
-     * Implement the request, creating or deleting Lucene index mirrors on the local
-     * node.
      *
      * The first half of the method (before the thread executor) is parallellized by
      * OpenSearch's thread pool so we can serialize in parallel. However network
@@ -188,7 +246,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      * @param listener the listener for executing actions
      * @return the action to execute
      */
-    public AsyncSender interceptTransportActions(TransportRequest request, ActionListener<TransportResponse> listener) {
+    public AsyncSender processTransportActions(TransportRequest request, ActionListener<TransportResponse> listener) {
 
         RestRequest.Method method;
         String indexName;
@@ -197,7 +255,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         InfinoOperation operation;
         BytesReference body;
 
-        logger.info("Serializing REST request for Infino");
+        logger.info("Transport Interceptor: Serializing REST request to Infino");
 
         // Serialize the request to a valid Infino URL
         try {
@@ -215,6 +273,8 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             };
         }
 
+        logger.info("Transport Interceptor: Serialized REST request for Infino to " + infinoRequest.getFinalUrl());
+
         // set local members we can pass to the thread context
         method = infinoRequest.getMethod();
         indexName = infinoRequest.getIndexName();
@@ -230,11 +290,12 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                                         () -> new ByteArrayInputStream(body.toBytesRef().bytes)))
                 .build();
 
-        logger.info("Sending HTTP Request to Infino: " + infinoRequest.getFinalUrl());
+        logger.debug("Transport Interceptor: Sending HTTP Request to Infino: " + infinoRequest.getFinalUrl());
 
         // Send request to Infino server and create a listener to handle the response.
         // Execute the HTTP request using our own thread factory.
         return new AsyncSender() {
+
             @Override
             public <T extends TransportResponse> void sendRequest(Connection connection, String action,
                     TransportRequest request, TransportRequestOptions options,
@@ -243,6 +304,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                     sendRequestWithBackoff(httpClient, forwardRequest, listener, indexName, method, operation, 0);
                 });
             }
+
         };
     }
 

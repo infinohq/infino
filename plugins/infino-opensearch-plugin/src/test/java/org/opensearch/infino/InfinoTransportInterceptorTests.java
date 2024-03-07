@@ -280,7 +280,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockSearchRequest, listener);
+        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
         asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
@@ -329,7 +329,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockSearchRequest, listener);
+        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
         asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
@@ -378,7 +378,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockSearchRequest, listener);
+        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
         asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
@@ -426,7 +426,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockSearchRequest, listener);
+        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
         asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
@@ -469,7 +469,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockIndexRequest, listener);
+        AsyncSender asyncSender = interceptor.processTransportActions(mockIndexRequest, listener);
         asyncSender.sendRequest(null, null, mockIndexRequest, null, null);
 
         // Wait for the async operation to complete or timeout
@@ -518,7 +518,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockCreateIndexRequest, listener);
+        AsyncSender asyncSender = interceptor.processTransportActions(mockCreateIndexRequest, listener);
         asyncSender.sendRequest(null, null, mockCreateIndexRequest, null, null);
 
         // Wait for the async operation to complete or timeout
@@ -559,7 +559,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockDeleteIndexRequest, listener);
+        AsyncSender asyncSender = interceptor.processTransportActions(mockDeleteIndexRequest, listener);
         asyncSender.sendRequest(null, null, mockDeleteIndexRequest, null, null);
 
         // Wait for the async operation to complete or timeout

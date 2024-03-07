@@ -8,7 +8,8 @@
 
 package org.opensearch.infino;
 
-import org.opensearch.client.node.NodeClient;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.IndexScopedSettings;
@@ -28,12 +29,12 @@ import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
 
-import java.util.Collections;
-
 /**
- * Implement both the REST API handler for client calls
+ * Implement the REST API handler and transport interceptor for client calls
  */
 public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin {
+
+    private static final Logger logger = LogManager.getLogger(InfinoPlugin.class);
 
     // This methods overrides the method from the parent class to hand a list
     // of additional REST handlers to OpenSearch at pre-defined paths.
@@ -47,6 +48,8 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
             final IndexNameExpressionResolver indexNameExpressionResolver,
             final Supplier nodesInCluster) {
 
+        logger.info("Registering REST Handler");
+
         return singletonList(new InfinoRestHandler());
     }
 
@@ -55,7 +58,10 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
     @Override
     public List<TransportInterceptor> getTransportInterceptors(NamedWriteableRegistry namedWriteableRegistry,
             ThreadContext threadContext) {
-        return Collections.singletonList(new InfinoTransportInterceptor());
+
+        logger.info("Registering Transport Interceptor");
+
+        return singletonList(new InfinoTransportInterceptor());
     }
 
 }
