@@ -15,6 +15,7 @@
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
 
+mod commit;
 mod queue_manager;
 mod utils;
 
@@ -25,6 +26,8 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use std::collections::HashMap;
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::result::Result;
 use std::sync::Arc;
 
@@ -42,7 +45,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -51,6 +53,7 @@ use coredb::utils::error::{CoreDBError, QueryError};
 use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
+use crate::commit::commit_in_loop;
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
@@ -67,6 +70,7 @@ struct AppState {
   queue: Option<RabbitMQ>,
   coredb: CoreDB,
   settings: Settings,
+  wal_file: Arc<File>,
   openai_helper: OpenAIHelper,
 }
 
@@ -102,48 +106,6 @@ struct SummarizeQuery {
 struct SummarizeQueryResponse {
   summary: String,
   results: QueryDSLObject,
-}
-
-/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
-/// can be asyncronously committed), and triggers retention policy every hour
-async fn commit_in_loop(state: Arc<AppState>) {
-  let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
-  let policy_interval_ms = 3600000; // 1hr in ms
-  loop {
-    let is_shutdown = IS_SHUTDOWN.load();
-
-    // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
-    // commit the current segment only when the server is shutting down.
-    let result = state.coredb.commit(is_shutdown).await;
-
-    if is_shutdown {
-      info!("Received shutdown in commit thread. Exiting...");
-      break;
-    }
-
-    let current_time = Utc::now().timestamp_millis() as u64;
-    // TODO: make trigger policy interval configurable
-    if current_time - last_trigger_policy_time > policy_interval_ms {
-      info!("Triggering retention policy on index in coredb");
-      let result = state.coredb.trigger_retention().await;
-
-      if let Err(e) = result {
-        error!(
-          "Error triggering retention policy on index in coredb: {}",
-          e
-        );
-      }
-
-      last_trigger_policy_time = current_time;
-    }
-
-    if let Err(e) = result {
-      error!("Error committing to coredb: {}", e);
-    }
-
-    // Sleep for some time before committing again.
-    sleep(Duration::from_millis(100)).await;
-  } // end loop {..}
 }
 
 /// Axum application for Infino server.
@@ -183,12 +145,21 @@ async fn app(
   }
 
   let openai_helper = OpenAIHelper::new();
+  let wal_file = Arc::new(
+    std::fs::OpenOptions::new()
+      .create(true)
+      .write(true)
+      .truncate(true)
+      .open("/tmp/wal.log")
+      .unwrap(),
+  );
 
   let shared_state = Arc::new(AppState {
     queue,
     coredb,
     settings,
     openai_helper,
+    wal_file,
   });
 
   // Start a thread to periodically commit coredb.
@@ -352,6 +323,12 @@ async fn append_log(
   Json(log_json): Json<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
+
+  state
+    .wal_file
+    .clone()
+    .write_all(&log_json.to_string().into_bytes()[..])
+    .unwrap();
 
   let is_queue = state.queue.is_some();
 
@@ -835,6 +812,7 @@ mod tests {
   use serde_json::json;
   use tempdir::TempDir;
   use test_case::test_case;
+  use tokio::time::{sleep, Duration};
   use tower::Service;
   use urlencoding::encode;
 
