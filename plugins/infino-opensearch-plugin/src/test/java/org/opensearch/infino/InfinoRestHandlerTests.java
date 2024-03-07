@@ -273,8 +273,7 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
     }
 
     // We use our own FakeRestChannel (from BaseRestHandler tests) because we need
-    // to
-    // access latch to wait on threads in the handler.
+    // to access latch to wait on threads in the handler.
     public final class FakeRestChannel extends AbstractRestChannel {
         protected final CountDownLatch latch;
         private final AtomicInteger responses = new AtomicInteger();

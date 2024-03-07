@@ -77,8 +77,10 @@ import static org.opensearch.rest.RestRequest.Method.*;
  * This effectively serves as the public API for Infino.
  *
  * Notes:
- * 1. Search window defaults to the past 30 days if not specified by the request.
- * 2. To access Infino indexes, the REST caller must prefix the index name with '/infino/'.
+ * 1. Search window defaults to the past 30 days if not specified by the
+ * request.
+ * 2. To access Infino indexes, the REST caller must prefix the index name with
+ * '/infino/'.
  * 3. Index creation or deletion is mirrored on Infino and in OpenSarch.
  * 4. We use our own thread pool to manage Infino requests.
  *
@@ -105,8 +107,10 @@ public class InfinoRestHandler extends BaseRestHandler {
     private static final Logger logger = LogManager.getLogger(InfinoRestHandler.class);
 
     /**
-     * Using a custom thread factory that can be used by the ScheduledExecutorService.
-     * We do this to add custom prefixes to the thread name. This will make debugging
+     * Using a custom thread factory that can be used by the
+     * ScheduledExecutorService.
+     * We do this to add custom prefixes to the thread name. This will make
+     * debugging
      * easier, if we ever have to debug.
      */
     protected static final class CustomThreadFactory implements ThreadFactory {
@@ -364,7 +368,6 @@ public class InfinoRestHandler extends BaseRestHandler {
         int statusCode = response.statusCode();
         if (shouldRetry(statusCode)) {
             long retryAfter = getRetryAfter(response, attempt);
-            // Use schedule method to retry after a delay
             infinoThreadPool.schedule(() -> sendRequestWithBackoff(processHttpClient, request, channel, client,
                     indexName, method, attempt + 1), retryAfter, TimeUnit.MILLISECONDS);
         } else {
@@ -380,8 +383,6 @@ public class InfinoRestHandler extends BaseRestHandler {
         return response.headers().firstValueAsLong("Retry-After").orElse((long) Math.pow(2, attempt) * 1000L);
     }
 
-    // Modify handleException and handleResponse methods to use the above utility
-    // methods
     private Void handleException(Throwable e, RestChannel channel, NodeClient client, String indexName,
             RestRequest.Method method) {
         logger.error("Error in async HTTP call", e);

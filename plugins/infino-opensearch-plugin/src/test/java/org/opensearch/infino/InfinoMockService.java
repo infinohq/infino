@@ -8,7 +8,6 @@
 
 package org.opensearch.infino;
 
-import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestResponse;
 
 public class InfinoMockService {

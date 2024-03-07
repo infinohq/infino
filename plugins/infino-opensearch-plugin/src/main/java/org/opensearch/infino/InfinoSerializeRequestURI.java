@@ -285,7 +285,8 @@ public class InfinoSerializeRequestURI {
 
         // Iterate over the request parameters and add them to the map
         request.params().forEach((key, value) -> {
-            requestParamsMap.put(key, value);
+            String value_holder = request.param(key, "");
+            requestParamsMap.put(key, value_holder);
             logger.debug("Query parameters from OpenSearch to Infino: " + key + " is " + value);
         });
 
