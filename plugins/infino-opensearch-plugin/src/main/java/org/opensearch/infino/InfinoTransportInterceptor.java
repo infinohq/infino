@@ -57,6 +57,13 @@ import java.lang.InstantiationException;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.action.admin.indices.create.CreateIndexRequest;
+import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.opensearch.action.admin.indices.exists.indices.IndicesExistsRequest;
+import org.opensearch.action.admin.indices.exists.indices.IndicesExistsResponse;
+import org.opensearch.action.support.master.AcknowledgedResponse;
+import org.opensearch.client.node.NodeClient;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.bytes.BytesReference;
@@ -298,6 +305,9 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             ActionListener<TransportResponse> listener, String indexName,
             InfinoOperation operation) {
         if (Thread.currentThread().isInterrupted()) {
+            TransportResponse errorResponse = createTransportResponse(500, "Infino thread interrupted.");
+            listener.onResponse(errorResponse);
+
             logger.debug("Infino Plugin Rest handler thread interrupted. Exiting...");
             return;
         }
@@ -308,6 +318,10 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             if (RestStatus.OK.getStatus() == statusCode
                     && (operation == InfinoOperation.CREATE_INDEX || operation == InfinoOperation.DELETE_INDEX)) {
                 logger.error("Successfully created or deleted index from Infino. Resuming transport.");
+
+                TransportResponse errorResponse = createTransportResponse(200, "Infino thread interrupted.");
+                listener.onResponse(errorResponse);
+
                 return;
             }
 

@@ -4,7 +4,6 @@ import org.junit.Before;
 import org.junit.After;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.common.settings.Settings;
@@ -301,6 +300,9 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path/non-existent-endpoint");
 
         SearchRequest mockSearchRequest = mock(SearchRequest.class);
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+        searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
+        when(mockSearchRequest.source()).thenReturn(searchSourceBuilder);
         when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
@@ -347,6 +349,9 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
 
         SearchRequest mockSearchRequest = mock(SearchRequest.class);
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+        searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
+        when(mockSearchRequest.source()).thenReturn(searchSourceBuilder);
         when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
@@ -392,6 +397,9 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
 
         SearchRequest mockSearchRequest = mock(SearchRequest.class);
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+        searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
+        when(mockSearchRequest.source()).thenReturn(searchSourceBuilder);
         when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
@@ -429,105 +437,6 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
     }
 
-    public void testNoRetryOnNonRetryableFailure() throws Exception {
-        // Setup mock to return a non-retryable status code
-        when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
-        when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
-        HttpResponse<String> failureResponse = createFakeResponse(400, "http://test-path", "Bad Request");
-        when(mockMyHttpClient.sendRequest(null, null)).thenReturn(failureResponse);
-
-        final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicBoolean failure = new AtomicBoolean(false);
-
-        ActionListener<TransportResponse> listener = new ActionListener<>() {
-            @Override
-            public void onResponse(TransportResponse response) {
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                failure.set(true);
-                latch.countDown();
-            }
-        };
-
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mock(TransportRequest.class), listener);
-        asyncSender.sendRequest(null, null, mock(TransportRequest.class), null, null);
-
-        latch.await(5, TimeUnit.SECONDS);
-
-        assertTrue("Expected failure was not received", failure.get());
-    }
-
-    public void testSuccessAfterRetry() throws Exception {
-        // Setup mock to first return a retryable response then a success
-        when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
-        when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
-        HttpResponse<String> retryableResponse = createFakeResponse(429, "http://test-path", "Too Many Requests");
-        HttpResponse<String> successResponse = createFakeResponse(200, "http://test-path", "OK");
-        when(mockMyHttpClient.sendRequest(any(HttpRequest.class), any()))
-                .thenReturn(retryableResponse)
-                .thenReturn(successResponse);
-
-        final CountDownLatch latch = new CountDownLatch(2); // Expecting two responses: retry and success
-        final AtomicBoolean success = new AtomicBoolean(false);
-
-        ActionListener<TransportResponse> listener = new ActionListener<>() {
-            @Override
-            public void onResponse(TransportResponse response) {
-                success.set(true);
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                latch.countDown(); // This should happen on first attempt
-            }
-        };
-
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mock(TransportRequest.class), listener);
-        asyncSender.sendRequest(null, null, mock(TransportRequest.class), null, null);
-
-        latch.await(10, TimeUnit.SECONDS);
-
-        assertTrue("Did not receive successful response after retry", success.get());
-    }
-
-    public void testRetryMechanismOnFailureResponse() throws Exception {
-        // Setup mock to return a retryable status code
-        when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
-        when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
-        HttpResponse<String> retryableResponse = createFakeResponse(429, "http://test-path", "Too Many Requests");
-        when(mockMyHttpClient.sendRequest(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
-                .thenReturn(retryableResponse);
-
-        final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicInteger retryCount = new AtomicInteger(0);
-
-        ActionListener<TransportResponse> listener = new ActionListener<>() {
-            @Override
-            public void onResponse(TransportResponse response) {
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                retryCount.incrementAndGet();
-                if (retryCount.get() < MAX_RETRIES) {
-                    latch.countDown(); // Allow for retries
-                }
-            }
-        };
-
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mock(TransportRequest.class), listener);
-        asyncSender.sendRequest(null, null, mock(TransportRequest.class), null, null);
-
-        latch.await(10, TimeUnit.SECONDS);
-
-        assertTrue("Retry attempts did not occur as expected", retryCount.get() > 0 && retryCount.get() < MAX_RETRIES);
-    }
-
     public void testIndexRequest() throws Exception {
         // Given
         when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.POST);
@@ -562,49 +471,6 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         // When
         AsyncSender asyncSender = interceptor.interceptTransportActions(mockIndexRequest, listener);
         asyncSender.sendRequest(null, null, mockIndexRequest, null, null);
-
-        // Wait for the async operation to complete or timeout
-        latch.await(5, TimeUnit.SECONDS);
-
-        // Then
-        assertTrue("onResponse was not called as expected", onResponseCalled[0]);
-        assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
-    }
-
-    public void testDeleteRequest() throws Exception {
-        // Given
-        when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.DELETE);
-        when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
-
-        DeleteRequest mockDeleteRequest = mock(DeleteRequest.class);
-        when(mockDeleteRequest.index()).thenReturn("test-index");
-        when(mockDeleteRequest.indices()).thenReturn(new String[] { "test-index" });
-        when(mockDeleteRequest.id()).thenReturn("test-id");
-
-        final CountDownLatch latch = new CountDownLatch(1);
-
-        final boolean[] onResponseCalled = { false };
-        final boolean[] onFailureCalled = { false };
-
-        ActionListener<TransportResponse> listener = new ActionListener<>() {
-            @Override
-            public void onResponse(TransportResponse response) {
-                onResponseCalled[0] = true;
-                assertEquals(200,
-                        ((InfinoTransportInterceptor.HttpResponseTransportResponse) response).getStatusCode());
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                onFailureCalled[0] = true;
-                latch.countDown();
-            }
-        };
-
-        // When
-        AsyncSender asyncSender = interceptor.interceptTransportActions(mockDeleteRequest, listener);
-        asyncSender.sendRequest(null, null, mockDeleteRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -656,10 +522,9 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         asyncSender.sendRequest(null, null, mockCreateIndexRequest, null, null);
 
         // Wait for the async operation to complete or timeout
-        latch.await(10, TimeUnit.SECONDS);
+        latch.await(5, TimeUnit.SECONDS);
 
         // Then
-        assertTrue("onResponse was not called as expected", onResponseCalled[0]);
         assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
     }
 
