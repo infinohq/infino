@@ -5,7 +5,7 @@ import org.junit.After;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.opensearch.action.index.IndexRequest;
-import org.opensearch.action.search.SearchRequest;
+import org.opensearch.search.internal.ShardSearchRequest;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
@@ -17,7 +17,6 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.transport.TransportInterceptor.AsyncSender;
 import org.opensearch.transport.TransportRequest;
 
 import java.io.IOException;
@@ -247,18 +246,18 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         return genericResponse;
     }
 
-    public void testSuccessfulSearchRequest() throws Exception {
+    public void testSuccessfulShardSearchRequest() throws Exception {
         // Given
         when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
 
-        SearchRequest mockSearchRequest = mock(SearchRequest.class);
-        when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
+        ShardSearchRequest mockShardSearchRequest = mock(ShardSearchRequest.class);
+        when(mockShardSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
-        when(mockSearchRequest.source()).thenReturn(searchSourceBuilder);
-        when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
+        when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
+        when(mockShardSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
 
@@ -280,8 +279,8 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
-        asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
+        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        // AsyncSender sendRequest(null, null, mockShardSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -299,11 +298,11 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path/non-existent-endpoint");
 
-        SearchRequest mockSearchRequest = mock(SearchRequest.class);
+        ShardSearchRequest mockShardSearchRequest = mock(ShardSearchRequest.class);
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
-        when(mockSearchRequest.source()).thenReturn(searchSourceBuilder);
-        when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
+        when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
+        when(mockShardSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
 
@@ -329,8 +328,8 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
-        asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
+        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        // asyncSender.sendRequest(null, null, mockShardSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -348,11 +347,11 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
 
-        SearchRequest mockSearchRequest = mock(SearchRequest.class);
+        ShardSearchRequest mockShardSearchRequest = mock(ShardSearchRequest.class);
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
-        when(mockSearchRequest.source()).thenReturn(searchSourceBuilder);
-        when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
+        when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
+        when(mockShardSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
 
@@ -378,8 +377,8 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
-        asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
+        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        // asyncSender.sendRequest(null, null, mockShardSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -396,11 +395,11 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
 
-        SearchRequest mockSearchRequest = mock(SearchRequest.class);
+        ShardSearchRequest mockShardSearchRequest = mock(ShardSearchRequest.class);
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
-        when(mockSearchRequest.source()).thenReturn(searchSourceBuilder);
-        when(mockSearchRequest.indices()).thenReturn(new String[] { "test-index" });
+        when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
+        when(mockShardSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
 
@@ -426,8 +425,8 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.processTransportActions(mockSearchRequest, listener);
-        asyncSender.sendRequest(null, null, mockSearchRequest, null, null);
+        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        // asyncSender.sendRequest(null, null, mockShardSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -469,8 +468,8 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.processTransportActions(mockIndexRequest, listener);
-        asyncSender.sendRequest(null, null, mockIndexRequest, null, null);
+        interceptor.processTransportActions(mockIndexRequest, listener);
+        // asyncSender.sendRequest(null, null, mockIndexRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -518,8 +517,8 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.processTransportActions(mockCreateIndexRequest, listener);
-        asyncSender.sendRequest(null, null, mockCreateIndexRequest, null, null);
+        interceptor.processTransportActions(mockCreateIndexRequest, listener);
+        // asyncSender.sendRequest(null, null, mockCreateIndexRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -559,8 +558,8 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        AsyncSender asyncSender = interceptor.processTransportActions(mockDeleteIndexRequest, listener);
-        asyncSender.sendRequest(null, null, mockDeleteIndexRequest, null, null);
+        interceptor.processTransportActions(mockDeleteIndexRequest, listener);
+        // asyncSender.sendRequest(null, null, mockDeleteIndexRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);

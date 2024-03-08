@@ -26,6 +26,7 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.search.internal.ShardSearchRequest;
 import org.opensearch.transport.TransportRequest;
 
 import static org.opensearch.rest.RestRequest.Method.*;
@@ -94,8 +95,8 @@ public class InfinoSerializeTransportRequest {
             IndexRequest indexRequest = (IndexRequest) request;
             parseRequest(indexRequest);
             constructInfinoRequestURI();
-        } else if (request instanceof SearchRequest) {
-            SearchRequest searchRequest = (SearchRequest) request;
+        } else if (request instanceof ShardSearchRequest) {
+            ShardSearchRequest searchRequest = (ShardSearchRequest) request;
             parseRequest(searchRequest);
             constructInfinoRequestURI();
         } else if (request instanceof CreateIndexRequest) {
@@ -123,7 +124,7 @@ public class InfinoSerializeTransportRequest {
      * @throws IOException If there is an error serializing the search request body
      *                     to JSON.
      */
-    private void parseRequest(SearchRequest searchRequest) throws IOException {
+    private void parseRequest(ShardSearchRequest searchRequest) throws IOException {
         setIndexName(searchRequest.indices()[0]);
         setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setOperation(InfinoOperation.SEARCH_DOCUMENTS);
@@ -297,7 +298,7 @@ public class InfinoSerializeTransportRequest {
      * @param searchRequest - the search request object
      * @throws IOException - could not build request body
      */
-    protected void setSearchBody(SearchRequest searchRequest) throws IOException {
+    protected void setSearchBody(ShardSearchRequest searchRequest) throws IOException {
         SearchSourceBuilder searchSourceBuilder = searchRequest.source();
         try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
             searchSourceBuilder.toXContent(builder, ToXContent.EMPTY_PARAMS);

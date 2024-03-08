@@ -66,14 +66,12 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.rest.RestRequest;
+import org.opensearch.search.internal.ShardSearchRequest;
 import org.opensearch.tasks.Task;
-import org.opensearch.transport.Transport.Connection;
 import org.opensearch.transport.TransportChannel;
 import org.opensearch.transport.TransportInterceptor;
 import org.opensearch.transport.TransportRequest;
 import org.opensearch.transport.TransportRequestHandler;
-import org.opensearch.transport.TransportRequestOptions;
-import org.opensearch.transport.TransportResponseHandler;
 
 /**
  * Handle transport requests.
@@ -101,10 +99,10 @@ import org.opensearch.transport.TransportResponseHandler;
  */
 public class InfinoTransportInterceptor implements TransportInterceptor {
 
-    private static final int MAX_RETRIES = 5; // Maximum number of retries for exponential backoff
+    private static final int MAX_RETRIES = 3; // Maximum number of retries for exponential backoff
     private static final int THREADPOOL_SIZE = 25; // Size of threadpool we will use for Infino
     private static final HttpClient httpClient = HttpClient.newHttpClient();
-    private static final Logger logger = LogManager.getLogger(InfinoRestHandler.class);
+    private static final Logger logger = LogManager.getLogger(InfinoTransportInterceptor.class);
 
     /**
      * Using a custom thread factory that can be used by the
@@ -138,10 +136,10 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      * @return a configured InfinoSerializeTransportRequest object
      */
     protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(TransportRequest request) {
-        logger.info("initializing Transport Registration=======================================");
+        logger.info("Initializing Transport Registration.");
 
         try {
-            logger.info("Loading Transport Interceptor.");
+            logger.debug("Loading Transport Interceptor.");
             return new InfinoSerializeTransportRequest(request);
         } catch (IOException e) {
             logger.error("Error serializing REST URI for Infino: ", e);
@@ -192,6 +190,8 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                     processTransportActions(request, new ActionListener<TransportResponse>() {
                         @Override
                         public void onResponse(TransportResponse response) {
+                            logger.info("TransportResponse: " + response);
+
                             try {
                                 channel.sendResponse(response);
                             } catch (IOException e) {
@@ -202,6 +202,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                         @Override
                         public void onFailure(Exception e) {
                             try {
+                                logger.info("Transport action failed.");
                                 channel.sendResponse(e);
                             } catch (IOException ex) {
                                 logger.error("Failed to send error response", ex);
@@ -209,7 +210,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                         }
                     });
                 } else {
-                    // Forward non-intercepted requests to the actual handler
+                    logger.info("TransportResponse: Sending back to actual handler ");
                     actualHandler.messageReceived(request, channel, task);
                 }
             }
@@ -217,10 +218,13 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
     }
 
     /*
-     * TODO: Use the task to make this decision, not the request
+     * TODO: Use the task to make this decision, not the request object
      */
     private <T extends TransportRequest> boolean shouldBeIntercepted(T request) {
         if ((request instanceof IndexRequest && ((IndexRequest) request).indices()[0].startsWith("infino-")) ||
+                (request instanceof ShardSearchRequest
+                        && ((ShardSearchRequest) request).indices()[0].startsWith("infino-"))
+                ||
                 (request instanceof SearchRequest && ((SearchRequest) request).indices()[0].startsWith("infino-")) ||
                 (request instanceof CreateIndexRequest
                         && ((CreateIndexRequest) request).indices()[0].startsWith("infino-"))
@@ -229,6 +233,8 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                         && ((DeleteIndexRequest) request).indices()[0].startsWith("infino-")) {
             return true;
         } else {
+            logger.info("TransportResponse: Not going to handle this: " + request);
+
             return false;
         }
     }
@@ -244,16 +250,12 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      *
      * @param request  the request to execute
      * @param listener the listener for executing actions
-     * @return the action to execute
      */
-    public AsyncSender processTransportActions(TransportRequest request, ActionListener<TransportResponse> listener) {
+    public void processTransportActions(TransportRequest request, ActionListener<TransportResponse> listener) {
 
-        RestRequest.Method method;
-        String indexName;
         InfinoSerializeTransportRequest infinoRequest = null;
         HttpClient httpClient = getHttpClient();
-        InfinoOperation operation;
-        BytesReference body;
+        HttpRequest forwardRequest;
 
         logger.info("Transport Interceptor: Serializing REST request to Infino");
 
@@ -261,59 +263,55 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         try {
             infinoRequest = new InfinoSerializeTransportRequest(request);
         } catch (Exception e) {
-            logger.error("Error serializing REST URI for Infino: ", e);
+            logger.info("Error serializing REST URI for Infino: ", e);
             listener.onFailure(e);
-            return new AsyncSender() {
-                @Override
-                public <T extends TransportResponse> void sendRequest(Connection connection, String action,
-                        TransportRequest request, TransportRequestOptions options,
-                        TransportResponseHandler<T> handler) {
-                    // No-op response
-                }
-            };
+            return;
         }
+
+        // Set local members we can pass to the thread context
+        RestRequest.Method method = infinoRequest.getMethod();
+        String indexName = infinoRequest.getIndexName();
+        BytesReference body = infinoRequest.getBody();
+        InfinoOperation operation = infinoRequest.getOperation();
+        String url = infinoRequest.getFinalUrl();
 
         logger.info("Transport Interceptor: Serialized REST request for Infino to " + infinoRequest.getFinalUrl());
 
-        // set local members we can pass to the thread context
-        method = infinoRequest.getMethod();
-        indexName = infinoRequest.getIndexName();
-        body = infinoRequest.getBody();
-        operation = infinoRequest.getOperation();
+        // Serialize the request to a valid Infino URL
+        try {
+            logger.info("Building HTTP Request for Infino: method = " + method + " indexName: " + indexName
+                    + " operation: " + operation);
 
-        HttpRequest forwardRequest = HttpRequest.newBuilder()
-                .uri(URI.create(infinoRequest.getFinalUrl()))
-                .header("Content-Type", "application/json")
-                .method(infinoRequest.getMethod().toString(),
-                        HttpRequest.BodyPublishers
-                                .ofInputStream(
-                                        () -> new ByteArrayInputStream(body.toBytesRef().bytes)))
-                .build();
+            forwardRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .method(method.toString(),
+                            HttpRequest.BodyPublishers.ofString(body.utf8ToString()))
+                    .build();
+        } catch (Exception e) {
+            logger.info("Error building HTTP Request for Infino: ", e);
+            listener.onFailure(e);
+            return;
+        }
 
-        logger.debug("Transport Interceptor: Sending HTTP Request to Infino: " + infinoRequest.getFinalUrl());
+        logger.info("Transport Interceptor: Sending HTTP Request to Infino: " + infinoRequest.getFinalUrl());
 
         // Send request to Infino server and create a listener to handle the response.
         // Execute the HTTP request using our own thread factory.
-        return new AsyncSender() {
 
-            @Override
-            public <T extends TransportResponse> void sendRequest(Connection connection, String action,
-                    TransportRequest request, TransportRequestOptions options,
-                    TransportResponseHandler<T> handler) {
-                infinoThreadPool.execute(() -> {
-                    sendRequestWithBackoff(httpClient, forwardRequest, listener, indexName, method, operation, 0);
-                });
-            }
-
-        };
+        infinoThreadPool.execute(() -> {
+            sendRequestWithBackoff(httpClient, forwardRequest, listener, indexName, method, operation, 0);
+        });
     }
 
     private void sendRequestWithBackoff(HttpClient backoffHttpClient, HttpRequest request,
             ActionListener<TransportResponse> listener, String indexName, RestRequest.Method method,
             InfinoOperation operation, int attempt) {
         if (attempt >= MAX_RETRIES) {
-            TransportResponse response = createTransportResponse(503, "Max retries exceeded");
-            listener.onResponse(response);
+            String errorMessage = "Max retries exceeded for " + operation + " on " + indexName;
+            logger.info(errorMessage);
+            Exception e = new Exception(errorMessage);
+            listener.onFailure(e);
             return;
         }
 
@@ -349,11 +347,9 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
     private Void handleException(Throwable e, ActionListener<TransportResponse> listener,
             String indexName, InfinoOperation operation) {
         try {
-            // e.getMessage() sometimes returns null for ConnectException.
-            // Using e.toString() when getMessage() returns null.
-            String errMsg = e.getMessage() != null ? e.getMessage() : e.toString();
-            TransportResponse errorResponse = createTransportResponse(500, errMsg);
-            listener.onResponse(errorResponse);
+            logger.error("Infino request failed", e);
+            Exception ex = new Exception(e);
+            listener.onFailure(ex);
         } catch (Exception ex) {
             logger.error("Failed to send response using reflection", ex);
             listener.onFailure(ex);
@@ -365,10 +361,9 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             ActionListener<TransportResponse> listener, String indexName,
             InfinoOperation operation) {
         if (Thread.currentThread().isInterrupted()) {
-            TransportResponse errorResponse = createTransportResponse(500, "Infino thread interrupted.");
-            listener.onResponse(errorResponse);
-
-            logger.debug("Infino Plugin Rest handler thread interrupted. Exiting...");
+            logger.info("Infino Plugin Rest handler thread interrupted. Exiting...");
+            Exception e = new Exception("Infino request thread was interrupted.");
+            listener.onFailure(e);
             return;
         }
 
@@ -377,10 +372,10 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             if (RestStatus.OK.getStatus() == statusCode
                     && (operation == InfinoOperation.CREATE_INDEX || operation == InfinoOperation.DELETE_INDEX)) {
-                logger.error("Successfully created or deleted index from Infino. Resuming transport.");
+                logger.info("Successfully created or deleted index from Infino. Resuming transport.");
 
-                TransportResponse errorResponse = createTransportResponse(200, "Infino thread interrupted.");
-                listener.onResponse(errorResponse);
+                TransportResponse successful = createTransportResponse(200, "Successful Infino request.");
+                listener.onResponse(successful);
 
                 return;
             }
@@ -392,7 +387,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             listener.onResponse(transportResponse);
 
         } catch (Exception e) {
-            logger.error("Error sending response", e);
+            logger.info("Error sending response", e);
 
             // Fall back to sending internal server error
             try {
@@ -400,7 +395,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                         "Internal server error: " + e.getMessage());
                 listener.onResponse(errorResponse);
             } catch (Exception ex) {
-                logger.error("Failed to send error response", ex);
+                logger.info("Failed to send error response", ex);
                 listener.onFailure(ex);
             }
         }
