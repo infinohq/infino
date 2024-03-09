@@ -52,6 +52,6 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
     }
 
     // Sleep for some time before committing again.
-    sleep(Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(1000)).await;
   } // end loop {..}
 }
