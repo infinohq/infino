@@ -613,7 +613,7 @@ impl Index {
     let mut lock = match lock {
       Ok(lock) => lock,
       Err(_) => {
-        info!(
+        debug!(
           "Could not acquire commit lock for index at path {}. Retrying in the next commit run.",
           self.index_dir_path
         );
