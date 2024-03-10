@@ -186,6 +186,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         return new TransportRequestHandler<T>() {
             @Override
             public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
+                logger.info("Received request " + request.toString());
                 if (shouldBeIntercepted(request)) {
                     processTransportActions(request, new ActionListener<TransportResponse>() {
                         @Override
@@ -284,7 +285,6 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             forwardRequest = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
                     .method(method.toString(),
                             HttpRequest.BodyPublishers.ofString(body.utf8ToString()))
                     .build();
