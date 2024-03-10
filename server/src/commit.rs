@@ -20,7 +20,7 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
     // commit the current segment only when the server is shutting down.
     let state_clone = state.clone();
     let is_shutdown_clone = is_shutdown;
-    tokio::spawn(async move {
+    let commit_handle = tokio::spawn(async move {
       let result = state_clone.coredb.commit(is_shutdown_clone).await;
 
       // Handle the result of the commit operation
@@ -30,8 +30,18 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
       }
     });
 
+    // Exit from the loop if is_shutdown is set.
     if is_shutdown {
-      info!("Received shutdown in commit thread. Exiting...");
+      // Wait for commit thread to finish and check for errors.
+      let result = commit_handle.await;
+      match result {
+        Ok(_) => {
+          info!("Commit thread completed successfully");
+        }
+        Err(e) => {
+          error!("Error while joining commit thread {}", e);
+        }
+      }
       break;
     }
 
