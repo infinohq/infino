@@ -19,7 +19,7 @@ use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
 use crate::utils::error::CoreDBError;
-use crate::utils::io;
+use crate::utils::io::get_joined_path;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex};
 
@@ -552,8 +552,7 @@ impl Index {
     let end_time = segment.get_end_time();
 
     // Commit this segment.
-    let segment_dir_path =
-      io::get_joined_path(&self.index_dir_path, segment_number.to_string().as_str());
+    let segment_dir_path = self.get_segment_dir_path(segment_number);
 
     let (uncompressed, compressed) = segment
       .commit(&self.storage, segment_dir_path.as_str())
@@ -578,7 +577,7 @@ impl Index {
     );
 
     // Read all segments summaries from disk.
-    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
     if !self.storage.check_path_exists(&all_segments_file).await {
       return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
@@ -663,14 +662,14 @@ impl Index {
     }
 
     // Write the summaries to disk.
-    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
     self
       .storage
       .write(&self.all_segments_summaries, all_segments_file.as_str())
       .await?;
 
     // Write the metadata to disk.
-    let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
+    let metadata_path = get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     self
       .storage
       .write(&self.metadata, metadata_path.as_str())
@@ -681,7 +680,7 @@ impl Index {
 
   /// Reads a segment from memory and insert it in memory_segments_map.
   pub async fn refresh_segment(&self, segment_number: u32) -> Result<Segment, CoreDBError> {
-    let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+    let segment_dir_path = self.get_segment_dir_path(segment_number);
     debug!(
       "Loading segment with segment number {} and path {}",
       segment_number, segment_dir_path
@@ -702,7 +701,7 @@ impl Index {
     let storage = Storage::new(storage_type).await?;
 
     // Read metadata.
-    let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
+    let metadata_path = get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let metadata: Metadata = storage.read(metadata_path.as_str()).await?;
 
     let commit_refresh_lock = Arc::new(TokioMutex::new(thread::current().id()));
@@ -795,7 +794,7 @@ impl Index {
   pub async fn delete_segment(&self, segment_number: u32) -> Result<(), CoreDBError> {
     // Delete the segment only if it is not in memory
     if !self.memory_segments_map.contains_key(&segment_number) {
-      let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+      let segment_dir_path = get_joined_path(&self.index_dir_path, &segment_number.to_string());
       let delete_result = self.storage.remove_dir(segment_dir_path.as_str()).await;
       match delete_result {
         Ok(_) => {
@@ -811,6 +810,10 @@ impl Index {
       return Err(CoreDBError::SegmentInMemory(segment_number));
     }
     Ok(())
+  }
+
+  fn get_segment_dir_path(&self, segment_numger: u32) -> String {
+    get_joined_path(&self.index_dir_path, &segment_numger.to_string())
   }
 }
 
@@ -896,10 +899,7 @@ mod tests {
         .await
     );
 
-    let segment_path = get_joined_path(
-      &index_dir_path,
-      &index.metadata.get_current_segment_number().to_string(),
-    );
+    let segment_path = index.get_segment_dir_path(index.metadata.get_current_segment_number());
     let segment_metadata_path = get_joined_path(&segment_path, &Segment::get_metadata_file_name());
     assert!(
       index
@@ -1122,8 +1122,7 @@ mod tests {
       .await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
-      let original_segment_path =
-        get_joined_path(&index_dir_path, &original_segment_number.to_string());
+      let original_segment_path = index.get_segment_dir_path(original_segment_number);
 
       let message_prefix = "message";
       let mut expected_log_messages: Vec<String> = Vec::new();
