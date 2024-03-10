@@ -380,9 +380,7 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the log message to the current segment.
-      current_segment
-        .append_log_message(time, fields, message)
-        .unwrap();
+      current_segment.append_log_message(time, fields, message)?;
     }
 
     // Update start and end time of the summary of the current segment.
@@ -431,9 +429,7 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the metric point to the current segment.
-      current_segment
-        .append_metric_point(metric_name, labels, time, value)
-        .unwrap();
+      current_segment.append_metric_point(metric_name, labels, time, value)?;
     }
 
     // Update start and end time of the summary of the current segment.
