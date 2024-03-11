@@ -137,8 +137,8 @@ mod tests {
     );
   }
 
-  #[test]
-  pub fn test_sort_segment_summary() {
+  #[tokio::test]
+  pub async fn test_sort_segment_summary() {
     let num_segments = 3;
     let mut segment_summaries = Vec::new();
     let mut expected_segment_ids = Vec::new();
@@ -148,6 +148,7 @@ mod tests {
       let segment = Segment::new();
       segment
         .append_log_message(i, &HashMap::new(), "some log message")
+        .await
         .expect("Could not append to segment");
       let segment_summary = SegmentSummary::new(i as u32, &segment);
       segment_summaries.push(segment_summary);

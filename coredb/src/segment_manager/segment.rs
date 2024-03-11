@@ -6,6 +6,7 @@ use std::vec::Vec;
 
 use dashmap::DashMap;
 use log::debug;
+use serde_json::json;
 
 use super::metadata::Metadata;
 use super::search_logs::QueryLogMessage;
@@ -14,6 +15,7 @@ use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
+use crate::segment_manager::wal::WriteAheadLog;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::QueryError;
@@ -53,19 +55,26 @@ pub struct Segment {
 
   // Mutex for only one thread to commit this segment at a time.
   commit_lock: TokioMutex<()>,
+
+  // Write ahead log.
+  wal: WriteAheadLog,
 }
 
 impl Segment {
   /// Create an empty segment.
   pub fn new() -> Self {
+    let metadata = Metadata::new();
+    let wal_dir_path = format!("/tmp/segments/{}", metadata.get_id());
+    let wal = WriteAheadLog::new(&wal_dir_path).unwrap();
     Segment {
-      metadata: Metadata::new(),
+      metadata,
       terms: DashMap::new(),
       forward_map: DashMap::new(),
       inverted_map: InvertedMap::new(),
       labels: DashMap::new(),
       time_series_map: TimeSeriesMap::new(),
       commit_lock: TokioMutex::new(()),
+      wal,
     }
   }
 
@@ -171,12 +180,15 @@ impl Segment {
   }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
-  pub fn append_log_message(
+  pub async fn append_log_message(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
   ) -> Result<(), CoreDBError> {
+    let value = json!({"time": time, "fields": fields, "text": text});
+    self.wal.append(value).await.unwrap();
+
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
@@ -316,6 +328,7 @@ impl Segment {
       TimeSeriesMap,
     ) = storage.read(&segment_path).await?;
     let commit_lock = TokioMutex::new(());
+    let wal = WriteAheadLog::new("/tmp/x").unwrap();
 
     let segment = Segment {
       metadata,
@@ -325,6 +338,7 @@ impl Segment {
       labels,
       time_series_map,
       commit_lock,
+      wal,
     };
 
     Ok(segment)
@@ -483,6 +497,7 @@ mod tests {
         &HashMap::new(),
         "this is my 1st log message",
       )
+      .await
       .unwrap();
 
     let metric_name = "request_count";
@@ -622,13 +637,14 @@ mod tests {
     assert_eq!(from_disk_segment.metadata.get_label_count(), 2);
   }
 
-  #[test]
-  fn test_one_log_message() {
+  #[tokio::test]
+  async fn test_one_log_message() {
     let segment = Segment::new();
     let time = Utc::now().timestamp_millis() as u64;
 
     segment
       .append_log_message(time, &HashMap::new(), "some log message")
+      .await
       .unwrap();
 
     assert_eq!(segment.metadata.get_start_time(), time);
@@ -663,8 +679,8 @@ mod tests {
     assert_eq!(results.len(), 1)
   }
 
-  #[test]
-  fn test_multiple_log_messages() {
+  #[tokio::test]
+  async fn test_multiple_log_messages() {
     let num_messages = 1000;
     let segment = Segment::new();
 
@@ -676,6 +692,7 @@ mod tests {
           &HashMap::new(),
           "some log message",
         )
+        .await
         .unwrap();
     }
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -737,16 +754,18 @@ mod tests {
     assert_eq!(expected, received);
   }
 
-  #[test]
-  fn test_range_overlap() {
+  #[tokio::test]
+  async fn test_range_overlap() {
     let (start, end) = (1000, 2000);
     let segment = Segment::new();
 
     segment
       .append_log_message(start, &HashMap::new(), "message_1")
+      .await
       .unwrap();
     segment
       .append_log_message(end, &HashMap::new(), "message_2")
+      .await
       .unwrap();
     assert_eq!(segment.metadata.get_start_time(), start);
     assert_eq!(segment.metadata.get_end_time(), end);
@@ -776,12 +795,15 @@ mod tests {
 
     segment
       .append_log_message(1000, &HashMap::new(), "hello world")
+      .await
       .unwrap();
     segment
       .append_log_message(1001, &HashMap::new(), "some message")
+      .await
       .unwrap();
     segment
       .append_log_message(1002, &HashMap::new(), "hello world hello world")
+      .await
       .unwrap();
 
     // Test terms map.

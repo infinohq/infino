@@ -1745,18 +1745,21 @@ mod tests {
     );
   }
 
-  #[test]
-  fn test_match_exact_phrase() {
+  #[tokio::test]
+  async fn test_match_exact_phrase() {
     let segment = Segment::new();
 
     segment
       .append_log_message(1001, &HashMap::new(), "log 1")
+      .await
       .unwrap();
     segment
       .append_log_message(1002, &HashMap::new(), "log 2")
+      .await
       .unwrap();
     segment
       .append_log_message(1003, &HashMap::new(), "log 3")
+      .await
       .unwrap();
 
     // Get all log message IDs from the forward map.
@@ -1775,6 +1778,7 @@ mod tests {
     fields.insert("field_name".to_string(), "log 3".to_string());
     segment
       .append_log_message(1004, &fields, "some message")
+      .await
       .unwrap();
 
     let all_log_ids_with_fields: Vec<u32> = segment

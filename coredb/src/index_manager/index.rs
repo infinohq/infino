@@ -380,7 +380,9 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the log message to the current segment.
-      current_segment.append_log_message(time, fields, message)?;
+      current_segment
+        .append_log_message(time, fields, message)
+        .await?;
     }
 
     // Update start and end time of the summary of the current segment.

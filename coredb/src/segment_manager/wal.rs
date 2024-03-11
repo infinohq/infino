@@ -1,16 +1,16 @@
+use crate::utils::sync::{Arc, TokioMutex};
 use serde_json::Value;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
-use std::sync::{Arc, Mutex};
 
 use crate::utils::error::CoreDBError;
 
-const MAX_ENTRIES: usize = 1000;
+const MAX_ENTRIES: usize = 10000;
 
 #[derive(Debug)]
 pub struct WriteAheadLog {
-  buffer: Arc<Mutex<Vec<Value>>>,
-  writer: Arc<Mutex<BufWriter<std::fs::File>>>,
+  buffer: Arc<TokioMutex<Vec<Value>>>,
+  writer: Arc<TokioMutex<BufWriter<std::fs::File>>>,
 }
 
 impl WriteAheadLog {
@@ -19,13 +19,13 @@ impl WriteAheadLog {
     let writer = BufWriter::new(file);
 
     Ok(Self {
-      buffer: Arc::new(Mutex::new(Vec::new())),
-      writer: Arc::new(Mutex::new(writer)),
+      buffer: Arc::new(TokioMutex::new(Vec::new())),
+      writer: Arc::new(TokioMutex::new(writer)),
     })
   }
 
   pub async fn append(&self, entry: Value) -> Result<(), CoreDBError> {
-    let mut buffer = self.buffer.lock().unwrap();
+    let mut buffer = self.buffer.lock().await;
     buffer.push(entry);
 
     if buffer.len() >= MAX_ENTRIES {
@@ -36,15 +36,19 @@ impl WriteAheadLog {
   }
 
   async fn flush(&self) -> Result<(), CoreDBError> {
-    let mut buffer = self.buffer.lock().unwrap();
-    let mut writer = self.writer.lock().unwrap();
+    let buffer = &mut *self.buffer.lock().await;
+    let writer = &mut *self.writer.lock().await;
 
-    for entry in buffer.iter() {
-      let line = serde_json::to_string(entry)? + "\n";
-      writer.write_all(line.as_bytes())?;
+    if !buffer.is_empty() {
+      let combined_entries = buffer
+        .iter()
+        .map(|entry| serde_json::to_string(entry).unwrap_or_default() + "\n")
+        .collect::<String>();
+
+      writer.write_all(combined_entries.as_bytes())?;
+      writer.flush()?;
+      buffer.clear();
     }
-    writer.flush()?;
-    buffer.clear();
 
     Ok(())
   }

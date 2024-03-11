@@ -24,6 +24,10 @@ uncommitted_segments_threshold = 10
 # Number of days to retain older older logs and metrics.
 retention_days = 30
 
+# Settings for write ahead log.
+write_ahead_log_dir_path = "wal"
+
+
 [server]
 port = 3000
 host = "0.0.0.0"
