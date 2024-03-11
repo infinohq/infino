@@ -535,6 +535,7 @@ impl Segment {
     doc_ids: &[u32],
     field_name: &str,
     prefix_text: &str,
+    case_insensitive: bool,
   ) -> Vec<u32> {
     doc_ids
       .iter()
@@ -545,7 +546,15 @@ impl Segment {
             .get_fields()
             .get(field_name)
             .and_then(|field_value| {
-              if field_value.starts_with(prefix_text) {
+              let value_to_compare = if case_insensitive {
+                field_value.to_lowercase()
+              } else {
+                field_value.to_string()
+              };
+
+              if case_insensitive && value_to_compare.starts_with(&prefix_text.to_lowercase())
+                || !case_insensitive && value_to_compare.starts_with(prefix_text)
+              {
                 Some(log_id)
               } else {
                 None

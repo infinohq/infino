@@ -20,6 +20,7 @@ use crate::utils::error::QueryError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::{Arc, RwLock, TokioMutex};
+use crate::utils::trie::Trie;
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
 const SEGMENT_FILE_NAME: &str = "segment.bin";
@@ -53,6 +54,11 @@ pub struct Segment {
 
   // Mutex for only one thread to commit this segment at a time.
   commit_lock: TokioMutex<()>,
+
+  /// Trie data structure containing terms present in this segment.
+  /// Primarily used for efficient prefix searches on log message terms.
+  /// The Trie is protected by an Arc (atomic reference counting) and RwLock to ensure concurrent access and modification safety.
+  trie: Arc<RwLock<Trie>>,
 }
 
 impl Segment {
@@ -66,6 +72,7 @@ impl Segment {
       labels: DashMap::new(),
       time_series_map: TimeSeriesMap::new(),
       commit_lock: TokioMutex::new(()),
+      trie: Arc::new(RwLock::new(Trie::new())),
     }
   }
 
@@ -177,23 +184,27 @@ impl Segment {
     fields: &HashMap<String, String>,
     text: &str,
   ) -> Result<(), CoreDBError> {
-    let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
+    let log_message: LogMessage = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
     // Increment the number of log messages appended so far, and get the id for this log message.
     let log_message_id = self.metadata.fetch_increment_log_message_count();
 
+    let trie = Arc::clone(&self.trie);
+
     // Update the inverted map.
     terms.into_iter().for_each(|term| {
       let term_id = *self
         .terms
-        .entry(term)
+        .entry(term.to_owned())
         .or_insert_with(|| self.metadata.fetch_increment_term_count());
 
       self
         .inverted_map
         .append(term_id, log_message_id)
         .expect("Could not append to postings list");
+
+      trie.write().insert(&term);
     });
 
     // Insert in the forward map.
@@ -253,6 +264,13 @@ impl Segment {
 
     self.update_start_end_time(time);
     Ok(())
+  }
+
+  /// Get all terms with a certain prefix from the segment.
+  pub fn get_terms_with_prefix(&self, prefix: &str, case_insensitive: bool) -> Vec<String> {
+    let trie = self.trie.read();
+    // Use the Trie's method to collect terms with the given prefix
+    trie.get_terms_with_prefix(prefix, case_insensitive)
   }
 
   pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
@@ -317,6 +335,17 @@ impl Segment {
     ) = storage.read(&segment_path).await?;
     let commit_lock = TokioMutex::new(());
 
+    // Create a new thread-safe trie
+    let mut temp_trie = Trie::new();
+
+    // Insert terms into the trie
+    for term_entry in terms.iter() {
+      let term = term_entry.key().clone();
+      temp_trie.insert(&term);
+    }
+
+    let trie = Arc::new(RwLock::new(temp_trie));
+
     let segment = Segment {
       metadata,
       terms,
@@ -325,6 +354,7 @@ impl Segment {
       labels,
       time_series_map,
       commit_lock,
+      trie,
     };
 
     Ok(segment)
@@ -398,6 +428,8 @@ impl Default for Segment {
 
 #[cfg(test)]
 mod tests {
+  use std::sync::Mutex;
+
   use crate::utils::sync::{Arc, RwLock};
 
   use chrono::Utc;
@@ -735,6 +767,71 @@ mod tests {
 
     expected.sort();
     assert_eq!(expected, received);
+  }
+
+  /// Tests concurrent log message appending and trie verification.
+  #[tokio::test]
+  async fn test_concurrent_append_log_messages() {
+    let num_threads = 20;
+    let num_log_messages_per_thread = 500;
+
+    // Shared segment and trie for concurrent testing.
+    let segment = Arc::new(Segment::new());
+    let trie = Arc::clone(&segment.trie);
+
+    // Shared vector to collect expected words for trie verification.
+    let expected_words = Arc::new(Mutex::new(Vec::new()));
+
+    let mut handles = Vec::new();
+    for thread_number in 0..num_threads {
+      let segment_arc = Arc::clone(&segment);
+      let expected_words_arc = Arc::clone(&expected_words);
+
+      let handle = thread::spawn(move || {
+        for i in 0..num_log_messages_per_thread {
+          // Generate a unique identifier for the log message.
+          let i_thread_number = format!("{}_{}", i, thread_number);
+
+          // Create log text and fields with unique values.
+          let log_text = format!("log message {} {}", i_thread_number, thread_number);
+          let mut fields = HashMap::new();
+          fields.insert("field12".to_owned(), format!("value1 {}", i_thread_number));
+          fields.insert("field34".to_owned(), format!("value3 {}", thread_number));
+
+          let time = Utc::now().timestamp_millis() as u64;
+          let log_message: LogMessage =
+            LogMessage::new_with_fields_and_text(time, &fields, &log_text);
+          let terms = log_message.get_terms();
+
+          // Append the log message to the segment.
+          segment_arc
+            .append_log_message(time, &fields, &log_text)
+            .unwrap();
+
+          // Collect terms for trie verification.
+          let mut expected_words = expected_words_arc.lock().expect("Mutex lock failed");
+          expected_words.extend(terms.iter().map(|word| word.to_owned()));
+        }
+      });
+
+      handles.push(handle);
+    }
+
+    // Wait for all threads to complete.
+    for handle in handles {
+      handle.join().unwrap();
+    }
+
+    // Verify trie contains all expected words.
+    let trie_read_lock = trie.read();
+    let expected_words = expected_words.lock().expect("Mutex lock failed");
+    for word in &*expected_words {
+      assert!(
+        trie_read_lock.contains(word),
+        "Word not found in trie: {}",
+        word
+      );
+    }
   }
 
   #[test]
