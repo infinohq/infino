@@ -93,9 +93,9 @@ id_element = { string }
 
 // Prefix Queries: https://opensearch.org/docs/latest/query-dsl/term/prefix/
 prefix_query  = { start_brace ~ quote ~ "prefix" ~ quote ~ colon ~ prefix_search ~ end_brace }
-prefix_search = { start_brace ~ (field | (fieldname ~ colon ~ prefix_array)) ~ end_brace }
-prefix_array  = { start_brace ~ (prefix ~ (comma ~ prefix)*)? ~ end_brace }
-prefix        = { (field | case_insensitive | rewrite) }
+prefix_search = { start_brace ~ fieldname ~ colon ~ (prefix_string | prefix_array) ~ end_brace }
+prefix_array  = { start_brace ~ value ~ (comma ~ prefix_terms)* ~ end_brace }
+prefix_terms  = { (case_insensitive | rewrite) }
 
 // Regexp Queries: https://opensearch.org/docs/latest/query-dsl/term/regexp/
 regexp_query  = { start_brace ~ quote ~ "regexp" ~ quote ~ colon ~ regexp_search ~ end_brace }
@@ -484,6 +484,7 @@ post_tags                    = { quote ~ "post_tags" ~ quote ~ colon ~ array_of_
 pre_tags                     = { quote ~ "pre_tags" ~ quote ~ colon ~ array_of_strings }
 precision                    = { quote ~ "precision" ~ quote ~ colon ~ integer }
 prefix_length                = { quote ~ "prefix_length" ~ quote ~ colon ~ non_negative_integer }
+prefix_string                = { string }
 query                        = { quote ~ "query" ~ quote ~ colon ~ string }
 query_array                  = { start_bracket ~ (query_root ~ (comma ~ query_root)*)? ~ end_bracket }
 quote_analyzer               = { quote ~ "quote_analyzer" ~ quote ~ colon ~ string }

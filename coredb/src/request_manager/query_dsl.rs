@@ -118,6 +118,9 @@ impl Segment {
       Rule::match_phrase_query => {
         results = self.process_match_phrase_query(node, timeout).await?;
       }
+      Rule::prefix_query => {
+        results = self.process_prefix_query(node, timeout).await?;
+      }
       _ => {
         return Err(QueryError::UnsupportedQuery(format!(
           "Unsupported rule: {:?}",
@@ -528,6 +531,131 @@ impl Segment {
       )),
       (_, None) => Err(QueryError::UnsupportedQuery(
         "Query string is missing".to_string(),
+      )),
+    }
+  }
+
+  /// Prefix Query Processor: https://opensearch.org/docs/latest/query-dsl/term/prefix/
+  async fn process_prefix_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+    timeout: u64,
+  ) -> Result<QueryDSLDocIds, QueryError> {
+    debug!("QueryDSL: Processing prefix query {:?}", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
+
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut fieldname: Option<&str> = None;
+    let mut prefix_text: Option<&str> = None;
+    let mut case_insensitive = false;
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::fieldname => {
+          if let Some(field) = node.into_inner().next() {
+            fieldname = Some(field.as_str());
+          }
+        }
+        Rule::prefix_string | Rule::value => {
+          prefix_text = node.into_inner().next().map(|v| v.as_str());
+        }
+        Rule::case_insensitive => {
+          case_insensitive = node
+            .into_inner()
+            .next()
+            .map(|v| v.as_str().parse::<bool>().unwrap_or(false))
+            .unwrap_or(true);
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    match (fieldname, prefix_text) {
+      (Some(field), Some(prefix_text_str)) => {
+        let analyzed_query: Vec<String> =
+          analyze_query_text(prefix_text_str, Some(field), case_insensitive).await;
+
+        if analyzed_query.len() == 1 {
+          // If there's only a single term, directly get the terms with prefix
+          let prefix_matches = self.get_terms_with_prefix(&analyzed_query[0], case_insensitive);
+
+          let or_doc_ids = self.search_inverted_index(prefix_matches, "OR").await?;
+
+          // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
+          // and return the specific document IDs
+          let matching_document_ids = self.get_bool_prefix_matches(
+            &or_doc_ids,
+            field,
+            prefix_text_str.trim_matches('"'),
+            case_insensitive,
+          );
+
+          let mut results = QueryDSLDocIds::new();
+          let execution_time = check_query_time(timeout, query_start_time)?;
+          results.set_execution_time(execution_time);
+          results.set_ids(matching_document_ids);
+
+          debug!(
+            "QueryDSL: Returning results from prefix query {:?}",
+            results
+          );
+
+          Ok(results)
+        } else {
+          // Get all prefix matches for the last term
+          let prefix_matches =
+            self.get_terms_with_prefix(analyzed_query.last().unwrap(), case_insensitive);
+
+          // Prepare a list to store document IDs from OR operations
+          let mut or_doc_ids: Vec<u32> = Vec::new();
+
+          // Perform AND operations on n-1 terms from analyzed_query and the last term's prefix matches
+          for term in prefix_matches {
+            let mut and_query = analyzed_query.clone();
+            and_query.pop(); // Remove the last term from analyzed_query
+            and_query.push(term.clone()); // Add the current term from prefix_matches
+
+            let and_search_result = self.search_inverted_index(and_query, "AND").await?;
+            or_doc_ids.extend(and_search_result);
+          }
+
+          // Remove duplicates from the list of document IDs
+          or_doc_ids.dedup();
+
+          // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
+          // and return the specific document IDs
+          let matching_document_ids = self.get_bool_prefix_matches(
+            &or_doc_ids,
+            field,
+            prefix_text_str.trim_matches('"'),
+            case_insensitive,
+          );
+
+          let mut results = QueryDSLDocIds::new();
+          let execution_time = check_query_time(timeout, query_start_time)?;
+          results.set_execution_time(execution_time);
+          results.set_ids(matching_document_ids);
+
+          debug!(
+            "QueryDSL: Returning results from match phrase query {:?}",
+            results
+          );
+
+          Ok(results)
+        }
+      }
+      (None, _) => Err(QueryError::UnsupportedQuery(
+        "Field name is missing".to_string(),
+      )),
+      (_, None) => Err(QueryError::UnsupportedQuery(
+        "Prefix query string is missing".to_string(),
       )),
     }
   }
@@ -1029,6 +1157,48 @@ mod tests {
               log.get_message().get_text().contains("another")
                 || log.get_message().get_text().contains("different"),
               "Each log should contain 'another' or 'different'."
+            );
+          }
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_prefix_query() {
+    let segment = create_mock_segment();
+
+    let query_dsl_query = r#"{
+        "query": {
+            "prefix": {
+                "key": {
+                    "value": "lo"
+                }
+            }
+        }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert_eq!(
+            results.get_messages().len(),
+            5,
+            "There should be exactly 5 logs matching the prefix query."
+          );
+
+          for log in results.get_messages().iter() {
+            let key_field_value = log.get_message().get_fields().get("key");
+
+            assert!(
+              key_field_value.map_or(false, |value| value.starts_with("lo")),
+              "Each log should have 'key' field starting with 'lo'."
             );
           }
         }
