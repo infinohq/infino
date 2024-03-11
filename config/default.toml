@@ -25,7 +25,7 @@ uncommitted_segments_threshold = 10
 retention_days = 30
 
 # Settings for write ahead log.
-write_ahead_log_dir_path = "wal"
+wal_dir_path = "wal"
 
 
 [server]
