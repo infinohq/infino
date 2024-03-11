@@ -32,3 +32,26 @@ setup:
       _source:
         field: "value"
 
+---
+"Search a Document":
+  - do:
+      index:
+        index: test_index
+        id: "1"
+        body: { "field": "value" }
+  - do:
+      indices.refresh:  # Make sure the indexed document is available for search
+        index: test_index
+  - do:  # This step performs the actual search operation
+      search:
+        index: test_index
+        body:
+          query:
+            match:
+              field: "value"
+  - match:  # Verify that the search operation returns the expected result
+      hits.total.value: 1
+  - match:
+      hits.hits.0._source.field: "value"
+
+

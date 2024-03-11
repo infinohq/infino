@@ -29,6 +29,8 @@ import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
 
+import java.net.http.HttpClient;
+
 /**
  * Implement the REST API handler and transport interceptor for client calls
  */
@@ -61,7 +63,9 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
 
         logger.info("Registering Transport Interceptor");
 
-        return singletonList(new InfinoTransportInterceptor());
+        HttpClient httpClient = HttpClient.newHttpClient();
+
+        return singletonList(new InfinoTransportInterceptor(httpClient));
     }
 
 }

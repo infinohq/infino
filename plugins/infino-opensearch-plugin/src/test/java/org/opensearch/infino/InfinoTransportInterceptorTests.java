@@ -40,15 +40,11 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -63,8 +59,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
     private ThreadPool threadPool;
     private int mockStatusCode = 200;
     private String mockPath = "/default/path";
-    private String mockBody = "Default body";
-    // private Map<String, List<String>> mockHeaders;
+    private String mockBody = "{\"Default\" : \"body\"}";
 
     private MyHttpClient mockMyHttpClient = new MyHttpClient() {
         @Override
@@ -88,7 +83,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         mockInfinoSerializeTransportRequest = mock(InfinoSerializeTransportRequest.class);
         threadPool = new TestThreadPool(this.getClass().getSimpleName() + "ThreadPool");
 
-        interceptor = new InfinoTransportInterceptor() {
+        interceptor = new InfinoTransportInterceptor(getCustomHttpClient()) {
             @Override
             protected ExecutorService getInfinoThreadPool() {
                 return executorService;
@@ -97,11 +92,6 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
             @Override
             protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(TransportRequest request) {
                 return mockInfinoSerializeTransportRequest;
-            }
-
-            @Override
-            protected HttpClient getHttpClient() {
-                return getCustomHttpClient();
             }
         };
     }
