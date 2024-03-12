@@ -163,8 +163,7 @@ impl Index {
 
     // The directory did not have a metadata file - so create a new index.
 
-    // Create an initial segment.
-    let segment = Segment::new();
+    // Create index metadata.
     let metadata = Metadata::new(
       0,
       0,
@@ -172,10 +171,12 @@ impl Index {
       metric_points_threshold,
       uncommitted_segments_threshold,
     );
-
-    // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
     metadata.set_current_segment_number(current_segment_number);
+
+    // Create initial segment.
+    let wal_file_path = Self::get_wal_file_path(wal_dir_path, current_segment_number);
+    let segment = Segment::new(&wal_file_path);
 
     // Create the summary for the initial segment.
     let all_segments_summaries = DashMap::new();
@@ -353,8 +354,9 @@ impl Index {
     *lock = thread::current().id();
 
     // Create a new segment since the current one has become too big.
-    let new_segment = Segment::new();
     let new_segment_number = self.metadata.fetch_increment_segment_count();
+    let wal_file_path = Self::get_wal_file_path(&self.wal_dir_path, new_segment_number);
+    let new_segment = Segment::new(&wal_file_path);
     info!(
       "Creating a new segment with segment_number {}, id {}",
       new_segment_number,
@@ -839,8 +841,15 @@ impl Index {
     Ok(())
   }
 
+  /// Get the directory in while the segment index is stored.
   fn get_segment_dir_path(&self, segment_numger: u32) -> String {
     get_joined_path(&self.index_dir_path, &segment_numger.to_string())
+  }
+
+  /// Get the file path for write ahead log.
+  fn get_wal_file_path(wal_dir_path: &str, segment_number: u32) -> String {
+    let wal_file_name = &format!("{}.wal", segment_number);
+    get_joined_path(wal_dir_path, wal_file_name)
   }
 }
 

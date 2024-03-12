@@ -124,7 +124,7 @@ mod tests {
     // Check if the SegmentSummary implements Sync + Send.
     is_sync_send::<SegmentSummary>();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     let segment_summary = SegmentSummary::new(1, &segment);
 
     assert_eq!(segment_summary.get_segment_id(), segment.get_id());
@@ -145,7 +145,7 @@ mod tests {
 
     // Create a few segments along with their summaries.
     for i in 1..=num_segments {
-      let segment = Segment::new();
+      let segment = Segment::new_with_temp_wal();
       segment
         .append_log_message(i, &HashMap::new(), "some log message")
         .await

@@ -548,7 +548,7 @@ mod tests {
   async fn create_mock_segment() -> Segment {
     config_test_logger();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     let log_messages = [
       ("log 1", "this is a test log message"),

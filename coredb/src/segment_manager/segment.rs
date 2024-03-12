@@ -62,12 +62,10 @@ pub struct Segment {
 
 impl Segment {
   /// Create an empty segment.
-  pub fn new() -> Self {
-    let metadata = Metadata::new();
-    let wal_dir_path = format!("/tmp/segments/{}", metadata.get_id());
-    let wal = WriteAheadLog::new(&wal_dir_path).unwrap();
+  pub fn new(wal_file_path: &str) -> Self {
+    let wal = WriteAheadLog::new(wal_file_path).unwrap();
     Segment {
-      metadata,
+      metadata: Metadata::new(),
       terms: DashMap::new(),
       forward_map: DashMap::new(),
       inverted_map: InvertedMap::new(),
@@ -76,6 +74,12 @@ impl Segment {
       commit_lock: TokioMutex::new(()),
       wal,
     }
+  }
+
+  #[cfg(test)]
+  pub fn new_with_temp_wal() -> Self {
+    let wal_file_path = format!("/tmp/{}.tmp", uuid::Uuid::new_v4());
+    Self::new(&wal_file_path)
   }
 
   /// Get the terms in this segment.
@@ -404,12 +408,6 @@ impl Segment {
   }
 }
 
-impl Default for Segment {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use crate::utils::sync::{Arc, RwLock};
@@ -446,7 +444,7 @@ mod tests {
   async fn test_new_segment() {
     is_sync_send::<Segment>();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     assert!(segment.is_empty());
 
     let query_node_result = create_term_test_node("doesnotexist");
@@ -465,7 +463,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_default_segment() {
-    let segment = Segment::default();
+    let segment = Segment::new_with_temp_wal();
     assert!(segment.is_empty());
 
     let query_node_result = create_term_test_node("doesnotexist");
@@ -484,7 +482,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_commit_refresh() {
-    let original_segment = Segment::new();
+    let original_segment = Segment::new_with_temp_wal();
     let segment_dir = TempDir::new("segment_test").unwrap();
     let segment_dir_path = segment_dir.path().to_str().unwrap();
     let storage = Storage::new(&StorageType::Local)
@@ -639,7 +637,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_one_log_message() {
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     let time = Utc::now().timestamp_millis() as u64;
 
     segment
@@ -653,7 +651,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_one_metric_point() {
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     let time = Utc::now().timestamp_millis() as u64;
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
@@ -682,7 +680,7 @@ mod tests {
   #[tokio::test]
   async fn test_multiple_log_messages() {
     let num_messages = 1000;
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     let start_time = Utc::now().timestamp_millis() as u64;
     for _ in 0..num_messages {
@@ -705,7 +703,7 @@ mod tests {
   async fn test_concurrent_append_metric_points() {
     let num_threads = 20;
     let num_metric_points_per_thread = 5000;
-    let segment = Arc::new(Segment::new());
+    let segment = Arc::new(Segment::new_with_temp_wal());
     let start_time = Utc::now().timestamp_millis() as u64;
     let expected = Arc::new(RwLock::new(Vec::new()));
 
@@ -757,7 +755,7 @@ mod tests {
   #[tokio::test]
   async fn test_range_overlap() {
     let (start, end) = (1000, 2000);
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     segment
       .append_log_message(start, &HashMap::new(), "message_1")
@@ -791,7 +789,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_duplicates() {
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     segment
       .append_log_message(1000, &HashMap::new(), "hello world")
