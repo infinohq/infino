@@ -31,7 +31,7 @@ use std::io::Write;
 use std::result::Result;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query};
+use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::response::IntoResponse;
 use axum::routing::{delete, put};
 use axum::{extract::State, routing::get, routing::post, Json, Router};
@@ -184,8 +184,14 @@ async fn app(
     // POST methods to create and delete index
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
+    // ---
+    // State that is passed to each request.
     .with_state(shared_state.clone())
-    .layer(TraceLayer::new_for_http());
+    // ---
+    // Layer for tracing in debug mode.
+    .layer(TraceLayer::new_for_http())
+    // Make the default for body to be 5MB (instead of 2MB http default.)
+    .layer(DefaultBodyLimit::max(5 * 1024 * 1024));
 
   (router, commit_thread_handle, shared_state)
 }
@@ -1344,6 +1350,58 @@ mod tests {
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
+
+    Ok(())
+  }
+
+  #[tokio::test]
+  async fn test_body_limit() -> Result<(), CoreDBError> {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let container_name = "infino-test-main-rs";
+
+    create_test_config(config_dir_path, index_dir_path, container_name, false);
+
+    // Create the app.
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // We need a http body of >2MB and <5MB for this test.
+    let num_log_messages = 15 * 1024;
+    let mut logs = Vec::new();
+    let value = json!("value1 value2 value3 value4 value5 value6 value7 value8 value9");
+    for i in 0..num_log_messages {
+      let mut log = HashMap::new();
+      log.insert("date", json!(i));
+      log.insert("field1", value.clone());
+      log.insert("field2", value.clone());
+      log.insert("field3", value.clone());
+      logs.push(log);
+    }
+
+    let body = serde_json::to_string(logs.as_slice()).unwrap();
+    // Make sure that the body is >2MB, but <5MB
+    let body_len = body.len();
+    assert!(body_len > 2 * 1024 * 1024 && body_len < 5 * 1024 * 1024);
+
+    // Send a large request.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri("/append_log")
+          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    let status = response.status();
+
+    // We may return OK or TOO_MANY_REQUESTS as the number of uncommitted segments are too high.
+    // However, we should not return other error codes such as CONTENT_TOO_LARGE.
+    assert!(status == StatusCode::OK || status == StatusCode::TOO_MANY_REQUESTS);
 
     Ok(())
   }
