@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 axum = { version = "0.7.3", features = ["macros"] }
 cfg-if = "1.0"
-chrono = "0.4.31"
+chrono = "0.4.35"
 config = "0.14.0"
 coredb = { path = "../coredb" }
 crossbeam = "0.8.2"

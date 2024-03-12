@@ -19,7 +19,7 @@ use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
 use crate::utils::error::CoreDBError;
-use crate::utils::io;
+use crate::utils::io::get_joined_path;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex};
 
@@ -205,73 +205,56 @@ impl Index {
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
   /// within the search_memory_budget_bytes.
   fn shrink_to_fit(&self) {
-    // Create a vector that has each segment's number, uncompressed size and end time.
-    let mut segment_data: Vec<(u32, u64, u64)> = Vec::new();
-    let mut memory_consumed = 0;
-    for entry in self.memory_segments_map.iter() {
-      let segment_number = *entry.key();
+    // Reserve the initial capacity to improve memory allocation efficiency.
+    let mut segment_data: Vec<(u32, u64, u64)> = Vec::with_capacity(self.memory_segments_map.len());
+
+    let mut memory_consumed: u64 = 0;
+    for entry in &self.memory_segments_map {
+      let segment_number = entry.key();
       let segment = entry.value();
       let uncompressed_size = segment.get_uncompressed_size();
       let end_time = segment.get_end_time();
-      segment_data.push((segment_number, uncompressed_size, end_time));
+      segment_data.push((*segment_number, uncompressed_size, end_time));
       memory_consumed += uncompressed_size;
     }
 
     if memory_consumed <= self.search_memory_budget_bytes {
-      // We are within the memory budget - no eviction needed.
-      return;
+      return; // Early exit if we are already under budget.
     }
 
-    // Find out the memory to evict (from the older segments), so that we'll still be
-    // within the memory budget.
+    // More efficient sort for primitive data types.
+    // We are sorting by the end times, so that oldest segments will be deallocated first.
+    segment_data.sort_unstable_by_key(|k| k.2);
+
     let memory_to_evict = memory_consumed - self.search_memory_budget_bytes;
-
-    info!(
-      "Need to evict segments upto size: {} bytes",
-      memory_to_evict
-    );
-
-    // Sort this vector by end time in ascending order (i.e., oldest segments first).
-    segment_data.sort_by_key(|&(_, _, end_time)| end_time);
-
-    // Counter to track memory evicted so far.
+    let current_segment_number = self.metadata.get_current_segment_number();
     let mut memory_evicted_so_far = 0;
 
-    // Iterate and evict the oldest segments first.
-    for segment in segment_data {
-      let segment_number = segment.0;
-      let uncompressed_size = segment.1;
-
-      // Do not evict the current segment - as it would be needed for inserts.
-      let current_segment_number = self.metadata.get_current_segment_number();
+    for (segment_number, uncompressed_size, _) in segment_data {
+      // Skip current or uncommitted segments, as these aren't yet written to object store.
       if segment_number == current_segment_number
         || self
           .uncommitted_segment_numbers
           .contains_key(&segment_number)
       {
-        debug!(
-          "Not evicting the segment with segment_number {} as it is the current segment or is in the uncommitted segment numbers",
-          segment_number
-        );
         continue;
       }
 
-      // We already evicted enough memory - stop evicting.
       if memory_evicted_so_far >= memory_to_evict {
-        debug!(
-          "Already evicted {} bytes of memory, greather than or equal to {}. Not evicting further.",
-          memory_evicted_so_far, memory_to_evict
-        );
-        break;
+        break; // Stop if we have evicted enough.
       }
 
-      // Evict the segment with segment_number from memory_segments_map.
       if let Some((_, segment)) = self.memory_segments_map.remove(&segment_number) {
-        info!("Evicting segment with segment_number {}", segment_number);
-        // Drop the segment to free the memory.
-        drop(segment);
-        memory_evicted_so_far += uncompressed_size;
+        memory_evicted_so_far += uncompressed_size; // Update evicted memory.
+        drop(segment); // Explicitly drop to signify memory release.
       }
+    }
+
+    if memory_evicted_so_far > 0 {
+      info!(
+        "Evicted {} bytes of segments to meet the memory budget",
+        memory_evicted_so_far
+      );
     }
   }
 
@@ -397,9 +380,7 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the log message to the current segment.
-      current_segment
-        .append_log_message(time, fields, message)
-        .unwrap();
+      current_segment.append_log_message(time, fields, message)?;
     }
 
     // Update start and end time of the summary of the current segment.
@@ -448,9 +429,7 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the metric point to the current segment.
-      current_segment
-        .append_metric_point(metric_name, labels, time, value)
-        .unwrap();
+      current_segment.append_metric_point(metric_name, labels, time, value)?;
     }
 
     // Update start and end time of the summary of the current segment.
@@ -573,8 +552,7 @@ impl Index {
     let end_time = segment.get_end_time();
 
     // Commit this segment.
-    let segment_dir_path =
-      io::get_joined_path(&self.index_dir_path, segment_number.to_string().as_str());
+    let segment_dir_path = self.get_segment_dir_path(segment_number);
 
     let (uncompressed, compressed) = segment
       .commit(&self.storage, segment_dir_path.as_str())
@@ -599,7 +577,7 @@ impl Index {
     );
 
     // Read all segments summaries from disk.
-    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
     if !self.storage.check_path_exists(&all_segments_file).await {
       return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
@@ -630,7 +608,7 @@ impl Index {
     let mut lock = match lock {
       Ok(lock) => lock,
       Err(_) => {
-        info!(
+        debug!(
           "Could not acquire commit lock for index at path {}. Retrying in the next commit run.",
           self.index_dir_path
         );
@@ -684,14 +662,14 @@ impl Index {
     }
 
     // Write the summaries to disk.
-    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
     self
       .storage
       .write(&self.all_segments_summaries, all_segments_file.as_str())
       .await?;
 
     // Write the metadata to disk.
-    let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
+    let metadata_path = get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     self
       .storage
       .write(&self.metadata, metadata_path.as_str())
@@ -702,7 +680,7 @@ impl Index {
 
   /// Reads a segment from memory and insert it in memory_segments_map.
   pub async fn refresh_segment(&self, segment_number: u32) -> Result<Segment, CoreDBError> {
-    let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+    let segment_dir_path = self.get_segment_dir_path(segment_number);
     debug!(
       "Loading segment with segment number {} and path {}",
       segment_number, segment_dir_path
@@ -723,7 +701,7 @@ impl Index {
     let storage = Storage::new(storage_type).await?;
 
     // Read metadata.
-    let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
+    let metadata_path = get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let metadata: Metadata = storage.read(metadata_path.as_str()).await?;
 
     let commit_refresh_lock = Arc::new(TokioMutex::new(thread::current().id()));
@@ -816,7 +794,7 @@ impl Index {
   pub async fn delete_segment(&self, segment_number: u32) -> Result<(), CoreDBError> {
     // Delete the segment only if it is not in memory
     if !self.memory_segments_map.contains_key(&segment_number) {
-      let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+      let segment_dir_path = get_joined_path(&self.index_dir_path, &segment_number.to_string());
       let delete_result = self.storage.remove_dir(segment_dir_path.as_str()).await;
       match delete_result {
         Ok(_) => {
@@ -832,6 +810,10 @@ impl Index {
       return Err(CoreDBError::SegmentInMemory(segment_number));
     }
     Ok(())
+  }
+
+  fn get_segment_dir_path(&self, segment_numger: u32) -> String {
+    get_joined_path(&self.index_dir_path, &segment_numger.to_string())
   }
 }
 
@@ -917,10 +899,7 @@ mod tests {
         .await
     );
 
-    let segment_path = get_joined_path(
-      &index_dir_path,
-      &index.metadata.get_current_segment_number().to_string(),
-    );
+    let segment_path = index.get_segment_dir_path(index.metadata.get_current_segment_number());
     let segment_metadata_path = get_joined_path(&segment_path, &Segment::get_metadata_file_name());
     assert!(
       index
@@ -1143,8 +1122,7 @@ mod tests {
       .await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
-      let original_segment_path =
-        get_joined_path(&index_dir_path, &original_segment_number.to_string());
+      let original_segment_path = index.get_segment_dir_path(original_segment_number);
 
       let message_prefix = "message";
       let mut expected_log_messages: Vec<String> = Vec::new();
