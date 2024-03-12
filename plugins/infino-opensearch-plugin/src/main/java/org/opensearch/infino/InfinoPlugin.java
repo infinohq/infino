@@ -50,7 +50,7 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
             final IndexNameExpressionResolver indexNameExpressionResolver,
             final Supplier nodesInCluster) {
 
-        logger.info("Registering REST Handler");
+        logger.info("-----------------------Registering REST Handler------------------------");
 
         return singletonList(new InfinoRestHandler());
     }
@@ -61,7 +61,7 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
     public List<TransportInterceptor> getTransportInterceptors(NamedWriteableRegistry namedWriteableRegistry,
             ThreadContext threadContext) {
 
-        logger.info("Registering Transport Interceptor");
+        logger.info("-----------------------Registering Transport Interceptor------------------------");
 
         HttpClient httpClient = HttpClient.newHttpClient();
 

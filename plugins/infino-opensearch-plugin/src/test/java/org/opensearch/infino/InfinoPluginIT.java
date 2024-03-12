@@ -18,7 +18,9 @@ import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.repositories.RepositoriesService;
+import org.opensearch.script.ScriptService;
 import org.opensearch.test.OpenSearchIntegTestCase;
+import org.opensearch.threadpool.ThreadPool;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,17 +29,17 @@ import java.util.Collections;
 
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
-
-import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.env.Environment;
 import org.opensearch.env.NodeEnvironment;
-import org.opensearch.script.ScriptService;
-import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.transport.TransportInterceptor;
 import org.opensearch.watcher.ResourceWatcherService;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.net.Authenticator;
 import java.net.CookieHandler;
@@ -51,6 +53,7 @@ import java.net.http.HttpResponse.PushPromiseHandler;
 import java.net.http.HttpHeaders;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -60,45 +63,44 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 
-import static org.mockito.Mockito.mock;
+import static java.util.Collections.singletonList;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
 
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 @OpenSearchIntegTestCase.ClusterScope(scope = OpenSearchIntegTestCase.Scope.SUITE)
 public class InfinoPluginIT extends OpenSearchIntegTestCase {
+    private static final Logger logger = LogManager.getLogger(InfinoPlugin.class);
 
     protected static final int MAX_RETRIES = 2;
     private static int mockStatusCode = 200;
     private static String mockPath = "/default/path";
-    private static String mockBody = "Default body";
+    private static String mockBody = "{\"Default\" : \"body\"}";
+
+    // @Override
+    // protected Settings nodeSettings(int nodeOrdinal) {
+    // return Settings.builder()
+    // .put(super.nodeSettings(nodeOrdinal))
+    // .put("plugin.types", MockInfinoPlugin.class.getName())
+    // .build();
+    // }
 
     @Override
-    protected Settings nodeSettings(int nodeOrdinal) {
-        return Settings.builder()
-                .put(super.nodeSettings(nodeOrdinal))
-                .put("plugin.types", MockInfinoPlugin.class.getName())
-                .build();
-    }
-
-    @Override
-    protected boolean addMockHttpTransport() {
-        return true;
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return Collections.singletonList(MockInfinoPlugin.class);
     }
 
     public static class MockInfinoPlugin extends InfinoPlugin {
-        // Define a static field for the mock client so it can be set from outside the
-        // class
-        private static MyHttpClient<String> staticMockMyHttpClient;
-
-        // No-argument constructor as expected by OpenSearch
-        public MockInfinoPlugin() {
-            super();
+        @Override
+        public List<TransportInterceptor> getTransportInterceptors(NamedWriteableRegistry namedWriteableRegistry,
+                ThreadContext threadContext) {
+            logger.info("-----------------------Registering Test Transport Interceptor------------------------");
+            return singletonList(new InfinoTransportInterceptor(getCustomHttpClient()));
         }
 
-        // Static method to set the mock client, same as before
-        public static void setStaticMockMyHttpClient(MyHttpClient<String> mockHttpClient) {
-            staticMockMyHttpClient = mockHttpClient;
+        // Provide a no-argument constructor as expected by OpenSearch
+        public MockInfinoPlugin() {
+            super();
         }
 
         @Override
@@ -114,102 +116,11 @@ public class InfinoPluginIT extends OpenSearchIntegTestCase {
                 NamedWriteableRegistry namedWriteableRegistry,
                 IndexNameExpressionResolver indexNameExpressionResolver,
                 Supplier<RepositoriesService> repositoriesServiceSupplier) {
-            HttpClient mockHttpClient = new MyHttpClientWrapper<>(staticMockMyHttpClient);
-            return Collections.singletonList(new InfinoTransportInterceptor(mockHttpClient));
-        }
-
-    }
-
-    public interface MyHttpClient<T> {
-        HttpResponse<T> sendRequest(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler);
-    }
-
-    private static class MyHttpClientWrapper<T> extends HttpClient {
-        private final MyHttpClient<String> myHttpClient;
-
-        public MyHttpClientWrapper(MyHttpClient<String> myHttpClient) {
-            this.myHttpClient = myHttpClient;
-        }
-
-        @Override
-        public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
-                BodyHandler<T> responseBodyHandler, PushPromiseHandler<T> pushPromiseHandler) {
-            throw new UnsupportedOperationException("sendAsync Not implemented in mock");
-        }
-
-        @Override
-        public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
-                BodyHandler<T> responseBodyHandler) {
-            throw new UnsupportedOperationException("sendAsync Not implemented in mock");
-        }
-
-        @Override
-        public <T> HttpResponse<T> send(HttpRequest request, BodyHandler<T> responseBodyHandler)
-                throws IOException, InterruptedException {
-            HttpResponse<String> response = mockMyHttpClient.sendRequest(request,
-                    convertToSpecificHandler(responseBodyHandler));
-            return convertToGenericResponse(response, responseBodyHandler);
-        }
-
-        // Helper method to convert BodyHandler<T> to BodyHandler<String>
-        private BodyHandler<String> convertToSpecificHandler(BodyHandler<?> handler) {
-            return HttpResponse.BodyHandlers.ofString();
-        }
-
-        @Override
-        public Optional<CookieHandler> cookieHandler() {
-            return Optional.empty();
-        }
-
-        @Override
-        public Optional<Duration> connectTimeout() {
-            return Optional.empty();
-        }
-
-        @Override
-        public Redirect followRedirects() {
-            return null;
-        }
-
-        @Override
-        public Optional<ProxySelector> proxy() {
-            return Optional.empty();
-        }
-
-        @Override
-        public SSLContext sslContext() {
-            return null;
-        }
-
-        @Override
-        public SSLParameters sslParameters() {
-            return null;
-        }
-
-        @Override
-        public Optional<Authenticator> authenticator() {
-            return Optional.empty();
-        }
-
-        @Override
-        public Version version() {
-            return Version.HTTP_1_1;
-        }
-
-        @Override
-        public Optional<Executor> executor() {
-            return Optional.empty();
-        }
-
-        // Helper method to convert HttpResponse<String> to HttpResponse<T>
-        private <T> HttpResponse<T> convertToGenericResponse(HttpResponse<String> response, BodyHandler<T> handler) {
-            @SuppressWarnings("unchecked")
-            HttpResponse<T> genericResponse = (HttpResponse<T>) response;
-            return genericResponse;
+            return Collections.singletonList(new InfinoTransportInterceptor(getCustomHttpClient()));
         }
     }
 
-    private static MyHttpClient<String> mockMyHttpClient = new MyHttpClient<>() {
+    private static MyHttpClient mockMyHttpClient = new MyHttpClient() {
         @Override
         public HttpResponse<String> sendRequest(HttpRequest request,
                 HttpResponse.BodyHandler<String> responseBodyHandler) {
@@ -219,11 +130,9 @@ public class InfinoPluginIT extends OpenSearchIntegTestCase {
         }
     };
 
-    @SuppressWarnings("unchecked")
-    @Before
-    public void setUp() throws Exception {
-        super.setUp();
-        MockInfinoPlugin.setStaticMockMyHttpClient(mock(MyHttpClient.class));
+    public interface MyHttpClient {
+        HttpResponse<String> sendRequest(HttpRequest request,
+                HttpResponse.BodyHandler<String> responseBodyHandler);
     }
 
     // Create a fake HttpResponse for testing
@@ -271,9 +180,85 @@ public class InfinoPluginIT extends OpenSearchIntegTestCase {
         };
     }
 
-    @Override
-    protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return Collections.singletonList(MockInfinoPlugin.class);
+    private static HttpClient getCustomHttpClient() {
+        return new HttpClient() {
+            @Override
+            public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
+                    BodyHandler<T> responseBodyHandler, PushPromiseHandler<T> pushPromiseHandler) {
+                throw new UnsupportedOperationException("sendAsync Not implemented in mock");
+            }
+
+            @Override
+            public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
+                    BodyHandler<T> responseBodyHandler) {
+                throw new UnsupportedOperationException("sendAsync Not implemented in mock");
+            }
+
+            @Override
+            public <T> HttpResponse<T> send(HttpRequest request, BodyHandler<T> responseBodyHandler)
+                    throws IOException, InterruptedException {
+                HttpResponse<String> response = mockMyHttpClient.sendRequest(request,
+                        convertToSpecificHandler(responseBodyHandler));
+                return convertToGenericResponse(response, responseBodyHandler);
+            }
+
+            // Helper method to convert BodyHandler<T> to BodyHandler<String>
+            private BodyHandler<String> convertToSpecificHandler(BodyHandler<?> handler) {
+                return HttpResponse.BodyHandlers.ofString();
+            }
+
+            @Override
+            public Optional<CookieHandler> cookieHandler() {
+                return Optional.empty();
+            }
+
+            @Override
+            public Optional<Duration> connectTimeout() {
+                return Optional.empty();
+            }
+
+            @Override
+            public Redirect followRedirects() {
+                return null;
+            }
+
+            @Override
+            public Optional<ProxySelector> proxy() {
+                return Optional.empty();
+            }
+
+            @Override
+            public SSLContext sslContext() {
+                return null;
+            }
+
+            @Override
+            public SSLParameters sslParameters() {
+                return null;
+            }
+
+            @Override
+            public Optional<Authenticator> authenticator() {
+                return Optional.empty();
+            }
+
+            @Override
+            public Version version() {
+                return Version.HTTP_1_1;
+            }
+
+            @Override
+            public Optional<Executor> executor() {
+                return Optional.empty();
+            }
+        };
+    }
+
+    // Helper method to convert HttpResponse<String> to HttpResponse<T>
+    private static <T> HttpResponse<T> convertToGenericResponse(HttpResponse<String> response, BodyHandler<T> handler) {
+        @SuppressWarnings("unchecked")
+        HttpResponse<T> genericResponse = (HttpResponse<T>) response;
+        return genericResponse;
     }
 
     public void testInfinoInstalled() throws IOException, ParseException {

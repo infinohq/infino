@@ -139,9 +139,15 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
     private static final int MAX_RETRIES = 3; // Maximum number of retries for exponential backoff
     private static final int THREADPOOL_SIZE = 25; // Size of threadpool we will use for Infino
-    private static HttpClient httpClient = HttpClient.newHttpClient();
+    private static HttpClient httpClient;
     private static final Logger logger = LogManager.getLogger(InfinoTransportInterceptor.class);
 
+    /**
+     * Constructor
+     * 
+     * @param httpClient - httpClient to use to communicate with Infino.
+     *                   we add here so we can mock http calls during testing
+     */
     public InfinoTransportInterceptor(HttpClient httpClient) {
         InfinoTransportInterceptor.httpClient = httpClient;
     }
@@ -171,7 +177,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
     }
 
     /**
-     * Get get a new instance of the class
+     * Get get a new instance of the serializer class
      * 
      * @param request - the Transport request to serialize
      * 
@@ -223,16 +229,12 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             boolean forceExecution,
             TransportRequestHandler<T> actualHandler) {
 
-        logger.debug("Executing Infino Transport Handler with action " + action + " and executor " + executor);
+        logger.info("Executing Infino Transport Handler with action " + action + " and executor " + executor);
 
         return new TransportRequestHandler<T>() {
             @Override
             public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
-                logger.debug("Received request " + request.toString());
-
-                if (request instanceof SearchRequest) {
-                    logger.info("Received SEARCH request " + request.toString());
-                }
+                logger.debug("-----------------Received request--------------- " + request.toString());
 
                 if (shouldBeIntercepted(request)) {
                     processTransportActions(request, new ActionListener<TransportResponse>() {
@@ -409,7 +411,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             InfinoOperation operation,
             TransportRequest transportRequest) {
         if (Thread.currentThread().isInterrupted()) {
-            logger.info("Infino Plugin Rest handler thread interrupted. Exiting...");
+            logger.warn("Infino Plugin Rest handler thread interrupted. Exiting...");
             Exception e = new Exception("Infino request thread was interrupted.");
             listener.onFailure(e);
             return;
@@ -417,6 +419,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
         try {
             String responseBody = response.body();
+            int responseCode = response.statusCode();
 
             logger.info("Response from Infino is " + responseBody);
 
@@ -424,11 +427,18 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                 throw new IOException("Response body is empty");
             }
 
-            Gson gson = new Gson();
-            JsonObject rootObj = gson.fromJson(responseBody, JsonObject.class);
-            if (rootObj == null) {
-                throw new JsonParseException("Unable to parse response body into JSON");
+            // TODO: Parse the error response from Infino
+            if (responseCode >= 400 && responseCode <= 599) {
+                throw new IOException("Error returned from Infino index");
             }
+
+            Gson gson = new Gson();
+            JsonElement element = gson.fromJson(responseBody, JsonElement.class);
+            if (!element.isJsonObject()) {
+                throw new JsonParseException("Expected JSON object but found different structure");
+            }
+
+            JsonObject rootObj = element.getAsJsonObject();
 
             JsonObject hitsObject = rootObj.getAsJsonObject("hits");
             if (hitsObject == null) {
@@ -491,7 +501,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             // Send the QueryFetchSearchResult back to the listener
             listener.onResponse(queryFetchSearchResult);
         } catch (JsonParseException | IOException e) {
-            logger.error("Error parsing response or response is empty", e);
+            logger.error("Error parsing or retrieving Infino response", e);
             listener.onFailure(e);
         } catch (Exception e) {
             logger.error("Error handling response", e);
