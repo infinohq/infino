@@ -666,7 +666,7 @@ impl Index {
     }
     uncommitted_segment_numbers.sort_by(|a, b| a.1.cmp(&b.1));
 
-    info!(
+    debug!(
       "Commiting index, uncommitted segment numbers: {:?}",
       uncommitted_segment_numbers
     );
