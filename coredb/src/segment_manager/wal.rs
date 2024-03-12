@@ -1,6 +1,7 @@
-use serde_json::Value;
-use std::fs::OpenOptions;
+use std::fs::{remove_file, OpenOptions};
 use std::io::{BufWriter, Write};
+
+use serde_json::Value;
 
 use crate::utils::error::CoreDBError;
 
@@ -8,6 +9,7 @@ const MAX_ENTRIES: usize = 1000;
 
 #[derive(Debug)]
 pub struct WriteAheadLog {
+  file_path: String,
   buffer: Vec<Value>,
   writer: BufWriter<std::fs::File>,
 }
@@ -18,7 +20,11 @@ impl WriteAheadLog {
     let writer = BufWriter::new(file);
     let buffer = Vec::new();
 
-    Ok(Self { buffer, writer })
+    Ok(Self {
+      file_path: path.to_owned(),
+      buffer,
+      writer,
+    })
   }
 
   pub fn append(&mut self, entry: Value) -> Result<(), CoreDBError> {
@@ -30,7 +36,7 @@ impl WriteAheadLog {
     Ok(())
   }
 
-  fn flush(&mut self) -> Result<(), CoreDBError> {
+  pub fn flush(&mut self) -> Result<(), CoreDBError> {
     if !self.buffer.is_empty() {
       let combined_entries = self
         .buffer
@@ -42,6 +48,13 @@ impl WriteAheadLog {
       self.writer.flush()?;
       self.buffer.clear();
     }
+
+    Ok(())
+  }
+
+  pub fn remove(&mut self) -> Result<(), CoreDBError> {
+    // Delete the file.
+    remove_file(&self.file_path)?;
 
     Ok(())
   }
@@ -62,7 +75,7 @@ mod tests {
   use crate::utils::sync::TokioMutex;
 
   #[tokio::test]
-  async fn test_write_and_flush() {
+  async fn test_wal_serial() {
     // Create a new temporary file
     let temp_file = NamedTempFile::new().unwrap();
     let path = temp_file.path().to_str().unwrap();
@@ -94,11 +107,13 @@ mod tests {
     assert!(contents.contains("Test log entry"));
     assert_eq!(contents.matches('\n').count(), MAX_ENTRIES + 2); // Each entry should be on a new line
 
-    fs::remove_file(path).unwrap(); // Clean up after the test
+    // Remove the file and check that it does not exist anymore.
+    wal.remove().unwrap();
+    assert!(std::fs::metadata(path).is_err())
   }
 
   #[tokio::test]
-  async fn test_append_and_flush_parallel() {
+  async fn test_wal_parallel() {
     let temp_file = NamedTempFile::new().unwrap();
     let path = temp_file.path().to_str().unwrap();
     let wal = WriteAheadLog::new(path).unwrap();
