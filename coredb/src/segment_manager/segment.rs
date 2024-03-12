@@ -185,17 +185,19 @@ impl Segment {
   }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
+  // Note that this function isn't async - this helps with testing and esuring correctness.
   pub fn append_log_message(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
   ) -> Result<(), CoreDBError> {
-    let value = json!({"time": time, "fields": fields, "text": text});
+    // Write to write-ahead-log.
+    let wal_entry = json!({"type": "log", "time": time, "fields": fields, "text": text});
     {
       let wal_clone = self.wal.clone();
       let wal = &mut wal_clone.lock();
-      wal.append(value).unwrap();
+      wal.append(wal_entry).unwrap();
     }
 
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
@@ -227,6 +229,7 @@ impl Segment {
   }
 
   /// Append a metric point with specified time and value to the segment.
+  // Note that this function isn't async - this helps with testing and esuring correctness.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
@@ -234,6 +237,15 @@ impl Segment {
     time: u64,
     value: f64,
   ) -> Result<(), CoreDBError> {
+    // Write to write-ahead-log.
+    let wal_entry = json!({"type": "metric", "time": time, "metric_name": metric_name,
+      "name_value_labels": name_value_labels, "value": value});
+    {
+      let wal_clone = self.wal.clone();
+      let wal = &mut wal_clone.lock();
+      wal.append(wal_entry).unwrap();
+    }
+
     // Increment the number of metric points appended so far.
     self.metadata.fetch_increment_metric_point_count();
 
