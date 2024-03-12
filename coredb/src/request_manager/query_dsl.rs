@@ -563,7 +563,6 @@ mod tests {
       fields.insert("key".to_string(), key.to_string());
       segment
         .append_log_message(Utc::now().timestamp_millis() as u64, &fields, message)
-        .await
         .unwrap();
     }
 

@@ -1,4 +1,3 @@
-use crate::utils::sync::{Arc, TokioMutex};
 use serde_json::Value;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
@@ -9,53 +8,39 @@ const MAX_ENTRIES: usize = 1000;
 
 #[derive(Debug)]
 pub struct WriteAheadLog {
-  buffer: Arc<TokioMutex<Vec<Value>>>,
-  writer: Arc<TokioMutex<BufWriter<std::fs::File>>>,
+  buffer: Vec<Value>,
+  writer: BufWriter<std::fs::File>,
 }
 
 impl WriteAheadLog {
   pub fn new(path: &str) -> Result<Self, CoreDBError> {
-    println!("#### Creatung new WAL");
     let file = OpenOptions::new().create(true).append(true).open(path)?;
-    println!("#### Created wal file");
     let writer = BufWriter::new(file);
+    let buffer = Vec::new();
 
-    Ok(Self {
-      buffer: Arc::new(TokioMutex::new(Vec::new())),
-      writer: Arc::new(TokioMutex::new(writer)),
-    })
+    Ok(Self { buffer, writer })
   }
 
-  pub async fn append(&self, entry: Value) -> Result<(), CoreDBError> {
-    //let num_entries;
+  pub fn append(&mut self, entry: Value) -> Result<(), CoreDBError> {
+    self.buffer.push(entry);
 
-    {
-      // Write in a new scope to release buffer lock immediately.
-      println!("#### Locking mutex");
-      let buffer = self.buffer.lock().await;
-      //buffer.push(entry);
-      //num_entries = buffer.len();
+    if self.buffer.len() >= MAX_ENTRIES {
+      self.flush()?;
     }
-
-    //if num_entries >= MAX_ENTRIES {
-    //  self.flush().await?;
-    //}
     Ok(())
   }
 
-  async fn flush(&self) -> Result<(), CoreDBError> {
-    let buffer = &mut *self.buffer.lock().await;
-    let writer = &mut *self.writer.lock().await;
-
-    if !buffer.is_empty() {
-      let combined_entries = buffer
+  fn flush(&mut self) -> Result<(), CoreDBError> {
+    if !self.buffer.is_empty() {
+      let combined_entries = self
+        .buffer
         .iter()
         .map(|entry| serde_json::to_string(entry).unwrap_or_default() + "\n")
         .collect::<String>();
 
-      writer.write_all(combined_entries.as_bytes())?;
-      writer.flush()?;
-      buffer.clear();
+      self.writer.write_all(combined_entries.as_bytes())?;
+      self.writer.flush()?;
+      self.buffer.clear();
     }
 
     Ok(())
@@ -65,36 +50,41 @@ impl WriteAheadLog {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use serde_json::json;
+
   use std::fs;
   use std::path::Path;
+  use std::sync::Arc;
+
+  use serde_json::json;
   use tempfile::NamedTempFile;
   use tokio::task;
+
+  use crate::utils::sync::TokioMutex;
 
   #[tokio::test]
   async fn test_write_and_flush() {
     // Create a new temporary file
     let temp_file = NamedTempFile::new().unwrap();
     let path = temp_file.path().to_str().unwrap();
-    let wal = WriteAheadLog::new(path).unwrap();
+    let mut wal = WriteAheadLog::new(path).unwrap();
 
     let entry = json!({"time": 1627590000, "message": "Test log entry"});
 
     // Add 2 entries. wal.flash() is not called yet, so the file should not contain 'Test log entry'.
-    wal.append(entry.clone()).await.unwrap();
-    wal.append(entry.clone()).await.unwrap();
+    wal.append(entry.clone()).unwrap();
+    wal.append(entry.clone()).unwrap();
     let contents = fs::read_to_string(Path::new(path)).unwrap();
     assert!(!contents.contains("Test log entry"));
 
     // Flush wal. File should now contain 'Test log entry' twice.
-    wal.flush().await.unwrap();
+    wal.flush().unwrap();
     let contents = fs::read_to_string(Path::new(path)).unwrap();
     assert!(contents.contains("Test log entry"));
     assert_eq!(contents.matches('\n').count(), 2); // Each entry should be on a new line
 
     // Add more entries, upto a total of MAX_ENTRIES.
     for _ in 0..MAX_ENTRIES {
-      wal.append(entry.clone()).await.unwrap();
+      wal.append(entry.clone()).unwrap();
     }
 
     // Flush should be called automatically as we reach MAX_ENTRIES limit.
@@ -111,7 +101,8 @@ mod tests {
   async fn test_append_and_flush_parallel() {
     let temp_file = NamedTempFile::new().unwrap();
     let path = temp_file.path().to_str().unwrap();
-    let wal = Arc::new(WriteAheadLog::new(path).unwrap());
+    let wal = WriteAheadLog::new(path).unwrap();
+    let wal = Arc::new(TokioMutex::new(wal));
 
     const NUM_APPEND_THREADS: usize = 20;
     const NUM_FLUSH_THREADS: usize = 10;
@@ -125,7 +116,8 @@ mod tests {
       let handle = task::spawn(async move {
         for _ in 0..NUM_APPENDS {
           let entry = json!({"time": 1627590000, "message": "Concurrent append"});
-          wal_clone.append(entry).await.unwrap();
+          let wal_clone = &mut wal_clone.lock().await;
+          wal_clone.append(entry).unwrap();
         }
       });
       append_handles.push(handle);
@@ -134,10 +126,11 @@ mod tests {
     // Spawn tasks for concurrent flushes.
     let mut flush_handles = vec![];
     for _ in 0..NUM_FLUSH_THREADS {
-      let wal_clone = Arc::clone(&wal);
+      let wal_clone = wal.clone();
       let handle = task::spawn(async move {
         for _ in 0..NUM_FLUSHES {
-          wal_clone.flush().await.unwrap();
+          let wal_clone = &mut wal_clone.lock().await;
+          wal_clone.flush().unwrap();
         }
       });
       flush_handles.push(handle);
@@ -152,7 +145,9 @@ mod tests {
     }
 
     // Final flush to ensure all entries are written.
-    wal.flush().await.unwrap();
+    let wal_clone = wal.clone();
+    let wal_clone = &mut wal_clone.lock().await;
+    wal_clone.flush().unwrap();
 
     // Verify that entries were written correctly.
     let contents = fs::read_to_string(temp_file.path()).unwrap();

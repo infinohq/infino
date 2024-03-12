@@ -371,6 +371,8 @@ impl Index {
     // Insert new segment in memory_segments_map and all_segments_summaries.
     self.insert_new_segment(new_segment_number, new_segment);
 
+    println!("#### inserting in mem map and summary complete");
+
     println!("#### now setting current seg number");
     // Appends will start going to the new segment after this point.
     self.metadata.set_current_segment_number(new_segment_number);
@@ -414,9 +416,9 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the log message to the current segment.
-      current_segment
-        .append_log_message(time, fields, message)
-        .await?;
+      current_segment.append_log_message(time, fields, message)?;
+
+      drop(current_segment);
     }
 
     // Update start and end time of the summary of the current segment.

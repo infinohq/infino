@@ -148,7 +148,6 @@ mod tests {
       let segment = Segment::new_with_temp_wal();
       segment
         .append_log_message(i, &HashMap::new(), "some log message")
-        .await
         .expect("Could not append to segment");
       let segment_summary = SegmentSummary::new(i as u32, &segment);
       segment_summaries.push(segment_summary);

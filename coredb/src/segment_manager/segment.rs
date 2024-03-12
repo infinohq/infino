@@ -21,7 +21,7 @@ use crate::utils::error::CoreDBError;
 use crate::utils::error::QueryError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
-use crate::utils::sync::{Arc, RwLock, TokioMutex};
+use crate::utils::sync::{Arc, Mutex, RwLock, TokioMutex};
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
 const SEGMENT_FILE_NAME: &str = "segment.bin";
@@ -57,13 +57,14 @@ pub struct Segment {
   commit_lock: TokioMutex<()>,
 
   // Write ahead log.
-  wal: WriteAheadLog,
+  wal: Arc<Mutex<WriteAheadLog>>,
 }
 
 impl Segment {
   /// Create an empty segment.
   pub fn new(wal_file_path: &str) -> Self {
     let wal = WriteAheadLog::new(wal_file_path).unwrap();
+    let wal = Arc::new(Mutex::new(wal));
     Segment {
       metadata: Metadata::new(),
       terms: DashMap::new(),
@@ -184,14 +185,18 @@ impl Segment {
   }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
-  pub async fn append_log_message(
+  pub fn append_log_message(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
   ) -> Result<(), CoreDBError> {
     let value = json!({"time": time, "fields": fields, "text": text});
-    self.wal.append(value).await.unwrap();
+    {
+      let wal_clone = self.wal.clone();
+      let wal = &mut wal_clone.lock();
+      wal.append(value).unwrap();
+    }
 
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
@@ -333,6 +338,7 @@ impl Segment {
     ) = storage.read(&segment_path).await?;
     let commit_lock = TokioMutex::new(());
     let wal = WriteAheadLog::new("/tmp/x").unwrap();
+    let wal = Arc::new(Mutex::new(wal));
 
     let segment = Segment {
       metadata,
@@ -495,7 +501,6 @@ mod tests {
         &HashMap::new(),
         "this is my 1st log message",
       )
-      .await
       .unwrap();
 
     let metric_name = "request_count";
@@ -642,7 +647,6 @@ mod tests {
 
     segment
       .append_log_message(time, &HashMap::new(), "some log message")
-      .await
       .unwrap();
 
     assert_eq!(segment.metadata.get_start_time(), time);
@@ -690,7 +694,6 @@ mod tests {
           &HashMap::new(),
           "some log message",
         )
-        .await
         .unwrap();
     }
     let end_time = Utc::now().timestamp_millis() as u64;
@@ -759,11 +762,9 @@ mod tests {
 
     segment
       .append_log_message(start, &HashMap::new(), "message_1")
-      .await
       .unwrap();
     segment
       .append_log_message(end, &HashMap::new(), "message_2")
-      .await
       .unwrap();
     assert_eq!(segment.metadata.get_start_time(), start);
     assert_eq!(segment.metadata.get_end_time(), end);
@@ -793,15 +794,12 @@ mod tests {
 
     segment
       .append_log_message(1000, &HashMap::new(), "hello world")
-      .await
       .unwrap();
     segment
       .append_log_message(1001, &HashMap::new(), "some message")
-      .await
       .unwrap();
     segment
       .append_log_message(1002, &HashMap::new(), "hello world hello world")
-      .await
       .unwrap();
 
     // Test terms map.
