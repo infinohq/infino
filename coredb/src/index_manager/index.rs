@@ -133,9 +133,11 @@ impl Index {
 
     // WAL storage is always local - we do not store WAL in the cloud.
     let wal_storage = Storage::new(&StorageType::Local).await?;
+    println!("#### Checking if wal dir creation is needed");
     if !wal_storage.check_path_exists(wal_dir_path).await {
       // WAL directory does not exist - create it.
-      storage.create_dir(wal_dir_path)?;
+      println!("#### Creating dir {}", wal_dir_path);
+      wal_storage.create_dir(wal_dir_path)?;
     }
 
     // Check whether index directory already has a metadata file.
@@ -875,7 +877,7 @@ mod tests {
   async fn create_index<'a>(
     name: &'a str,
     storage_type: &'a StorageType,
-  ) -> (Index, String, String) {
+  ) -> (Index, String, String, TempDir, TempDir) {
     config_test_logger();
 
     let index_dir = TempDir::new("index_test").unwrap();
@@ -885,7 +887,11 @@ mod tests {
     let index = Index::new(storage_type, &index_dir_path, &wal_dir_path)
       .await
       .unwrap();
-    (index, index_dir_path, wal_dir_path)
+
+    // Return the paths as well as temporary directories.
+    // We need to return the temporary directories as otherwise they will be deleted by the end of this function
+    // (when they go out of scope).
+    (index, index_dir_path, wal_dir_path, index_dir, wal_dir)
   }
 
   async fn create_index_with_thresholds<'a>(
@@ -895,7 +901,7 @@ mod tests {
     log_messages_threshold: u32,
     metric_points_threshold: u32,
     uncommitted_segments_threshold: u32,
-  ) -> (Index, String, String) {
+  ) -> (Index, String, String, TempDir, TempDir) {
     config_test_logger();
 
     let index_dir = TempDir::new("index_test").unwrap();
@@ -913,7 +919,11 @@ mod tests {
     )
     .await
     .unwrap();
-    (index, index_dir_path, wal_dir_path)
+
+    // Return the paths as well as temporary directories.
+    // We need to return the temporary directories as otherwise they will be deleted by the end of this function
+    // (when they go out of scope).
+    (index, index_dir_path, wal_dir_path, index_dir, wal_dir)
   }
 
   #[tokio::test]
@@ -964,7 +974,7 @@ mod tests {
   #[tokio::test]
   async fn test_commit_refresh() {
     let storage_type = StorageType::Local;
-    let (expected, index_dir_path, wal_dir_path) =
+    let (expected, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
       create_index("test_commit_refresh", &storage_type).await;
     let num_log_messages = 5;
     let message_prefix = "content#";
@@ -1027,7 +1037,7 @@ mod tests {
   #[tokio::test]
   async fn test_basic_search_logs() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path, _wal_dir_path) =
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
       create_index("test_basic_search", &storage_type).await;
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
@@ -1126,7 +1136,7 @@ mod tests {
   #[tokio::test]
   async fn test_basic_time_series() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path, _wal_dir_path) =
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
       create_index("test_basic_time_series", &storage_type).await;
     let num_metric_points = 1000;
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
@@ -1166,15 +1176,16 @@ mod tests {
     for _ in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
-      let (index, index_dir_path, wal_dir_path) = create_index_with_thresholds(
-        "test_two_segments",
-        &storage_type,
-        1024 * 1024,
-        1000,
-        50000,
-        10,
-      )
-      .await;
+      let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+        create_index_with_thresholds(
+          "test_two_segments",
+          &storage_type,
+          1024 * 1024,
+          1000,
+          50000,
+          10,
+        )
+        .await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path = index.get_segment_dir_path(original_segment_number);
@@ -1410,15 +1421,16 @@ mod tests {
     let commit_after = 1000;
 
     // Create a new index with a low threshold for the segment size.
-    let (mut index, index_dir_path, wal_dir_path) = create_index_with_thresholds(
-      "test_multiple_segments_logs",
-      &storage_type,
-      1024 * 1024,
-      commit_after,
-      10000,
-      10,
-    )
-    .await;
+    let (mut index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_multiple_segments_logs",
+        &storage_type,
+        1024 * 1024,
+        commit_after,
+        10000,
+        10,
+      )
+      .await;
 
     let message_prefix = "message";
     let num_log_messages = 10000;
@@ -1525,15 +1537,16 @@ mod tests {
   #[tokio::test]
   async fn test_search_logs_count() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path, _wal_dir_path) = create_index_with_thresholds(
-      "test_search_logs_count",
-      &storage_type,
-      1024 * 1024,
-      100000,
-      1000000,
-      10,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_search_logs_count",
+        &storage_type,
+        1024 * 1024,
+        100000,
+        1000000,
+        10,
+      )
+      .await;
 
     let message_prefix = "message";
     let num_message_suffixes = 10;
@@ -1576,15 +1589,16 @@ mod tests {
   #[tokio::test]
   async fn test_multiple_segments_metric_points() {
     let storage_type = StorageType::Local;
-    let (mut index, index_dir_path, wal_dir_path) = create_index_with_thresholds(
-      "test_multiple_segments_metric_points",
-      &storage_type,
-      1024 * 1024,
-      10,
-      100,
-      10,
-    )
-    .await;
+    let (mut index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_multiple_segments_metric_points",
+        &storage_type,
+        1024 * 1024,
+        10,
+        100,
+        10,
+      )
+      .await;
 
     let num_metric_points = 10000;
     let mut num_metric_points_from_last_commit = 0;
@@ -1697,7 +1711,7 @@ mod tests {
   #[tokio::test]
   async fn test_overlap_one_segment() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path, _wal_dir_path) =
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
       create_index("test_overlap_one_segment", &storage_type).await;
 
     index
@@ -1799,7 +1813,7 @@ mod tests {
 
     // Create a new index with a low threshold for the segment size.
     let name = &format!("test_concurrent_append_{}", num_segments_in_memory);
-    let (index, index_dir_path, wal_dir_path) = create_index_with_thresholds(
+    let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) = create_index_with_thresholds(
       name,
       &storage_type,
       search_memory_budget_bytes,
@@ -1902,7 +1916,7 @@ mod tests {
   #[tokio::test]
   async fn test_reusing_index_when_available() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path, wal_dir_path) = create_index_with_thresholds(
+    let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) = create_index_with_thresholds(
       "test_reusing_index_when_available",
       &storage_type,
       1024 * 1024,
@@ -1991,15 +2005,16 @@ mod tests {
     let storage_type = StorageType::Local;
     let some_segment_size_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * some_segment_size_bytes;
-    let (index, _index_dir_path, _wal_dir_path) = create_index_with_thresholds(
-      "test_limited_memory",
-      &storage_type,
-      search_memory_budget_bytes,
-      2,
-      100,
-      10,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_limited_memory",
+        &storage_type,
+        search_memory_budget_bytes,
+        2,
+        100,
+        10,
+      )
+      .await;
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -2068,7 +2083,7 @@ mod tests {
   #[tokio::test]
   async fn test_delete_segment_in_memory() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path, _wal_dir_path) =
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
       create_index("test_delete_segment_in_memory", &storage_type).await;
     let message = "test_message";
     index
@@ -2097,15 +2112,16 @@ mod tests {
     let segment_size_approx_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_approx_bytes;
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path, _wal_dir_path) = create_index_with_thresholds(
-      "test_delete_multiple_segments",
-      &storage_type,
-      search_memory_budget_bytes,
-      2,
-      20,
-      100,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_delete_multiple_segments",
+        &storage_type,
+        search_memory_budget_bytes,
+        2,
+        20,
+        100,
+      )
+      .await;
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -2152,15 +2168,16 @@ mod tests {
     let storage_type = StorageType::Local;
     let log_messages_threshold = 1000;
     let uncommitted_segments_threshold = 10;
-    let (index, _index_dir_path, _wal_dir_path) = create_index_with_thresholds(
-      "test_uncommitted_segments",
-      &storage_type,
-      5 * 1024 * 1024,
-      log_messages_threshold,
-      10000,
-      uncommitted_segments_threshold,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_uncommitted_segments",
+        &storage_type,
+        5 * 1024 * 1024,
+        log_messages_threshold,
+        10000,
+        uncommitted_segments_threshold,
+      )
+      .await;
 
     // The below will create exactly uncommitted_segments_threshold segments.
     let num_messages = log_messages_threshold * uncommitted_segments_threshold;
