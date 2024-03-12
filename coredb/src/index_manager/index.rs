@@ -216,10 +216,12 @@ impl Index {
 
   /// Insert a new segment in the memory segments map and in the all_segments_summaries map.
   fn insert_new_segment(&self, segment_number: u32, segment: Segment) {
+    println!("#### Inserting in seg summaries");
     self.all_segments_summaries.insert(
       segment_number,
       SegmentSummary::new(segment_number, &segment),
     );
+    println!("#### Inserting in memory seg map");
     self.memory_segments_map.insert(segment_number, segment);
   }
 
@@ -365,17 +367,22 @@ impl Index {
       new_segment.get_id()
     );
 
+    println!("#### now inserting new segment in mem map and summary");
     // Insert new segment in memory_segments_map and all_segments_summaries.
     self.insert_new_segment(new_segment_number, new_segment);
 
+    println!("#### now setting current seg number");
     // Appends will start going to the new segment after this point.
     self.metadata.set_current_segment_number(new_segment_number);
 
+    println!("#### now adding to uncommitted seg numbers");
     // Add the original segment number to the uncommitted segment numbers, so that it will be committed
     // by the commit thread.
     self
       .uncommitted_segment_numbers
       .insert(current_segment_number, current_segment_end_time);
+
+    println!("#### returning from check_and_create_new_seg");
   }
 
   /// Append a log message to the current segment of the index.

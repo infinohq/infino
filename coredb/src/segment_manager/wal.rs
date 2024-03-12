@@ -5,7 +5,7 @@ use std::io::{BufWriter, Write};
 
 use crate::utils::error::CoreDBError;
 
-const MAX_ENTRIES: usize = 10000;
+const MAX_ENTRIES: usize = 1000;
 
 #[derive(Debug)]
 pub struct WriteAheadLog {
@@ -15,7 +15,9 @@ pub struct WriteAheadLog {
 
 impl WriteAheadLog {
   pub fn new(path: &str) -> Result<Self, CoreDBError> {
+    println!("#### Creatung new WAL");
     let file = OpenOptions::new().create(true).append(true).open(path)?;
+    println!("#### Created wal file");
     let writer = BufWriter::new(file);
 
     Ok(Self {
@@ -25,18 +27,19 @@ impl WriteAheadLog {
   }
 
   pub async fn append(&self, entry: Value) -> Result<(), CoreDBError> {
-    let num_entries;
+    //let num_entries;
 
     {
       // Write in a new scope to release buffer lock immediately.
-      let mut buffer = self.buffer.lock().await;
-      buffer.push(entry);
-      num_entries = buffer.len();
+      println!("#### Locking mutex");
+      let buffer = self.buffer.lock().await;
+      //buffer.push(entry);
+      //num_entries = buffer.len();
     }
 
-    if num_entries >= MAX_ENTRIES {
-      self.flush().await?;
-    }
+    //if num_entries >= MAX_ENTRIES {
+    //  self.flush().await?;
+    //}
     Ok(())
   }
 
