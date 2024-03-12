@@ -1,4 +1,4 @@
-use std::fs::{remove_file, OpenOptions};
+use std::fs::{metadata, remove_file, OpenOptions};
 use std::io::{BufWriter, Write};
 
 use serde_json::Value;
@@ -53,8 +53,10 @@ impl WriteAheadLog {
   }
 
   pub fn remove(&mut self) -> Result<(), CoreDBError> {
-    // Delete the file.
-    remove_file(&self.file_path)?;
+    // Delete the file - if it exists.
+    if metadata(&self.file_path).is_ok() {
+      remove_file(&self.file_path)?
+    }
 
     Ok(())
   }

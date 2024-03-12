@@ -555,6 +555,27 @@ impl Index {
     Ok(results)
   }
 
+  /// Removing WAL for the given segment number.
+  async fn remove_wal(&self, segment_number: u32) -> Result<(), CoreDBError> {
+    debug!("Removing wal for segment_number: {}", segment_number);
+
+    // Get the segment corresponding to the segment_number.
+    let segment_ref = self
+      .memory_segments_map
+      .get(&segment_number)
+      .unwrap_or_else(|| {
+        panic!(
+          "Could not commit segment {} since it isn't in memory",
+          segment_number
+        )
+      });
+
+    // Commit is successful - remove the write ahead log as it is no longer needed.
+    segment_ref.value().remove_wal()?;
+
+    Ok(())
+  }
+
   /// Helper function to commit a segment with given segment_number to disk.
   /// Returns the (id, start_time, end_time, uncompressed_size, compressed_size) for the segment.
   async fn commit_segment(
@@ -670,6 +691,10 @@ impl Index {
 
       // Remove the segment from the uncommitted_segment_numbers map.
       self.uncommitted_segment_numbers.remove(&segment_number);
+
+      // The segment is now fully committed - so remove its write ahead log as we do not need it anymore for
+      // any recovery.
+      self.remove_wal(segment_number).await?;
 
       // Shrink the memory segments map.
       self.shrink_to_fit();

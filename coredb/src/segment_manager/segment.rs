@@ -77,6 +77,12 @@ impl Segment {
     }
   }
 
+  pub fn remove_wal(&self) -> Result<(), CoreDBError> {
+    let wal_clone = self.wal.clone();
+    let wal = &mut wal_clone.lock();
+    wal.remove()
+  }
+
   #[cfg(test)]
   pub fn new_with_temp_wal() -> Self {
     let wal_file_path = format!("/tmp/{}.tmp", uuid::Uuid::new_v4());
