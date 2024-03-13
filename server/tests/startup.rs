@@ -18,7 +18,7 @@ fn test_cargo_run_infino() {
     .spawn()
     .expect("Failed to start process");
 
-  // Wait for 60 seconds.
+  // Wait for 30 seconds.
   thread::sleep(Duration::from_secs(30));
 
   // Check if the process is still running - fail in case the server isn't running.

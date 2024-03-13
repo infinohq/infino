@@ -1390,7 +1390,7 @@ mod tests {
   fn create_mock_segment() -> Segment {
     config_test_logger();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     segment.insert_in_terms("term1", 1);
     segment.insert_in_terms("term2", 2);
@@ -1456,7 +1456,7 @@ mod tests {
 
   #[test]
   fn test_get_postings_lists_empty_segment() {
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = segment.get_postings_lists(&terms);
     assert!(matches!(result, Err(QueryError::PostingsListError(_))));
@@ -1745,9 +1745,9 @@ mod tests {
     );
   }
 
-  #[test]
-  fn test_match_exact_phrase() {
-    let segment = Segment::new();
+  #[tokio::test]
+  async fn test_match_exact_phrase() {
+    let segment = Segment::new_with_temp_wal();
 
     segment
       .append_log_message(1001, &HashMap::new(), "log 1")

@@ -14,6 +14,12 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let policy_interval_ms = 3600000; // 1hr in ms
   loop {
+    // Flush write ahead log.
+    let state_clone = state.clone();
+    let flush_wal_handle = tokio::spawn(async move {
+      state_clone.coredb.flush_wal().await;
+    });
+
     let is_shutdown = IS_SHUTDOWN.load();
 
     // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
@@ -32,6 +38,17 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
 
     // Exit from the loop if is_shutdown is set.
     if is_shutdown {
+      // Wait for wal flush thread to finish and check for errors.
+      let result = flush_wal_handle.await;
+      match result {
+        Ok(_) => {
+          info!("Write ahead log flush thread completed successfully");
+        }
+        Err(e) => {
+          error!("Error while joining write ahead log flush thread {}", e);
+        }
+      }
+
       // Wait for commit thread to finish and check for errors.
       let result = commit_handle.await;
       match result {

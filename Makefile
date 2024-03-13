@@ -49,7 +49,18 @@ clean-os-plugin:
 clean:
 	cargo clean
 	rm -rf docs/release
+
+	# index and wal directories created by 'make run'
 	rm -rf data/
+	rm -rf wal/
+
+	# index and wal directories created by 'make rust-apache-logs'
+	rm -fr examples/rust-apache-logs/data/
+	rm -fr examples/rust-apache-logs/wal/
+
+	# index and wal directories created by server integration tests
+	rm -fr server/data/
+	rm -fr server/wal/
 
 clean-all: clean clean-os-plugin
 
