@@ -51,7 +51,7 @@ impl InfinoApiClient {
           logs_batch.push(log);
           if num_docs_in_this_batch == num_docs_per_batch {
             let _ = client
-              .post("http://localhost:3000/append_log")
+              .post("http://localhost:3000/default/append_log")
               .header("Content-Type", "application/json")
               .body(Body::from(serde_json::to_string(&logs_batch).unwrap()))
               .send()

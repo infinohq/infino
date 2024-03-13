@@ -78,6 +78,9 @@ pub enum QueryError {
   #[error("Combiner failure: {0}")]
   CombinerFailure(String),
 
+  #[error("Index not found error: {0}")]
+  IndexNotFoundError(String),
+
   #[error("Traverse error: {0}")]
   TraverseError(String),
 

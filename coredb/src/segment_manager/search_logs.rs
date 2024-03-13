@@ -135,7 +135,8 @@ impl Serialize for QueryLogMessage {
     let log_message = &self.message;
     let mut map = serializer.serialize_map(None)?;
 
-    map.serialize_entry("_index", &"your_index_name_here")?;
+    //TODO: Inject the index name
+    map.serialize_entry("_index", "DUMMY")?;
     map.serialize_entry("_id", &self.id)?;
     map.serialize_entry("_score", &1.0)?;
 

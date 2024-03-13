@@ -238,7 +238,7 @@ mod tests {
         .write_all(b"index_dir_path = \"/var/index\"\n")
         .unwrap();
       file
-        .write_all(b"default_index_name = \".default\"\n")
+        .write_all(b"default_index_name = \"default\"\n")
         .unwrap();
       file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file
@@ -257,7 +257,7 @@ mod tests {
     let settings = Settings::new(config_dir_path).unwrap();
     let coredb_settings = settings.get_coredb_settings();
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
-    assert_eq!(coredb_settings.get_default_index_name(), ".default");
+    assert_eq!(coredb_settings.get_default_index_name(), "default");
     assert_eq!(
       coredb_settings.get_search_memory_budget_bytes(),
       4096 * 1024 * 1024
@@ -294,7 +294,7 @@ mod tests {
         coredb_settings.get_search_memory_budget_bytes(),
         4 * 1024 * 1024
       );
-      assert_eq!(coredb_settings.get_default_index_name(), ".default");
+      assert_eq!(coredb_settings.get_default_index_name(), "default");
     }
   }
 
@@ -312,7 +312,7 @@ mod tests {
         .write_all(b"index_dir_path = \"/var/index\"\n")
         .unwrap();
       file
-        .write_all(b"default_index_name = \".default\"\n")
+        .write_all(b"default_index_name = \"default\"\n")
         .unwrap();
       file
         .write_all(b"search_memory_budget_megabytes = 2048\n")

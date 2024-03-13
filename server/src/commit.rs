@@ -15,7 +15,6 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
   let policy_interval_ms = 3600000; // 1hr in ms
   loop {
     let is_shutdown = IS_SHUTDOWN.load();
-
     // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
     // commit the current segment only when the server is shutting down.
     let state_clone = state.clone();
@@ -50,17 +49,14 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
     if current_time - last_trigger_policy_time > policy_interval_ms {
       info!("Triggering retention policy on index in coredb");
       let result = state.coredb.trigger_retention().await;
-
       if let Err(e) = result {
         error!(
           "Error triggering retention policy on index in coredb: {}",
           e
         );
       }
-
       last_trigger_policy_time = current_time;
     }
-
     // Sleep for some time before committing again.
     sleep(Duration::from_millis(1000)).await;
   } // end loop {..}
