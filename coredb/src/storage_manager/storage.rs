@@ -135,10 +135,10 @@ impl Storage {
 
     // Write the compressed input to object store using multipart upload.
     let path = Path::from(file_path);
-    let (_id, mut writer) = self.object_store.put_multipart(&path).await.unwrap();
-    writer.write_all(&compressed_data[..]).await.unwrap();
-    writer.flush().await.unwrap();
-    writer.shutdown().await.unwrap();
+    let (_id, mut writer) = self.object_store.put_multipart(&path).await?;
+    writer.write_all(&compressed_data[..]).await?;
+    writer.flush().await?;
+    writer.shutdown().await?;
 
     Ok((uncompressed_length, compressed_length))
   }
