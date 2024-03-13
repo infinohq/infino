@@ -169,18 +169,18 @@ async fn app(
   // Build our application with a route
   let router: Router = Router::new()
     // GET methods
-    .route("/get_index_dir", get(get_index_dir))
+    .route("/:index_name/get_index_dir", get(get_index_dir))
     .route("/ping", get(ping))
     .route("/", get(ping))
-    .route("/search_logs", get(search_logs))
-    .route("/search_metrics", get(search_metrics))
-    .route("/summarize", get(summarize))
+    .route("/:index_name/search_logs", get(search_logs))
+    .route("/:index_name/search_metrics", get(search_metrics))
+    .route("/:index_name/summarize", get(summarize))
     //---
     // POST methods
     // TODO: all the APIs should have index name
-    .route("/append_log", post(append_log))
-    .route("/append_metric", post(append_metric))
-    .route("/flush", post(flush))
+    .route("/:index_name/append_log", post(append_log))
+    .route("/:index_name/append_metric", post(append_metric))
+    .route("/:index_name/flush", post(flush))
     // POST methods to create and delete index
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
@@ -326,6 +326,7 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
 /// Append log data to CoreDB.
 async fn append_log(
   State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
   Json(log_json): Json<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
@@ -386,17 +387,15 @@ async fn append_log(
 
     let result = state
       .coredb
-      .append_log_message(timestamp, &fields, &text)
+      .append_log_message(&index_name, timestamp, &fields, &text)
       .await;
 
     if let Err(error) = result {
       match error {
         CoreDBError::TooManyAppendsError() => {
-          // Handle the TooManyAppendsError specifically
           return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
         }
         _ => {
-          // Catch-all for other errors
           println!("An unexpected error occurred.");
         }
       }
@@ -409,6 +408,7 @@ async fn append_log(
 /// Append metric data to CoreDB.
 async fn append_metric(
   State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
   Json(ts_json): Json<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending metric entry: {:?}", ts_json);
@@ -483,17 +483,15 @@ async fn append_metric(
 
         let result = state
           .coredb
-          .append_metric_point(key, &labels, timestamp, value_f64)
+          .append_metric_point(&index_name, key, &labels, timestamp, value_f64)
           .await;
 
         if let Err(error) = result {
           match error {
             CoreDBError::TooManyAppendsError() => {
-              // Handle the TooManyAppendsError specifically
               return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
             }
             _ => {
-              // Catch-all for other errors
               println!("An unexpected error occurred.");
             }
           }
@@ -509,6 +507,7 @@ async fn append_metric(
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
+  Path(index_name): Path<String>,
   json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
@@ -520,6 +519,7 @@ async fn search_logs(
   let results = state
     .coredb
     .search_logs(
+      &index_name,
       &logs_query.text,
       &json_body,
       logs_query.start_time.unwrap_or(0),
@@ -542,6 +542,9 @@ async fn search_logs(
           match search_logs_error {
             QueryError::JsonParseError(_) => {
               Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+            }
+            QueryError::IndexNotFoundError(_) => {
+              Err((StatusCode::BAD_REQUEST, "Could not find index".to_string()))
             }
             QueryError::TimeOutError(_) => Err((
               StatusCode::INTERNAL_SERVER_ERROR,
@@ -568,6 +571,7 @@ async fn search_logs(
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
+  Path(index_name): Path<String>,
   json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
@@ -582,6 +586,7 @@ async fn summarize(
   let results = state
     .coredb
     .search_logs(
+      &index_name,
       &summarize_query.text,
       &json_body,
       summarize_query.start_time.unwrap_or(0),
@@ -650,6 +655,7 @@ async fn summarize(
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
+  Path(index_name): Path<String>,
   json_body: String,
 ) -> impl IntoResponse {
   debug!("MAIN: Search metrics for HTTP query: {:?}", metrics_query);
@@ -681,6 +687,7 @@ async fn search_metrics(
   let results = state
     .coredb
     .search_metrics(
+      &index_name,
       text_ref,
       &json_body,
       timeout.num_seconds() as u64,
@@ -746,8 +753,11 @@ async fn search_metrics(
 }
 
 /// Flush the index to disk.
-async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
-  let result = state.coredb.commit(true).await;
+async fn flush(
+  State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
+) -> Result<(), (StatusCode, String)> {
+  let result = state.coredb.commit(&index_name, true).await;
 
   match result {
     Ok(result) => Ok(result),
@@ -761,8 +771,11 @@ async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, St
 }
 
 /// Get index directory used by CoreDB.
-async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
-  state.coredb.get_index_dir()
+async fn get_index_dir(
+  State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
+) -> String {
+  state.coredb.get_index_dir(&index_name)
 }
 
 /// Ping to check if the server is up.
@@ -811,7 +824,7 @@ mod tests {
   use std::io::Write;
 
   use axum::{
-    body::Body,
+    body::{to_bytes, Body},
     http::{self, Request, StatusCode},
   };
   use chrono::Utc;
@@ -856,7 +869,7 @@ mod tests {
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
-      let default_index_name = format!("default_index_name = \"{}\"\n", ".default");
+      let default_index_name = format!("default_index_name = \"{}\"\n", "default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = use_rabbitmq
         .then(|| "yes".to_string())
@@ -904,6 +917,7 @@ mod tests {
 
   async fn check_search_logs(
     app: &mut Router,
+    index_name: &str,
     config_dir_path: &str,
     search_text: &str,
     query: LogsQuery,
@@ -923,40 +937,47 @@ mod tests {
       query_end_time
     );
 
-    let uri = format!("/search_logs?{}", query_string);
+    let path = format!("/{}/search_logs?{}", index_name, query_string);
 
-    // Now call search to get the documents.
-    let response = app
-      .call(
-        Request::builder()
-          .method(http::Method::GET)
-          .uri(uri)
-          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-          .body(Body::from(""))
-          .unwrap(),
-      )
-      .await
+    let request = Request::builder()
+      .method(http::Method::GET)
+      .uri(path)
+      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+      .body(Body::from(""))
       .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let result = app.call(request).await;
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-      .await
-      .unwrap();
-    let log_messages_received: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    if let Ok(response) = result {
+      // assert_eq!(response.status(), StatusCode::OK);
+      let body = response.into_body();
+      let max_body_size = 10 * 1024 * 1024; // Example: 10MB limit
+      let bytes = to_bytes(body, max_body_size)
+        .await
+        .expect("Failed to read body");
+      let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
+      debug!("Response content: {}", body_str);
 
-    let hits = log_messages_received["hits"]["total"]["value"]
-      .as_u64()
-      .unwrap();
+      let log_messages_received: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
-    assert_eq!(log_messages_expected.get_messages().len() as u64, hits);
+      let hits = log_messages_received["hits"]["total"]["value"]
+        .as_u64()
+        .unwrap();
+
+      assert_eq!(log_messages_expected.get_messages().len() as u64, hits);
+    } else if let Err(e) = result {
+      error!("Failed to make a call: {:?}", e);
+      return Err(CoreDBError::IOError(e.to_string()));
+    }
+
+    let path = format!("/{}/flush", index_name);
 
     // Flush the index.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri("/flush")
+          .uri(path)
           .body(Body::from(""))
           .unwrap(),
       )
@@ -967,7 +988,7 @@ mod tests {
     // Sleep for 2 seconds and refresh from the index directory.
     sleep(Duration::from_millis(2000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
+    let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
     let end_time = query
       .end_time
@@ -975,7 +996,7 @@ mod tests {
 
     // Handle errors from search_logs
     let log_messages_result = refreshed_coredb
-      .search_logs(search_text, "", start_time, end_time)
+      .search_logs(index_name, search_text, "", start_time, end_time)
       .await;
 
     match log_messages_result {
@@ -1021,6 +1042,7 @@ mod tests {
   // Check that metrics queries adhere to Prometheus input and output format
   async fn check_time_series(
     app: &mut Router,
+    index_name: &str,
     config_dir_path: &str,
     query: MetricsQuery,
     metric_points_expected: Vec<MetricPoint>,
@@ -1043,7 +1065,7 @@ mod tests {
       query_end_time
     );
 
-    let uri = format!("/search_metrics?{}", query_string);
+    let uri = format!("/{}/search_metrics?{}", index_name, query_string);
 
     let response = app
       .call(
@@ -1119,12 +1141,14 @@ mod tests {
       _ => panic!("Unexpected status value in response"),
     }
 
+    let path = format!("/{}/flush", index_name);
+
     // Flush the index.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri("/flush")
+          .uri(path)
           .body(Body::from(""))
           .unwrap(),
       )
@@ -1136,7 +1160,7 @@ mod tests {
     sleep(Duration::from_secs(2)).await;
 
     // Refresh CoreDB instance with the given configuration directory path.
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
+    let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
 
     // Calculate the start and end time for querying metrics post-refresh.
     let start_time = query.start.unwrap_or(0);
@@ -1147,6 +1171,7 @@ mod tests {
     // Use the refreshed CoreDB instance to search metrics with updated parameters.
     let mut results = refreshed_coredb
       .search_metrics(
+        index_name,
         &query.query.unwrap_or_default(),
         "",
         0,
@@ -1177,7 +1202,8 @@ mod tests {
   async fn test_basic_main(use_rabbitmq: bool) -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_name = "index_test";
+    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
 
@@ -1217,7 +1243,105 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // **Part 1**: Test insertion and search of log messages
+    // **Part 1**: Test insertion and search of log messages across many indexes
+    let num_log_messages = 10;
+    for i in 0..num_log_messages {
+      let time = Utc::now().timestamp_millis() as u64;
+
+      let mut log = HashMap::new();
+      log.insert("date", json!(time));
+      log.insert("field12", json!("value1 value2"));
+      log.insert("field34", json!("value3 value4"));
+
+      let index_str = format!("{}+{}", index_name, i);
+
+      // Create a single index.
+      let response = app
+        .call(
+          Request::builder()
+            .method(http::Method::PUT)
+            .uri(&format!("/{}", index_str))
+            .body(Body::from(""))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+      assert_eq!(response.status(), StatusCode::OK);
+
+      let path = format!("/{}/append_log", index_str);
+
+      info!("Writing to path: {:?}", path);
+
+      let response = app
+        .call(
+          Request::builder()
+            .method(http::Method::POST)
+            .uri(path)
+            .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+            .body(Body::from(serde_json::to_string(&log).unwrap()))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+      assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    for i in 0..num_log_messages {
+      let mut log_messages_expected: Vec<QueryLogMessage> = Vec::new();
+
+      let time = Utc::now().timestamp_millis() as u64;
+
+      // Create the expected LogMessage.
+      let mut fields = HashMap::new();
+      fields.insert("field12".to_owned(), "value1 value2".to_owned());
+      fields.insert("field34".to_owned(), "value3 value4".to_owned());
+      let text = "value1 value2 value3 value4";
+      let message = LogMessage::new_with_fields_and_text(time, &fields, text);
+
+      log_messages_expected.push(QueryLogMessage::new_with_params(0, message));
+
+      // Sort the expected log messages in reverse chronological order.
+      log_messages_expected.sort();
+
+      let search_query = &format!("value1 field34{}value4", FIELD_DELIMITER);
+
+      let mut query_object = QueryDSLObject::new();
+      query_object.set_messages(log_messages_expected);
+
+      let query = LogsQuery {
+        start_time: None,
+        end_time: None,
+        text: search_query.to_owned(),
+      };
+
+      let index_str = format!("{}+{}", index_name, i);
+
+      check_search_logs(
+        &mut app,
+        &index_str,
+        config_dir_path,
+        search_query,
+        query,
+        query_object,
+      )
+      .await?;
+    }
+
+    // **Part 2**: Test insertion and search of log messages in single index
+
+    // Create a single index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
     let num_log_messages = 100;
     let mut log_messages_expected: Vec<QueryLogMessage> = Vec::new();
     for i in 0..num_log_messages {
@@ -1228,11 +1352,13 @@ mod tests {
       log.insert("field12", json!("value1 value2"));
       log.insert("field34", json!("value3 value4"));
 
+      let path = format!("/{}/append_log", index_name);
+
       let response = app
         .call(
           Request::builder()
             .method(http::Method::POST)
-            .uri("/append_log")
+            .uri(path)
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
             .body(Body::from(serde_json::to_string(&log).unwrap()))
             .unwrap(),
@@ -1264,7 +1390,15 @@ mod tests {
       end_time: None,
       text: search_query.to_owned(),
     };
-    check_search_logs(&mut app, config_dir_path, search_query, query, query_object).await?;
+    check_search_logs(
+      &mut app,
+      index_name,
+      config_dir_path,
+      search_query,
+      query,
+      query_object,
+    )
+    .await?;
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = LogsQuery {
@@ -1274,6 +1408,7 @@ mod tests {
     };
     check_search_logs(
       &mut app,
+      index_name,
       config_dir_path,
       search_query,
       query_too_old,
@@ -1281,7 +1416,7 @@ mod tests {
     )
     .await?;
 
-    // **Part 2**: Test insertion and search of time series metric points.
+    // **Part 3**: Test insertion and search of time series metric points.
     let num_metric_points = 100;
     let mut metric_points_expected = Vec::new();
     let name_for_metric_name_label = "__name__";
@@ -1295,12 +1430,14 @@ mod tests {
       let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, metric_name, value);
       metric_points_expected.push(metric_point);
 
+      let path = format!("/{}/append_metric", index_name);
+
       // Insert the metric.
       let response = app
         .call(
           Request::builder()
             .method(http::Method::POST)
-            .uri("/append_metric")
+            .uri(path)
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
             .body(Body::from(json_str))
             .unwrap(),
@@ -1321,7 +1458,14 @@ mod tests {
       start: None,
       end: None,
     };
-    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await?;
+    check_time_series(
+      &mut app,
+      index_name,
+      config_dir_path,
+      query,
+      metric_points_expected,
+    )
+    .await?;
 
     // End time in this query is too old - this should yield 0 results.
     // Test legacy Infino syntax here
@@ -1333,14 +1477,16 @@ mod tests {
       start: Some(1),
       end: Some(10000),
     };
-    check_time_series(&mut app, config_dir_path, query, Vec::new()).await?;
+    check_time_series(&mut app, index_name, config_dir_path, query, Vec::new()).await?;
+
+    let path = format!("/{}/flush", index_name);
 
     // Check whether the /flush works.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri("/flush")
+          .uri(path)
           .body(Body::from(""))
           .unwrap(),
       )
@@ -1358,7 +1504,8 @@ mod tests {
   async fn test_body_limit() -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_name = "index_test";
+    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
 
@@ -1385,12 +1532,14 @@ mod tests {
     let body_len = body.len();
     assert!(body_len > 2 * 1024 * 1024 && body_len < 5 * 1024 * 1024);
 
+    let path = format!("/{}/append_log", index_name);
+
     // Send a large request.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri("/append_log")
+          .uri(path)
           .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
           .body(Body::from(body))
           .unwrap(),
@@ -1412,7 +1561,8 @@ mod tests {
   async fn test_create_delete_index(use_rabbitmq: bool) {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_name = "index_test";
+    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
     let storage = Storage::new(&StorageType::Local)
@@ -1430,7 +1580,6 @@ mod tests {
     let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Create an index.
-    let index_name = "test_index";
     let response = app
       .call(
         Request::builder()

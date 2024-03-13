@@ -16,17 +16,36 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
   loop {
     let is_shutdown = IS_SHUTDOWN.load();
 
-    // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
+    // Commit the indexes to object store. Set commit_current_segment to is_shutdown -- i.e.,
     // commit the current segment only when the server is shutting down.
     let state_clone = state.clone();
     let is_shutdown_clone = is_shutdown;
     let commit_handle = tokio::spawn(async move {
-      let result = state_clone.coredb.commit(is_shutdown_clone).await;
+      for index_entry in state_clone.coredb.get_index_map().iter() {
+        let index = index_entry.value();
+        let index_name = index_entry.key();
+        let result = index.commit(is_shutdown_clone).await;
+        // Handle the result of the commit operation
+        match result {
+          Ok(_) => debug!("Commit for index {} successful", index_name),
+          Err(e) => error!("Commit failed for index {}: {}", index_name, e),
+        }
 
-      // Handle the result of the commit operation
-      match result {
-        Ok(_) => debug!("Commit successful"),
-        Err(e) => error!("Commit failed: {}", e),
+        let current_time = Utc::now().timestamp_millis() as u64;
+        // TODO: make trigger policy interval configurable
+        if current_time - last_trigger_policy_time > policy_interval_ms {
+          info!("Triggering retention policy on index in coredb");
+          let result = state_clone.coredb.trigger_retention(index_name).await;
+
+          if let Err(e) = result {
+            error!(
+              "Error triggering retention policy on index in coredb: {}",
+              e
+            );
+          }
+
+          last_trigger_policy_time = current_time;
+        }
       }
     });
 
@@ -43,22 +62,6 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
         }
       }
       break;
-    }
-
-    let current_time = Utc::now().timestamp_millis() as u64;
-    // TODO: make trigger policy interval configurable
-    if current_time - last_trigger_policy_time > policy_interval_ms {
-      info!("Triggering retention policy on index in coredb");
-      let result = state.coredb.trigger_retention().await;
-
-      if let Err(e) = result {
-        error!(
-          "Error triggering retention policy on index in coredb: {}",
-          e
-        );
-      }
-
-      last_trigger_policy_time = current_time;
     }
 
     // Sleep for some time before committing again.

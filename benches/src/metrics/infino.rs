@@ -25,7 +25,7 @@ impl InfinoMetricsClient {
         let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, "cpu_usage", value);
         let client = reqwest::Client::new();
         let res = client
-          .post("http://localhost:3000/append_metric")
+          .post("http://localhost:3000/default/append_metric")
           .header("Content-Type", "application/json")
           .body(json_str)
           .send()
@@ -50,7 +50,7 @@ impl InfinoMetricsClient {
 
   pub async fn search_metrics(&self) -> u128 {
     let query_url =
-      "http://localhost:3000/search_metrics?label_name=__name__&&label_value=cpu_usage&start_time=0";
+      "http://localhost:3000/default/search_metrics?label_name=__name__&&label_value=cpu_usage&start_time=0";
     let now = Instant::now();
     let response = reqwest::get(query_url).await;
     let elapsed = now.elapsed();

@@ -46,6 +46,7 @@ impl InfinoEngine {
         }
         if let Ok(message) = line {
           self.coredb.append_log_message(
+            "default",
             Utc::now().timestamp_millis() as u64,
             &HashMap::new(),
             message.as_str(),
@@ -69,7 +70,7 @@ impl InfinoEngine {
 
     match self
       .coredb
-      .search_logs(query, "", range_start_time, range_end_time)
+      .search_logs("default", query, "", range_start_time, range_end_time)
       .await
     {
       Ok(result) => {

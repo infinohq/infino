@@ -159,12 +159,18 @@ async fn index(
   let mut batch_count = 0;
   let mut logs_batch = Vec::new();
   let now = Instant::now();
-  let append_url = &format!("{}/append_log", infino_url);
+  let append_url = &format!("{}/max_docs/append_log", infino_url);
   let client = reqwest::Client::new();
 
   // User only when coredb_only is set to true.
   let config_dir_path = "../../config";
   let coredb = CoreDB::new(config_dir_path).await.unwrap();
+  let index_name = "max_docs";
+
+  let create_result = coredb.create_index(index_name).await;
+  if create_result.is_err() {
+    println!("Received create index error from CoreDB",);
+  }
 
   let file = File::open(file_path).await.unwrap();
   let reader = BufReader::new(file);
@@ -189,7 +195,9 @@ async fn index(
       let fields = log.get_fields_map();
       let text = fields.values().cloned().collect::<Vec<String>>().join(" ");
       loop {
-        let result = coredb.append_log_message(timestamp, &fields, &text).await;
+        let result = coredb
+          .append_log_message(index_name, timestamp, &fields, &text)
+          .await;
         if result.is_err() {
           println!(
             "Received error from CoreDB, retrying after sleeping: {}",
@@ -227,6 +235,11 @@ async fn index(
     "Infino REST time required for insertion: {:.2} seconds, throughput {:.2} docs/seconds",
     elapsed, throughout
   );
+
+  let delete_result = coredb.delete_index(index_name).await;
+  if delete_result.is_err() {
+    println!("Received delete index error from CoreDB",);
+  }
 
   Ok(())
 }
