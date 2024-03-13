@@ -177,11 +177,10 @@ async fn app(
     .route("/:index_name/summarize", get(summarize))
     //---
     // POST methods
-    // TODO: all the APIs should have index name
     .route("/:index_name/append_log", post(append_log))
     .route("/:index_name/append_metric", post(append_metric))
-    .route("/:index_name/flush", post(flush))
-    // POST methods to create and delete index
+    .route("/flush", post(flush))
+    // PUT methods
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
     // ---
@@ -753,11 +752,8 @@ async fn search_metrics(
 }
 
 /// Flush the index to disk.
-async fn flush(
-  State(state): State<Arc<AppState>>,
-  Path(index_name): Path<String>,
-) -> Result<(), (StatusCode, String)> {
-  let result = state.coredb.commit(&index_name, true).await;
+async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
+  let result = state.coredb.commit(true).await;
 
   match result {
     Ok(result) => Ok(result),
@@ -970,14 +966,12 @@ mod tests {
       return Err(CoreDBError::IOError(e.to_string()));
     }
 
-    let path = format!("/{}/flush", index_name);
-
     // Flush the index.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri(path)
+          .uri("/flush")
           .body(Body::from(""))
           .unwrap(),
       )
@@ -1141,14 +1135,12 @@ mod tests {
       _ => panic!("Unexpected status value in response"),
     }
 
-    let path = format!("/{}/flush", index_name);
-
     // Flush the index.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri(path)
+          .uri("/flush")
           .body(Body::from(""))
           .unwrap(),
       )
@@ -1479,14 +1471,12 @@ mod tests {
     };
     check_time_series(&mut app, index_name, config_dir_path, query, Vec::new()).await?;
 
-    let path = format!("/{}/flush", index_name);
-
     // Check whether the /flush works.
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri(path)
+          .uri("/flush")
           .body(Body::from(""))
           .unwrap(),
       )

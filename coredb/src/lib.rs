@@ -273,19 +273,12 @@ impl CoreDB {
   }
 
   /// Commit the index to disk.
-  pub async fn commit(
-    &self,
-    index_name: &str,
-    commit_current_segment: bool,
-  ) -> Result<(), CoreDBError> {
-    debug!("COREDB: Commiting index {}", index_name);
+  pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
+    for index_entry in self.get_index_map() {
+      index_entry.value().commit(commit_current_segment).await?
+    }
 
-    let index = self
-      .index_map
-      .get(index_name)
-      .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
-
-    index.value().commit(commit_current_segment).await
+    Ok(())
   }
 
   /// Refresh the index from the given directory path.
@@ -383,25 +376,23 @@ impl CoreDB {
   }
 
   /// Function to help with triggering the retention policy
-  pub async fn trigger_retention(&self, index_name: &str) -> Result<(), CoreDBError> {
-    let temp_reference = self.index_map.get(index_name).unwrap();
-    let index = temp_reference.value();
+  pub async fn trigger_retention(&self) -> Result<(), CoreDBError> {
+    for index_entry in self.get_index_map() {
+      // TODO: this does not need to read all_segments_summaries from disk - can use the one already
+      // in memory in Index::all_segments_summaries()
+      let all_segments_summaries = index_entry.value().get_all_segments_summaries().await?;
 
-    // TODO: this does not need to read all_segments_summaries from disk - can use the one already
-    // in memory in Index::all_segments_summaries()
-    let all_segments_summaries = index.get_all_segments_summaries().await?;
+      let segment_ids_to_delete = self.get_retention_policy().apply(&all_segments_summaries);
 
-    let segment_ids_to_delete = self.get_retention_policy().apply(&all_segments_summaries);
+      let mut deletion_futures: FuturesUnordered<_> = segment_ids_to_delete
+        .into_iter()
+        .map(|segment_id| index_entry.value().delete_segment(segment_id))
+        .collect();
 
-    let mut deletion_futures: FuturesUnordered<_> = segment_ids_to_delete
-      .into_iter()
-      .map(|segment_id| index.delete_segment(segment_id))
-      .collect();
-
-    while let Some(result) = deletion_futures.next().await {
-      result?;
+      while let Some(result) = deletion_futures.next().await {
+        result?;
+      }
     }
-
     Ok(())
   }
 }
@@ -508,10 +499,7 @@ mod tests {
       .await
       .expect("Could not append metric point");
 
-    coredb
-      .commit(index_name, true)
-      .await
-      .expect("Could not commit");
+    coredb.commit(true).await.expect("Could not commit");
     let coredb = CoreDB::refresh(index_name, config_dir_path).await?;
 
     let end = Utc::now().timestamp_millis() as u64;
@@ -561,7 +549,7 @@ mod tests {
     assert_eq!(mp[1].get_value(), 2.0);
 
     coredb
-      .trigger_retention(index_name)
+      .trigger_retention()
       .await
       .expect("Error in retention policy");
 
