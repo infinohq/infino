@@ -1237,16 +1237,9 @@ mod tests {
     for _ in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
+      let name = &format!("test_two_segments_{}_{}", append_log, append_metric_point);
       let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
-        create_index_with_thresholds(
-          "test_two_segments",
-          &storage_type,
-          1024 * 1024,
-          1000,
-          50000,
-          10,
-        )
-        .await;
+        create_index_with_thresholds(name, &storage_type, 1024 * 1024, 1000, 50000, 10).await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path = index.get_segment_dir_path(original_segment_number);
