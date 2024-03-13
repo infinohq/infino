@@ -2096,13 +2096,18 @@ mod tests {
         .append_log_message(end, &HashMap::new(), message_end)
         .await
         .expect("Could not append log message");
-      index.commit(true).await.expect("Could not commit index");
+      index.commit(false).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
     assert_eq!(index.all_segments_summaries.len() as u64, num_segments + 1);
 
     // We shouldn't have more than specified segments in memory.
+    println!(
+      "##### memory = {}, num segments in memory = {}",
+      index.memory_segments_map.len(),
+      num_segments_in_memory
+    );
     assert!(index.memory_segments_map.len() as u64 <= num_segments_in_memory);
 
     // Check the queries return results as expected.
