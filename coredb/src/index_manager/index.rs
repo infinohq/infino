@@ -645,8 +645,9 @@ impl Index {
     Ok(all_segments_summaries)
   }
 
-  /// Commit an index to disk.
-  pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
+  /// Commit an index to disk. The flag is_shutdown indicates if the commit is being called as part of the shutdown
+  /// of Infino server.
+  pub async fn commit(&self, is_shutdown: bool) -> Result<(), CoreDBError> {
     debug!("Committing index at {}", chrono::Utc::now());
 
     // Lock to make sure only one thread calls commit at a time. If the lock isn't avilable, we simply
@@ -696,12 +697,14 @@ impl Index {
       // any recovery.
       self.remove_wal(segment_number).await?;
 
-      // Shrink the memory segments map.
-      self.shrink_to_fit();
+      // Shrink the memory segments map - only when we are't in a shutdown.
+      if !is_shutdown {
+        self.shrink_to_fit();
+      }
     }
 
-    // Commit the current segment if requested (typically during shutdown).
-    if commit_current_segment {
+    // Commit the current segment if commit is called during shutdown.
+    if is_shutdown {
       let current_segment_number = self.metadata.get_current_segment_number();
       info!(
         "Now committing current segment with segment number {}",
@@ -709,8 +712,9 @@ impl Index {
       );
       self.commit_segment(current_segment_number).await?;
 
-      // Shrink the memory segments map.
-      self.shrink_to_fit();
+      // The current segment is now fully committed - so remove its write ahead log as we do not need it anymore for
+      // any recovery.
+      self.remove_wal(current_segment_number).await?;
     }
 
     // Write the summaries to disk.
@@ -864,6 +868,40 @@ impl Index {
       return Err(CoreDBError::SegmentInMemory(segment_number));
     }
     Ok(())
+  }
+
+  /// Flush write ahead log for all uncommitted segments.
+  pub async fn flush_wal(&self) {
+    // Flush wal for current segment.
+    let (current_segment_number, current_segment) = self.get_current_segment_ref();
+    current_segment.flush_wal().unwrap_or_else(|error| {
+      error!(
+        "Error while flushing current segment with segment number {}: {}",
+        current_segment_number, error
+      );
+    });
+
+    // Iterate over uncommitted segments and flush WAL for each of them.
+    // This is ideally not necessary - as the uncommitted segments are not being appended to. However, given that
+    // switching of current segment to a new segment may not be atomic, there might be a small window where the
+    // appends go to an uncommitted segment. In order to cover for that case, we flush each of the uncommitted
+    // segments too.
+    for segment_number in &self.uncommitted_segment_numbers {
+      let segment_number = segment_number.key();
+      let segment = self.memory_segments_map.get(segment_number);
+
+      // Flush wal for segment. In case there is an error, just log it - as it will be flushed again
+      // in the next invocation.
+      let _ = segment
+        .map(|s| s.flush_wal())
+        .unwrap_or_else(|| Ok(()))
+        .map_err(|error| {
+          error!(
+            "Error while flushing segment with segment number {}: {}",
+            segment_number, error
+          );
+        });
+    }
   }
 
   /// Get the directory in while the segment index is stored.

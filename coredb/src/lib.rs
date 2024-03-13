@@ -407,6 +407,17 @@ impl CoreDB {
 
     Ok(())
   }
+
+  /// Flush write ahead log.
+  pub async fn flush_wal(&self) {
+    // Get the default index.
+    let default_index_name = self.get_default_index_name();
+    let temp_reference = self.index_map.get(default_index_name).unwrap();
+    let index = temp_reference.value();
+
+    // Flush the WAL for the index.
+    index.flush_wal().await;
+  }
 }
 
 #[cfg(test)]

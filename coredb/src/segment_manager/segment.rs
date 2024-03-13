@@ -77,18 +77,6 @@ impl Segment {
     }
   }
 
-  pub fn remove_wal(&self) -> Result<(), CoreDBError> {
-    let wal_clone = self.wal.clone();
-    let wal = &mut wal_clone.lock();
-    wal.remove()
-  }
-
-  #[cfg(test)]
-  pub fn new_with_temp_wal() -> Self {
-    let wal_file_path = format!("/tmp/{}.tmp", uuid::Uuid::new_v4());
-    Self::new(&wal_file_path)
-  }
-
   /// Get the terms in this segment.
   pub fn get_terms(&self) -> &DashMap<String, u32> {
     &self.terms
@@ -429,6 +417,28 @@ impl Segment {
   #[cfg(test)]
   pub fn get_metadata_file_name() -> String {
     METADATA_FILE_NAME.to_owned()
+  }
+
+  /// Remove the write ahead log - typically called when after a segment is committed and will
+  /// no longer be written to.
+  pub fn remove_wal(&self) -> Result<(), CoreDBError> {
+    let wal_clone = self.wal.clone();
+    let wal = &mut wal_clone.lock();
+    wal.remove()
+  }
+
+  /// Flush write ahead log to disk.
+  pub fn flush_wal(&self) -> Result<(), CoreDBError> {
+    let wal_clone = self.wal.clone();
+    let wal = &mut wal_clone.lock();
+    wal.flush()
+  }
+
+  #[cfg(test)]
+  /// Create a new segment with a temporary WAL file.
+  pub fn new_with_temp_wal() -> Self {
+    let wal_file_path = format!("/tmp/{}.tmp", uuid::Uuid::new_v4());
+    Self::new(&wal_file_path)
   }
 }
 
