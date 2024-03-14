@@ -269,7 +269,7 @@ async fn index(
       println!("Received delete index error from CoreDB",);
     }
   } else {
-    //delete_index(&client, create_delete_index_url).await;
+    delete_index(&client, create_delete_index_url).await;
   }
 
   Ok(())
