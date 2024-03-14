@@ -101,7 +101,7 @@ pub async fn check_and_start_background_threads(state: Arc<AppState>) {
 
   loop {
     // Start flush log thread - if one isn't running already.
-    /*check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
+    check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
 
     // Check if we need to shut down (typically triggered by the user by sending Ctrl-C on Infino server).
     // We can check for this anywhere in the loop, but we check just before commit to avoid extra work
@@ -113,24 +113,31 @@ pub async fn check_and_start_background_threads(state: Arc<AppState>) {
 
     // Exit from the loop after shutting down background threads if is_shutdown is set.
     if is_shutdown {
-      let temp_flush_wal_handle =
-        flush_wal_handle.expect("Could not get handle for flush wal thread");
-      let temp_commit_handle = commit_handle.expect("Could not get handle for commit thread");
-      let temp_retention_handle = retention_handle.expect("Could not get handle for commit thread");
+      // Gather the handles of all the background threads.
+      let mut join_handles = Vec::new();
+      if let Some(handle) = flush_wal_handle {
+        join_handles.push(handle);
+      }
+      if let Some(handle) = commit_handle {
+        join_handles.push(handle);
+      }
+      if let Some(handle) = retention_handle {
+        join_handles.push(handle);
+      }
 
-      // Wait for wal flush thread and commit thread to finish and check for errors.
-      tokio::try_join!(
-        temp_flush_wal_handle,
-        temp_commit_handle,
-        temp_retention_handle
-      )
-      .expect("Could not wait for the background threads to finish");
+      // Wait for the background threads to finish and check for errors.
+      for handle in join_handles {
+        if let Err(e) = handle.await {
+          error!("Error while joining thread: {}", e);
+        }
+      }
 
+      // break from the loop - as we don't want to start any more background threads.
       break;
-    }*/
+    }
 
     // Start retention thread - if one isn't running already.
-    /*let current_time = Utc::now().timestamp_millis() as u64;
+    let current_time = Utc::now().timestamp_millis() as u64;
     if current_time - last_trigger_policy_time > policy_interval_ms {
       let new_retention_thread_started =
         check_and_start_retention_thread(state.clone(), &mut retention_handle);
@@ -138,7 +145,7 @@ pub async fn check_and_start_background_threads(state: Arc<AppState>) {
         // Update last_trigger_policy_time only if a new retention thread was started.
         last_trigger_policy_time = current_time;
       }
-    }*/
+    }
 
     // Sleep for some time before committing again.
     sleep(Duration::from_millis(1000)).await;

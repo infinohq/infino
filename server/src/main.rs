@@ -237,12 +237,12 @@ async fn run_server() {
       .expect("Could not stop rabbitmq container");
   }
 
-  // Set the flag to indicate the commit thread to shutdown, and wait for it to finish.
+  // Set the flag to indicate the background threads to shutdown, and wait for them to finish.
   IS_SHUTDOWN.store(true);
-  info!("Shutting down commit thread and waiting for it to finish...");
+  info!("Shutting down background threads and waiting for it to finish...");
   background_threads_handle
     .await
-    .expect("Error while completing the commit thread");
+    .expect("Error while shutting down the background threads");
 
   info!("Completed Infino server shutdown");
 }
