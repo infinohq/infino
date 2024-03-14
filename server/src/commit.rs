@@ -3,30 +3,60 @@ use std::sync::Arc;
 use chrono::Utc;
 use log::{debug, error, info};
 
+use tokio::io::Join;
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::AppState;
 use crate::IS_SHUTDOWN;
+
+/// Function to flush WAL by starting a new thread as necessory.
+async fn check_and_start_flush_wal_thread(
+  state: Arc<AppState>,
+  flush_wal_handle: &mut Option<JoinHandle<()>>,
+) {
+  // Check if a new thread for flushing WAL should be started. A new thread needs to be started if
+  // the flush_wal_handle is not set, or it points to a thread that has finished.
+  let mut start_flush_wal_thread = false;
+  match flush_wal_handle {
+    Some(handle) => {
+      if handle.is_finished() {
+        start_flush_wal_thread = true;
+      }
+    }
+    None => start_flush_wal_thread = true,
+  }
+
+  if start_flush_wal_thread {
+    // Start a new thread for flushing WAL, and update the flush_wal_handle.
+    *flush_wal_handle = Some(tokio::spawn(async move {
+      state.coredb.flush_wal().await;
+    }));
+  }
+}
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
 /// can be asyncronously committed), and triggers retention policy every hour
 pub async fn commit_in_loop(state: Arc<AppState>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let policy_interval_ms = 3600000; // 1hr in ms
-  loop {
-    // Flush write ahead log.
-    let state_clone = state.clone();
-    let flush_wal_handle = tokio::spawn(async move {
-      state_clone.coredb.flush_wal().await;
-    });
+  let mut flush_wal_handle: Option<JoinHandle<()>> = None;
+  let mut commit_handle: Option<JoinHandle<()>> = None;
 
+  loop {
+    check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
+
+    // Check if we need to shut down (typically triggered by the user by sending Ctrl-C on Infino server).
     let is_shutdown = IS_SHUTDOWN.load();
 
+    // Part 2 -
     // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
     // commit the current segment only when the server is shutting down.
+
+    // TODO-------- start here
     let state_clone = state.clone();
     let is_shutdown_clone = is_shutdown;
-    let commit_handle = tokio::spawn(async move {
+    commit_handle = tokio::spawn(async move {
       let result = state_clone.coredb.commit(is_shutdown_clone).await;
 
       // Handle the result of the commit operation
