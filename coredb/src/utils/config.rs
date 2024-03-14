@@ -36,6 +36,7 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "default.toml";
 /// Settings for coredb.
 pub struct CoreDBSettings {
   index_dir_path: String,
+  wal_dir_path: String,
   default_index_name: String,
 
   log_messages_threshold: u32,
@@ -49,23 +50,32 @@ pub struct CoreDBSettings {
 }
 
 impl CoreDBSettings {
-  /// Get the settings for the directory where the index is stored.
-  pub fn get_index_dir_path(&self) -> String {
-    let path = Path::new(&self.index_dir_path);
+  fn get_absolute_path(input: &str) -> String {
+    let path = Path::new(input);
 
     if path.is_absolute() {
       // If the path is already absolute, return it as is.
-      self.index_dir_path.clone()
+      input.to_owned()
     } else {
       // If the path is relative, concatenate it with the current directory.
       let current_dir = env::current_dir().expect("Could not get current directory");
-      let joined_path = current_dir.join(path);
+      let joined_path = current_dir.join(input);
       joined_path
         .as_path()
         .to_str()
         .expect("Could not convert path to string")
         .to_owned()
     }
+  }
+
+  /// Get the settings for the directory where the index is stored.
+  pub fn get_index_dir_path(&self) -> String {
+    Self::get_absolute_path(&self.index_dir_path)
+  }
+
+  /// Get the settings for the directory where the write ahead log is stored.
+  pub fn get_wal_dir_path(&self) -> String {
+    Self::get_absolute_path(&self.wal_dir_path)
   }
 
   /// Get the settings for the default index name.
@@ -237,6 +247,7 @@ mod tests {
       file
         .write_all(b"index_dir_path = \"/var/index\"\n")
         .unwrap();
+      file.write_all(b"wal_dir_path = \"/var/wal\"\n").unwrap();
       file
         .write_all(b"default_index_name = \"default\"\n")
         .unwrap();
@@ -257,6 +268,7 @@ mod tests {
     let settings = Settings::new(config_dir_path).unwrap();
     let coredb_settings = settings.get_coredb_settings();
     assert_eq!(coredb_settings.get_index_dir_path(), "/var/index");
+    assert_eq!(coredb_settings.get_wal_dir_path(), "/var/wal");
     assert_eq!(coredb_settings.get_default_index_name(), "default");
     assert_eq!(
       coredb_settings.get_search_memory_budget_bytes(),
