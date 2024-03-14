@@ -88,8 +88,12 @@ fn check_and_start_retention_thread(
   false
 }
 
-/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
-/// can be asyncronously committed), and triggers retention policy every hour
+/// Periodically start background threads such flushing WAL, commit and execute retention policy.
+/// The threads for each of these tasks are started only if there isn't a currently running thread
+/// for the same task.
+///
+/// Checks crate::IS_SHUTDOWN to know whether to shut down, and in that case waits for the currently
+/// executing threads to finish and then returns.
 pub async fn check_and_start_background_threads(state: Arc<AppState>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let mut flush_wal_handle: Option<JoinHandle<()>> = None;
