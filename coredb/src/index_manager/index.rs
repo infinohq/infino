@@ -128,6 +128,7 @@ impl Index {
     let storage = Storage::new(storage_type).await?;
     if !storage.check_path_exists(index_dir_path).await {
       // Index directory does not exist - create it.
+      info!("Creating index directory {}", index_dir_path);
       storage.create_dir(index_dir_path)?;
     }
 
@@ -135,6 +136,7 @@ impl Index {
     let wal_storage = Storage::new(&StorageType::Local).await?;
     if !wal_storage.check_path_exists(wal_dir_path).await {
       // WAL directory does not exist - create it.
+      info!("Creating WAL directory {}", wal_dir_path);
       wal_storage.create_dir(wal_dir_path)?;
     }
 

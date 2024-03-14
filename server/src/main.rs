@@ -180,7 +180,7 @@ async fn app(
     .route("/:index_name/append_log", post(append_log))
     .route("/:index_name/append_metric", post(append_metric))
     .route("/flush", post(flush))
-    // PUT methods
+    // PUT and DELETE methods
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
     // ---
@@ -784,7 +784,7 @@ async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,
 ) -> Result<(), (StatusCode, String)> {
-  debug!("Creating index {}", index_name);
+  info!("Creating index {}", index_name);
 
   let result = state.coredb.create_index(&index_name).await;
 
@@ -802,7 +802,7 @@ async fn delete_index(
   State(state): State<Arc<AppState>>,
   Path(index_name): Path<String>,
 ) -> Result<(), (StatusCode, String)> {
-  debug!("Deleting index {}", index_name);
+  info!("Deleting index {}", index_name);
 
   let result = state.coredb.delete_index(&index_name).await;
   if result.is_err() {
