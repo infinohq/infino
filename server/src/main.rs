@@ -514,21 +514,21 @@ async fn search_logs(
     logs_query, json_body
   );
 
-  // Attempt to parse start_time if provided
   let start_time = logs_query
     .start_time
-    .as_ref()
-    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
     .map(|dt| dt.timestamp_millis() as u64)
-    .unwrap_or_else(|| 0);
+    .unwrap_or(0); // Default to 0 if None
 
-  // Attempt to parse end_time if provided
   let end_time = logs_query
     .end_time
-    .as_ref()
-    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
     .map(|dt| dt.timestamp_millis() as u64)
-    .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
+    .unwrap_or_else(|| Utc::now().timestamp_millis() as u64); // Default to current time if None
 
   let results = state
     .coredb
@@ -836,7 +836,7 @@ mod tests {
     body::{to_bytes, Body},
     http::{self, Request, StatusCode},
   };
-  use chrono::Utc;
+  use chrono::{TimeZone, Utc};
   use serde_json::json;
   use tempdir::TempDir;
   use test_case::test_case;
@@ -932,21 +932,30 @@ mod tests {
     query: LogsQuery,
     log_messages_expected: QueryDSLObject,
   ) -> Result<(), CoreDBError> {
-    let query_start_time = query
+    debug!(
+      "Calling check_search_logs with index_name {}, config_dir_path {}, search_text {}, query: {:?}, expected log messages length {}",
+      index_name, config_dir_path, search_text, query,
+      log_messages_expected.get_messages().len(),
+    );
+
+    let query_string = format!(
+      "q={}",
+      encode(&query.q.unwrap_or_else(|| "default_query".to_string())),
+    );
+
+    let start_time_query = query
       .start_time
       .as_ref()
-      .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
-    let query_end_time = query
+      .map(|start_time| format!("&start_time={}", start_time))
+      .unwrap_or_default();
+
+    let end_time_query = query
       .end_time
       .as_ref()
-      .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value))
-      .to_owned();
-    let query_string = format!(
-      "q={}{}{}",
-      encode(&query.q.unwrap().to_string()),
-      query_start_time,
-      query_end_time
-    );
+      .map(|end_time| format!("&end_time={}", end_time))
+      .unwrap_or_default();
+
+    let query_string = format!("{}{}{}", query_string, start_time_query, end_time_query);
 
     let path = format!("/{}/search_logs?{}", index_name, query_string);
 
@@ -960,7 +969,7 @@ mod tests {
     let result = app.call(request).await;
 
     if let Ok(response) = result {
-      // assert_eq!(response.status(), StatusCode::OK);
+      assert_eq!(response.status(), StatusCode::OK);
       let body = response.into_body();
       let max_body_size = 10 * 1024 * 1024; // Example: 10MB limit
       let bytes = to_bytes(body, max_body_size)
@@ -998,25 +1007,23 @@ mod tests {
     sleep(Duration::from_millis(2000)).await;
 
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
-    // Attempt to parse start_time if provided
+
     let start_time = query
       .start_time
-      .clone()
-      .as_ref()
-      .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+      .as_deref()
+      .map(|s| s.replace(' ', "+")) // Correct the format by using a char for the space
+      .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
       .map(|dt| dt.timestamp_millis() as u64)
-      .unwrap_or_else(|| 0);
+      .unwrap_or(0); // Default to 0 if None
 
-    // Attempt to parse end_time if provided
     let end_time = query
       .end_time
-      .clone()
-      .as_ref()
-      .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+      .as_deref()
+      .map(|s| s.replace(' ', "+")) // Correct the format by using a char for the space
+      .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
       .map(|dt| dt.timestamp_millis() as u64)
-      .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
-
-    // Handle errors from search_logs
+      .unwrap_or_else(|| Utc::now().timestamp_millis() as u64); // Default to current time if None
+                                                                // Handle errors from search_logs
     let log_messages_result = refreshed_coredb
       .search_logs(index_name, search_text, "", start_time, end_time)
       .await;
@@ -1263,6 +1270,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
+    debug!("----------Basic main starting Part 1--------");
+
     // **Part 1**: Test insertion and search of log messages across many indexes
     let num_log_messages = 10;
     for i in 0..num_log_messages {
@@ -1289,8 +1298,6 @@ mod tests {
       assert_eq!(response.status(), StatusCode::OK);
 
       let path = format!("/{}/append_log", index_str);
-
-      info!("Writing to path: {:?}", path);
 
       let response = app
         .call(
@@ -1346,6 +1353,8 @@ mod tests {
       )
       .await?;
     }
+
+    debug!("----------Basic main starting Part 2--------");
 
     // **Part 2**: Test insertion and search of log messages in single index
 
@@ -1420,12 +1429,27 @@ mod tests {
     )
     .await?;
 
-    // End time in this query is too old - this should yield 0 results.
+    debug!("----------Basic main starting Part 3--------");
+
+    // **Part 3**: End time in this query is too old - this should yield 0 results.
+    let start_time = Utc
+      .timestamp_opt(1, 0) // Creates a DateTime<Utc> at 1 second past the UNIX epoch
+      .single()
+      .expect("Invalid start timestamp")
+      .to_rfc3339(); // Converts the DateTime<Utc> to an RFC 3339 formatted string
+
+    let end_time = Utc
+      .timestamp_opt(10, 0) // Creates a DateTime<Utc> at 10 seconds past the UNIX epoch
+      .single()
+      .expect("Invalid end timestamp")
+      .to_rfc3339(); // Converts the DateTime<Utc> to an RFC 3339 formatted string
+
     let query_too_old = LogsQuery {
-      start_time: Some(1.to_string()),
-      end_time: Some(10000.to_string()),
+      start_time: Some(start_time),
+      end_time: Some(end_time),
       q: Some(search_query.to_owned()),
     };
+
     check_search_logs(
       &mut app,
       index_name,
@@ -1436,7 +1460,9 @@ mod tests {
     )
     .await?;
 
-    // **Part 3**: Test insertion and search of time series metric points.
+    debug!("----------Basic main starting Part 4--------");
+
+    // **Part 4**: Test insertion and search of time series metric points.
     let num_metric_points = 100;
     let mut metric_points_expected = Vec::new();
     let name_for_metric_name_label = "__name__";
