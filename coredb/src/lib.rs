@@ -53,6 +53,7 @@ impl CoreDB {
       Ok(settings) => {
         let coredb_settings = settings.get_coredb_settings();
         let index_dir_path = &coredb_settings.get_index_dir_path();
+        let wal_dir_path = &coredb_settings.get_wal_dir_path();
         let default_index_name = coredb_settings.get_default_index_name();
         let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
         let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
@@ -77,9 +78,11 @@ impl CoreDB {
                 index_dir_path
               );
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
+              let default_wal_dir_path = format!("{}/{}", wal_dir_path, default_index_name);
               let index = Index::new_with_threshold_params(
                 &storage_type,
                 &default_index_dir_path,
+                &default_wal_dir_path,
                 search_memory_budget_bytes,
                 append_log_messages_threshold,
                 append_metric_points_threshold,
@@ -90,9 +93,11 @@ impl CoreDB {
             } else {
               for index_name in index_names {
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
+                let full_wal_path_name = format!("{}/{}", wal_dir_path, index_name);
                 let index = Index::refresh(
                   &storage_type,
                   &full_index_path_name,
+                  &full_wal_path_name,
                   search_memory_budget_bytes,
                 )
                 .await?;
@@ -106,9 +111,11 @@ impl CoreDB {
               index_dir_path
             );
             let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
+            let default_wal_dir_path = format!("{}/{}", wal_dir_path, default_index_name);
             let index = Index::new_with_threshold_params(
               &storage_type,
               &default_index_dir_path,
+              &default_wal_dir_path,
               search_memory_budget_bytes,
               append_log_messages_threshold,
               append_metric_points_threshold,
@@ -281,8 +288,10 @@ impl CoreDB {
     let settings = Settings::new(config_dir_path).unwrap();
     let coredb_settings = settings.get_coredb_settings();
     let index_dir_path = coredb_settings.get_index_dir_path();
+    let wal_dir_path = coredb_settings.get_wal_dir_path();
     let default_index_name = coredb_settings.get_default_index_name();
     let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
+    let default_wal_dir_path = format!("{}/{}", wal_dir_path, default_index_name);
     let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
     let storage_type = coredb_settings.get_storage_type()?;
 
@@ -290,6 +299,7 @@ impl CoreDB {
     let index = Index::refresh(
       &storage_type,
       &default_index_dir_path,
+      &default_wal_dir_path,
       search_memory_budget_bytes,
     )
     .await?;
@@ -326,6 +336,7 @@ impl CoreDB {
   pub async fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
     let coredb_settings = self.settings.get_coredb_settings();
     let index_dir_path = coredb_settings.get_index_dir_path();
+    let wal_dir_path = coredb_settings.get_wal_dir_path();
     let search_memory_budget_bytes = coredb_settings.get_search_memory_budget_bytes();
     let append_log_messages_threshold = coredb_settings.get_log_messages_threshold();
     let append_metric_points_threshold = coredb_settings.get_metric_points_threshold();
@@ -333,9 +344,12 @@ impl CoreDB {
     let storage_type = self.settings.get_coredb_settings().get_storage_type()?;
 
     let index_dir_path = format!("{}/{}", index_dir_path, index_name);
+    let wal_dir_path = format!("{}/{}", wal_dir_path, index_name);
+
     let index = Index::new_with_threshold_params(
       &storage_type,
       &index_dir_path,
+      &wal_dir_path,
       search_memory_budget_bytes,
       append_log_messages_threshold,
       append_metric_points_threshold,
@@ -393,6 +407,17 @@ impl CoreDB {
 
     Ok(())
   }
+
+  /// Flush write ahead log.
+  pub async fn flush_wal(&self) {
+    // Get the default index.
+    let default_index_name = self.get_default_index_name();
+    let temp_reference = self.index_map.get(default_index_name).unwrap();
+    let index = temp_reference.value();
+
+    // Flush the WAL for the index.
+    index.flush_wal().await;
+  }
 }
 
 #[cfg(test)]
@@ -408,7 +433,7 @@ mod tests {
   use super::*;
 
   /// Helper function to create a test configuration.
-  fn create_test_config(config_dir_path: &str, index_dir_path: &str) {
+  fn create_test_config(config_dir_path: &str, index_dir_path: &str, wal_dir_path: &str) {
     // Create a test config in the directory config_dir_path.
     let config_file_path = get_joined_path(
       config_dir_path,
@@ -417,11 +442,13 @@ mod tests {
 
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
+      let wal_dir_path_line = format!("wal_dir_path = \"{}\"\n", wal_dir_path);
       let default_index_name_line = format!("default_index_name = \"{}\"\n", ".default");
 
       let mut file = std::fs::File::create(config_file_path).unwrap();
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file.write_all(wal_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name_line.as_bytes()).unwrap();
       file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file
@@ -444,7 +471,9 @@ mod tests {
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    create_test_config(config_dir_path, index_dir_path);
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
     println!("Config dir path {}", config_dir_path);
 
     // Create a new coredb instance.

@@ -15,6 +15,7 @@
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
 
+mod commit;
 mod queue_manager;
 mod utils;
 
@@ -25,10 +26,12 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use std::collections::HashMap;
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::result::Result;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query};
+use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::response::IntoResponse;
 use axum::routing::{delete, put};
 use axum::{extract::State, routing::get, routing::post, Json, Router};
@@ -42,7 +45,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -51,6 +53,7 @@ use coredb::utils::error::{CoreDBError, QueryError};
 use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
+use crate::commit::commit_in_loop;
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
@@ -67,6 +70,7 @@ struct AppState {
   queue: Option<RabbitMQ>,
   coredb: CoreDB,
   settings: Settings,
+  wal_file: Arc<File>,
   openai_helper: OpenAIHelper,
 }
 
@@ -102,48 +106,6 @@ struct SummarizeQuery {
 struct SummarizeQueryResponse {
   summary: String,
   results: QueryDSLObject,
-}
-
-/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
-/// can be asyncronously committed), and triggers retention policy every hour
-async fn commit_in_loop(state: Arc<AppState>) {
-  let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
-  let policy_interval_ms = 3600000; // 1hr in ms
-  loop {
-    let is_shutdown = IS_SHUTDOWN.load();
-
-    // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
-    // commit the current segment only when the server is shutting down.
-    let result = state.coredb.commit(is_shutdown).await;
-
-    if is_shutdown {
-      info!("Received shutdown in commit thread. Exiting...");
-      break;
-    }
-
-    let current_time = Utc::now().timestamp_millis() as u64;
-    // TODO: make trigger policy interval configurable
-    if current_time - last_trigger_policy_time > policy_interval_ms {
-      info!("Triggering retention policy on index in coredb");
-      let result = state.coredb.trigger_retention().await;
-
-      if let Err(e) = result {
-        error!(
-          "Error triggering retention policy on index in coredb: {}",
-          e
-        );
-      }
-
-      last_trigger_policy_time = current_time;
-    }
-
-    if let Err(e) = result {
-      error!("Error committing to coredb: {}", e);
-    }
-
-    // Sleep for some time before committing again.
-    sleep(Duration::from_millis(100)).await;
-  } // end loop {..}
 }
 
 /// Axum application for Infino server.
@@ -183,12 +145,21 @@ async fn app(
   }
 
   let openai_helper = OpenAIHelper::new();
+  let wal_file = Arc::new(
+    std::fs::OpenOptions::new()
+      .create(true)
+      .write(true)
+      .truncate(true)
+      .open("/tmp/wal.log")
+      .unwrap(),
+  );
 
   let shared_state = Arc::new(AppState {
     queue,
     coredb,
     settings,
     openai_helper,
+    wal_file,
   });
 
   // Start a thread to periodically commit coredb.
@@ -213,8 +184,14 @@ async fn app(
     // POST methods to create and delete index
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
+    // ---
+    // State that is passed to each request.
     .with_state(shared_state.clone())
-    .layer(TraceLayer::new_for_http());
+    // ---
+    // Layer for tracing in debug mode.
+    .layer(TraceLayer::new_for_http())
+    // Make the default for body to be 5MB (instead of 2MB http default.)
+    .layer(DefaultBodyLimit::max(5 * 1024 * 1024));
 
   (router, commit_thread_handle, shared_state)
 }
@@ -352,6 +329,12 @@ async fn append_log(
   Json(log_json): Json<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
+
+  state
+    .wal_file
+    .clone()
+    .write_all(&log_json.to_string().into_bytes()[..])
+    .unwrap();
 
   let is_queue = state.queue.is_some();
 
@@ -835,6 +818,7 @@ mod tests {
   use serde_json::json;
   use tempdir::TempDir;
   use test_case::test_case;
+  use tokio::time::{sleep, Duration};
   use tower::Service;
   use urlencoding::encode;
 
@@ -862,6 +846,7 @@ mod tests {
   fn create_test_config(
     config_dir_path: &str,
     index_dir_path: &str,
+    wal_dir_path: &str,
     container_name: &str,
     use_rabbitmq: bool,
   ) {
@@ -872,6 +857,7 @@ mod tests {
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
+      let wal_dir_path_line = format!("wal_dir_path = \"{}\"\n", wal_dir_path);
       let default_index_name = format!("default_index_name = \"{}\"\n", ".default");
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = use_rabbitmq
@@ -890,6 +876,7 @@ mod tests {
       // Write coredb section.
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file.write_all(wal_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name.as_bytes()).unwrap();
       file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file.write_all(b"metric_points_threshold = 1000\n").unwrap();
@@ -1195,11 +1182,14 @@ mod tests {
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
 
     create_test_config(
       config_dir_path,
       index_dir_path,
+      wal_dir_path,
       container_name,
       use_rabbitmq,
     );
@@ -1370,6 +1360,66 @@ mod tests {
     Ok(())
   }
 
+  #[tokio::test]
+  async fn test_body_limit() -> Result<(), CoreDBError> {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+    let container_name = "infino-test-main-rs";
+
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      wal_dir_path,
+      container_name,
+      false,
+    );
+
+    // Create the app.
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // We need a http body of >2MB and <5MB for this test.
+    let num_log_messages = 15 * 1024;
+    let mut logs = Vec::new();
+    let value = json!("value1 value2 value3 value4 value5 value6 value7 value8 value9");
+    for i in 0..num_log_messages {
+      let mut log = HashMap::new();
+      log.insert("date", json!(i));
+      log.insert("field1", value.clone());
+      log.insert("field2", value.clone());
+      log.insert("field3", value.clone());
+      logs.push(log);
+    }
+
+    let body = serde_json::to_string(logs.as_slice()).unwrap();
+    // Make sure that the body is >2MB, but <5MB
+    let body_len = body.len();
+    assert!(body_len > 2 * 1024 * 1024 && body_len < 5 * 1024 * 1024);
+
+    // Send a large request.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri("/append_log")
+          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    let status = response.status();
+
+    // We may return OK or TOO_MANY_REQUESTS as the number of uncommitted segments are too high.
+    // However, we should not return other error codes such as CONTENT_TOO_LARGE.
+    assert!(status == StatusCode::OK || status == StatusCode::TOO_MANY_REQUESTS);
+
+    Ok(())
+  }
+
   /// Write test to test Create and Delete index APIs.
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
@@ -1378,6 +1428,8 @@ mod tests {
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
     let storage = Storage::new(&StorageType::Local)
       .await
@@ -1386,6 +1438,7 @@ mod tests {
     create_test_config(
       config_dir_path,
       index_dir_path,
+      wal_dir_path,
       container_name,
       use_rabbitmq,
     );

@@ -148,7 +148,7 @@ mod tests {
   fn create_segment() -> Segment {
     config_test_logger();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     // Create a couple of metric points.
     let mut label_set_1 = HashMap::new();

@@ -19,7 +19,7 @@ use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
 use crate::utils::error::CoreDBError;
-use crate::utils::io;
+use crate::utils::io::get_joined_path;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex};
 
@@ -61,6 +61,9 @@ pub struct Index {
   /// Directory where the index is serialized.
   index_dir_path: String,
 
+  /// Directory where the WAL is stored.
+  wal_dir_path: String,
+
   /// Mutex for locking new segment creation - so that only one thread creates a new segment at a time.
   /// Use TokioMutex, as it needs to be held across await points.
   create_new_segment_lock: Arc<TokioMutex<thread::ThreadId>>,
@@ -87,10 +90,15 @@ impl Index {
   /// the function will refresh the existing index instead of creating a new one.
   /// If the refresh process fails, an error will be thrown to indicate the issue.
   #[cfg(test)]
-  pub async fn new(storage_type: &StorageType, index_dir_path: &str) -> Result<Self, CoreDBError> {
+  pub async fn new(
+    storage_type: &StorageType,
+    index_dir_path: &str,
+    wal_dir_path: &str,
+  ) -> Result<Self, CoreDBError> {
     Index::new_with_threshold_params(
       storage_type,
       index_dir_path,
+      wal_dir_path,
       DEFAULT_SEARCH_MEMORY_BUDGET_BYTES,
       DEFAULT_LOG_MESSAGES_THRESHOLD,
       DEFAULT_METRIC_POINTS_THRESHOLD,
@@ -105,7 +113,8 @@ impl Index {
   /// process fails, an error will be thrown to indicate the issue.
   pub async fn new_with_threshold_params(
     storage_type: &StorageType,
-    index_dir: &str,
+    index_dir_path: &str,
+    wal_dir_path: &str,
     search_memory_budget_bytes: u64,
     log_messages_threshold: u32,
     metric_points_threshold: u32,
@@ -113,21 +122,34 @@ impl Index {
   ) -> Result<Self, CoreDBError> {
     info!(
       "Creating index - storage type {:?}, dir {}",
-      storage_type, index_dir
+      storage_type, index_dir_path
     );
 
     let storage = Storage::new(storage_type).await?;
-
-    if !storage.check_path_exists(index_dir).await {
+    if !storage.check_path_exists(index_dir_path).await {
       // Index directory does not exist - create it.
-      storage.create_dir(index_dir)?;
+      storage.create_dir(index_dir_path)?;
+    }
+
+    // WAL storage is always local - we do not store WAL in the cloud.
+    let wal_storage = Storage::new(&StorageType::Local).await?;
+    if !wal_storage.check_path_exists(wal_dir_path).await {
+      // WAL directory does not exist - create it.
+      wal_storage.create_dir(wal_dir_path)?;
     }
 
     // Check whether index directory already has a metadata file.
-    let metadata_path = &format!("{}/{}", index_dir, METADATA_FILE_NAME);
+    let metadata_path = &format!("{}/{}", index_dir_path, METADATA_FILE_NAME);
     if storage.check_path_exists(metadata_path).await {
       // index_dir_path has metadata file, refresh the index instead of creating new one
-      match Self::refresh(storage_type, index_dir, search_memory_budget_bytes).await {
+      match Self::refresh(
+        storage_type,
+        index_dir_path,
+        wal_dir_path,
+        search_memory_budget_bytes,
+      )
+      .await
+      {
         Ok(mut index) => {
           index.search_memory_budget_bytes = search_memory_budget_bytes;
           return Ok(index);
@@ -141,8 +163,7 @@ impl Index {
 
     // The directory did not have a metadata file - so create a new index.
 
-    // Create an initial segment.
-    let segment = Segment::new();
+    // Create index metadata.
     let metadata = Metadata::new(
       0,
       0,
@@ -150,10 +171,12 @@ impl Index {
       metric_points_threshold,
       uncommitted_segments_threshold,
     );
-
-    // Update the initial segment as the current segment.
     let current_segment_number = metadata.fetch_increment_segment_count();
     metadata.set_current_segment_number(current_segment_number);
+
+    // Create initial segment.
+    let wal_file_path = Self::get_wal_file_path(wal_dir_path, current_segment_number);
+    let segment = Segment::new(&wal_file_path);
 
     // Create the summary for the initial segment.
     let all_segments_summaries = DashMap::new();
@@ -174,7 +197,8 @@ impl Index {
       metadata,
       all_segments_summaries,
       memory_segments_map,
-      index_dir_path: index_dir.to_owned(),
+      index_dir_path: index_dir_path.to_owned(),
+      wal_dir_path: wal_dir_path.to_owned(),
       commit_refresh_lock,
       create_new_segment_lock,
       search_memory_budget_bytes,
@@ -330,8 +354,9 @@ impl Index {
     *lock = thread::current().id();
 
     // Create a new segment since the current one has become too big.
-    let new_segment = Segment::new();
     let new_segment_number = self.metadata.fetch_increment_segment_count();
+    let wal_file_path = Self::get_wal_file_path(&self.wal_dir_path, new_segment_number);
+    let new_segment = Segment::new(&wal_file_path);
     info!(
       "Creating a new segment with segment_number {}, id {}",
       new_segment_number,
@@ -380,9 +405,9 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the log message to the current segment.
-      current_segment
-        .append_log_message(time, fields, message)
-        .unwrap();
+      current_segment.append_log_message(time, fields, message)?;
+
+      drop(current_segment);
     }
 
     // Update start and end time of the summary of the current segment.
@@ -431,9 +456,7 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the metric point to the current segment.
-      current_segment
-        .append_metric_point(metric_name, labels, time, value)
-        .unwrap();
+      current_segment.append_metric_point(metric_name, labels, time, value)?;
     }
 
     // Update start and end time of the summary of the current segment.
@@ -532,6 +555,27 @@ impl Index {
     Ok(results)
   }
 
+  /// Removing WAL for the given segment number.
+  async fn remove_wal(&self, segment_number: u32) -> Result<(), CoreDBError> {
+    debug!("Removing wal for segment_number: {}", segment_number);
+
+    // Get the segment corresponding to the segment_number.
+    let segment_ref = self
+      .memory_segments_map
+      .get(&segment_number)
+      .unwrap_or_else(|| {
+        panic!(
+          "Could not commit segment {} since it isn't in memory",
+          segment_number
+        )
+      });
+
+    // Commit is successful - remove the write ahead log as it is no longer needed.
+    segment_ref.value().remove_wal()?;
+
+    Ok(())
+  }
+
   /// Helper function to commit a segment with given segment_number to disk.
   /// Returns the (id, start_time, end_time, uncompressed_size, compressed_size) for the segment.
   async fn commit_segment(
@@ -556,8 +600,7 @@ impl Index {
     let end_time = segment.get_end_time();
 
     // Commit this segment.
-    let segment_dir_path =
-      io::get_joined_path(&self.index_dir_path, segment_number.to_string().as_str());
+    let segment_dir_path = self.get_segment_dir_path(segment_number);
 
     let (uncompressed, compressed) = segment
       .commit(&self.storage, segment_dir_path.as_str())
@@ -582,7 +625,7 @@ impl Index {
     );
 
     // Read all segments summaries from disk.
-    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
 
     if !self.storage.check_path_exists(&all_segments_file).await {
       return Err(CoreDBError::CannotFindIndexMetadataInDirectory(
@@ -602,8 +645,9 @@ impl Index {
     Ok(all_segments_summaries)
   }
 
-  /// Commit an index to disk.
-  pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
+  /// Commit an index to disk. The flag is_shutdown indicates if the commit is being called as part of the shutdown
+  /// of Infino server.
+  pub async fn commit(&self, is_shutdown: bool) -> Result<(), CoreDBError> {
     debug!("Committing index at {}", chrono::Utc::now());
 
     // Lock to make sure only one thread calls commit at a time. If the lock isn't avilable, we simply
@@ -613,7 +657,7 @@ impl Index {
     let mut lock = match lock {
       Ok(lock) => lock,
       Err(_) => {
-        info!(
+        debug!(
           "Could not acquire commit lock for index at path {}. Retrying in the next commit run.",
           self.index_dir_path
         );
@@ -633,7 +677,7 @@ impl Index {
     }
     uncommitted_segment_numbers.sort_by(|a, b| a.1.cmp(&b.1));
 
-    info!(
+    debug!(
       "Commiting index, uncommitted segment numbers: {:?}",
       uncommitted_segment_numbers
     );
@@ -649,12 +693,18 @@ impl Index {
       // Remove the segment from the uncommitted_segment_numbers map.
       self.uncommitted_segment_numbers.remove(&segment_number);
 
-      // Shrink the memory segments map.
-      self.shrink_to_fit();
+      // The segment is now fully committed - so remove its write ahead log as we do not need it anymore for
+      // any recovery.
+      self.remove_wal(segment_number).await?;
+
+      // Shrink the memory segments map - only when we are't in a shutdown.
+      if !is_shutdown {
+        self.shrink_to_fit();
+      }
     }
 
-    // Commit the current segment if requested (typically during shutdown).
-    if commit_current_segment {
+    // Commit the current segment if commit is called during shutdown.
+    if is_shutdown {
       let current_segment_number = self.metadata.get_current_segment_number();
       info!(
         "Now committing current segment with segment number {}",
@@ -662,19 +712,20 @@ impl Index {
       );
       self.commit_segment(current_segment_number).await?;
 
-      // Shrink the memory segments map.
-      self.shrink_to_fit();
+      // The current segment is now fully committed - so remove its write ahead log as we do not need it anymore for
+      // any recovery.
+      self.remove_wal(current_segment_number).await?;
     }
 
     // Write the summaries to disk.
-    let all_segments_file = io::get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
     self
       .storage
       .write(&self.all_segments_summaries, all_segments_file.as_str())
       .await?;
 
     // Write the metadata to disk.
-    let metadata_path = io::get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
+    let metadata_path = get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     self
       .storage
       .write(&self.metadata, metadata_path.as_str())
@@ -685,7 +736,7 @@ impl Index {
 
   /// Reads a segment from memory and insert it in memory_segments_map.
   pub async fn refresh_segment(&self, segment_number: u32) -> Result<Segment, CoreDBError> {
-    let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+    let segment_dir_path = self.get_segment_dir_path(segment_number);
     debug!(
       "Loading segment with segment number {} and path {}",
       segment_number, segment_dir_path
@@ -699,6 +750,7 @@ impl Index {
   pub async fn refresh(
     storage_type: &StorageType,
     index_dir_path: &str,
+    wal_dir_path: &str,
     search_memory_budget_bytes: u64,
   ) -> Result<Self, CoreDBError> {
     info!("Refreshing index from index_dir_path: {}", index_dir_path);
@@ -706,7 +758,7 @@ impl Index {
     let storage = Storage::new(storage_type).await?;
 
     // Read metadata.
-    let metadata_path = io::get_joined_path(index_dir_path, METADATA_FILE_NAME);
+    let metadata_path = get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let metadata: Metadata = storage.read(metadata_path.as_str()).await?;
 
     let commit_refresh_lock = Arc::new(TokioMutex::new(thread::current().id()));
@@ -721,6 +773,7 @@ impl Index {
       all_segments_summaries: DashMap::new(),
       memory_segments_map: DashMap::new(),
       index_dir_path: index_dir_path.to_owned(),
+      wal_dir_path: wal_dir_path.to_owned(),
       commit_refresh_lock,
       create_new_segment_lock,
       search_memory_budget_bytes,
@@ -799,7 +852,7 @@ impl Index {
   pub async fn delete_segment(&self, segment_number: u32) -> Result<(), CoreDBError> {
     // Delete the segment only if it is not in memory
     if !self.memory_segments_map.contains_key(&segment_number) {
-      let segment_dir_path = io::get_joined_path(&self.index_dir_path, &segment_number.to_string());
+      let segment_dir_path = get_joined_path(&self.index_dir_path, &segment_number.to_string());
       let delete_result = self.storage.remove_dir(segment_dir_path.as_str()).await;
       match delete_result {
         Ok(_) => {
@@ -815,6 +868,51 @@ impl Index {
       return Err(CoreDBError::SegmentInMemory(segment_number));
     }
     Ok(())
+  }
+
+  /// Flush write ahead log for all uncommitted segments.
+  pub async fn flush_wal(&self) {
+    // Flush wal for current segment.
+    let (current_segment_number, current_segment) = self.get_current_segment_ref();
+    current_segment.flush_wal().unwrap_or_else(|error| {
+      error!(
+        "Error while flushing current segment with segment number {}: {}",
+        current_segment_number, error
+      );
+    });
+
+    // Iterate over uncommitted segments and flush WAL for each of them.
+    // This is ideally not necessary - as the uncommitted segments are not being appended to. However, given that
+    // switching of current segment to a new segment may not be atomic, there might be a small window where the
+    // appends go to an uncommitted segment. In order to cover for that case, we flush each of the uncommitted
+    // segments too.
+    for segment_number in &self.uncommitted_segment_numbers {
+      let segment_number = segment_number.key();
+      let segment = self.memory_segments_map.get(segment_number);
+
+      // Flush wal for segment. In case there is an error, just log it - as it will be flushed again
+      // in the next invocation.
+      let _ = segment
+        .map(|s| s.flush_wal())
+        .unwrap_or_else(|| Ok(()))
+        .map_err(|error| {
+          error!(
+            "Error while flushing segment with segment number {}: {}",
+            segment_number, error
+          );
+        });
+    }
+  }
+
+  /// Get the directory in while the segment index is stored.
+  fn get_segment_dir_path(&self, segment_numger: u32) -> String {
+    get_joined_path(&self.index_dir_path, &segment_numger.to_string())
+  }
+
+  /// Get the file path for write ahead log.
+  fn get_wal_file_path(wal_dir_path: &str, segment_number: u32) -> String {
+    let wal_file_name = &format!("{}.wal", segment_number);
+    get_joined_path(wal_dir_path, wal_file_name)
   }
 }
 
@@ -837,13 +935,24 @@ mod tests {
   use crate::utils::sync::is_sync_send;
 
   // Helper function to create index
-  async fn create_index<'a>(name: &'a str, storage_type: &'a StorageType) -> (Index, String) {
+  async fn create_index<'a>(
+    name: &'a str,
+    storage_type: &'a StorageType,
+  ) -> (Index, String, String, TempDir, TempDir) {
     config_test_logger();
 
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
-    let index = Index::new(storage_type, &index_dir_path).await.unwrap();
-    (index, index_dir_path)
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = format!("{}/{}", wal_dir.path().to_str().unwrap(), name);
+    let index = Index::new(storage_type, &index_dir_path, &wal_dir_path)
+      .await
+      .unwrap();
+
+    // Return the paths as well as temporary directories.
+    // We need to return the temporary directories as otherwise they will be deleted by the end of this function
+    // (when they go out of scope).
+    (index, index_dir_path, wal_dir_path, index_dir, wal_dir)
   }
 
   async fn create_index_with_thresholds<'a>(
@@ -853,14 +962,17 @@ mod tests {
     log_messages_threshold: u32,
     metric_points_threshold: u32,
     uncommitted_segments_threshold: u32,
-  ) -> (Index, String) {
+  ) -> (Index, String, String, TempDir, TempDir) {
     config_test_logger();
 
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = format!("{}/{}", wal_dir.path().to_str().unwrap(), name);
     let index = Index::new_with_threshold_params(
       storage_type,
       &index_dir_path,
+      &wal_dir_path,
       memory_budget,
       log_messages_threshold,
       metric_points_threshold,
@@ -868,7 +980,11 @@ mod tests {
     )
     .await
     .unwrap();
-    (index, index_dir_path)
+
+    // Return the paths as well as temporary directories.
+    // We need to return the temporary directories as otherwise they will be deleted by the end of this function
+    // (when they go out of scope).
+    (index, index_dir_path, wal_dir_path, index_dir, wal_dir)
   }
 
   #[tokio::test]
@@ -881,8 +997,14 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_empty_index"
     );
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = format!(
+      "{}/{}",
+      wal_dir.path().to_str().unwrap(),
+      "test_empty_index"
+    );
 
-    let index = Index::new(&StorageType::Local, &index_dir_path)
+    let index = Index::new(&StorageType::Local, &index_dir_path, &wal_dir_path)
       .await
       .unwrap();
     let (_, segment_ref) = index.get_current_segment_ref();
@@ -900,10 +1022,7 @@ mod tests {
         .await
     );
 
-    let segment_path = get_joined_path(
-      &index_dir_path,
-      &index.metadata.get_current_segment_number().to_string(),
-    );
+    let segment_path = index.get_segment_dir_path(index.metadata.get_current_segment_number());
     let segment_metadata_path = get_joined_path(&segment_path, &Segment::get_metadata_file_name());
     assert!(
       index
@@ -916,7 +1035,8 @@ mod tests {
   #[tokio::test]
   async fn test_commit_refresh() {
     let storage_type = StorageType::Local;
-    let (expected, index_dir_path) = create_index("test_commit_refresh", &storage_type).await;
+    let (expected, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      create_index("test_commit_refresh", &storage_type).await;
     let num_log_messages = 5;
     let message_prefix = "content#";
     let num_metric_points = 5;
@@ -951,7 +1071,7 @@ mod tests {
     }
 
     expected.commit(true).await.expect("Could not commit");
-    let received = Index::refresh(&storage_type, &index_dir_path, 1024)
+    let received = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024)
       .await
       .unwrap();
 
@@ -978,7 +1098,8 @@ mod tests {
   #[tokio::test]
   async fn test_basic_search_logs() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path) = create_index("test_basic_search", &storage_type).await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index("test_basic_search", &storage_type).await;
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -1076,7 +1197,8 @@ mod tests {
   #[tokio::test]
   async fn test_basic_time_series() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path) = create_index("test_basic_time_series", &storage_type).await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index("test_basic_time_series", &storage_type).await;
     let num_metric_points = 1000;
     let mut expected_metric_points: Vec<MetricPoint> = Vec::new();
 
@@ -1115,19 +1237,12 @@ mod tests {
     for _ in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
-      let (index, index_dir_path) = create_index_with_thresholds(
-        "test_two_segments",
-        &storage_type,
-        1024 * 1024,
-        1000,
-        50000,
-        10,
-      )
-      .await;
+      let name = &format!("test_two_segments_{}_{}", append_log, append_metric_point);
+      let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+        create_index_with_thresholds(name, &storage_type, 1024 * 1024, 1000, 50000, 10).await;
 
       let original_segment_number = index.metadata.get_current_segment_number();
-      let original_segment_path =
-        get_joined_path(&index_dir_path, &original_segment_number.to_string());
+      let original_segment_path = index.get_segment_dir_path(original_segment_number);
 
       let message_prefix = "message";
       let mut expected_log_messages: Vec<String> = Vec::new();
@@ -1163,7 +1278,7 @@ mod tests {
       index.commit(true).await.expect("Could not commit index");
 
       // Read the index from disk and see that it has expected number of log messages and metric points.
-      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+      let index = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
       let original_segment = Segment::refresh(&storage, &original_segment_path)
@@ -1218,7 +1333,7 @@ mod tests {
 
       // Force a commit and refresh. The index should still have only 2 segments.
       index.commit(true).await.expect("Could not commit index");
-      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+      let index = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
         .await
         .unwrap();
       let mut original_segment = Segment::refresh(&storage, &original_segment_path)
@@ -1281,7 +1396,7 @@ mod tests {
 
       // Force a commit and refresh.
       index.commit(true).await.expect("Could not commit index");
-      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+      let index = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
       original_segment = Segment::refresh(&storage, &original_segment_path)
@@ -1321,15 +1436,15 @@ mod tests {
 
       // Commit and refresh a few times. The index should not change.
       index.commit(true).await.expect("Could not commit index");
-      let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+      let index = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
         .await
         .expect("Could not refresh index");
       index.commit(true).await.expect("Could not commit index");
       index.commit(true).await.expect("Could not commit index");
-      Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+      Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
         .await
         .unwrap();
-      let index_final = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+      let index_final = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
         .await
         .unwrap();
       let (_, index_final_current_segment_ref) = index_final.get_current_segment_ref();
@@ -1360,15 +1475,16 @@ mod tests {
     let commit_after = 1000;
 
     // Create a new index with a low threshold for the segment size.
-    let (mut index, index_dir_path) = create_index_with_thresholds(
-      "test_multiple_segments_logs",
-      &storage_type,
-      1024 * 1024,
-      commit_after,
-      10000,
-      10,
-    )
-    .await;
+    let (mut index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_multiple_segments_logs",
+        &storage_type,
+        1024 * 1024,
+        commit_after,
+        10000,
+        10,
+      )
+      .await;
 
     let message_prefix = "message";
     let num_log_messages = 10000;
@@ -1402,7 +1518,7 @@ mod tests {
     let end_time = Utc::now().timestamp_millis() as u64;
 
     // Read the index from disk.
-    index = match Index::refresh(&storage_type, &index_dir_path, 1024 * 1024).await {
+    index = match Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024).await {
       Ok(index) => index,
       Err(err) => {
         error!("Error refreshing index: {:?}", err);
@@ -1475,15 +1591,16 @@ mod tests {
   #[tokio::test]
   async fn test_search_logs_count() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path) = create_index_with_thresholds(
-      "test_search_logs_count",
-      &storage_type,
-      1024 * 1024,
-      100000,
-      1000000,
-      10,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_search_logs_count",
+        &storage_type,
+        1024 * 1024,
+        100000,
+        1000000,
+        10,
+      )
+      .await;
 
     let message_prefix = "message";
     let num_message_suffixes = 10;
@@ -1526,15 +1643,16 @@ mod tests {
   #[tokio::test]
   async fn test_multiple_segments_metric_points() {
     let storage_type = StorageType::Local;
-    let (mut index, index_dir_path) = create_index_with_thresholds(
-      "test_multiple_segments_metric_points",
-      &storage_type,
-      1024 * 1024,
-      10,
-      100,
-      10,
-    )
-    .await;
+    let (mut index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_multiple_segments_metric_points",
+        &storage_type,
+        1024 * 1024,
+        10,
+        100,
+        10,
+      )
+      .await;
 
     let num_metric_points = 10000;
     let mut num_metric_points_from_last_commit = 0;
@@ -1562,7 +1680,7 @@ mod tests {
     sleep(Duration::from_millis(10000));
 
     // Refresh the segment from disk.
-    index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+    index = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
       .await
       .unwrap();
     let (_, current_segment_ref) = index.get_current_segment_ref();
@@ -1601,9 +1719,9 @@ mod tests {
     let storage_type = StorageType::Local;
 
     // Create a path within index_dir that does not exist.
-    let temp_path_buf = index_dir.path().join("doesnotexist");
+    let temp_path_buf = index_dir.path().join("doesnotexist_index");
 
-    let index = Index::new(&storage_type, temp_path_buf.to_str().unwrap())
+    let index = Index::new(&storage_type, temp_path_buf.to_str().unwrap(), "/tmp")
       .await
       .unwrap();
 
@@ -1621,22 +1739,34 @@ mod tests {
       .expect("Could not create storage");
 
     // Expect an error when directory isn't present.
-    let mut result =
-      Index::refresh(&storage_type, temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
+    let mut result = Index::refresh(
+      &storage_type,
+      temp_path_buf.to_str().unwrap(),
+      "/tmp",
+      1024 * 1024,
+    )
+    .await;
     assert!(result.is_err());
 
     // Expect an error when metadata file is not present in the directory.
     storage
       .create_dir(temp_path_buf.to_str().expect("Could not create dir path"))
       .expect("Could not create dir");
-    result = Index::refresh(&storage_type, temp_path_buf.to_str().unwrap(), 1024 * 1024).await;
+    result = Index::refresh(
+      &storage_type,
+      temp_path_buf.to_str().unwrap(),
+      "/tmp",
+      1024 * 1024,
+    )
+    .await;
     assert!(result.is_err());
   }
 
   #[tokio::test]
   async fn test_overlap_one_segment() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path) = create_index("test_overlap_one_segment", &storage_type).await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index("test_overlap_one_segment", &storage_type).await;
 
     index
       .append_log_message(1000, &HashMap::new(), "message_1")
@@ -1662,13 +1792,26 @@ mod tests {
       index_dir.path().to_str().unwrap(),
       "test_overlap_multiple_segments"
     );
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = format!(
+      "{}/{}",
+      wal_dir.path().to_str().unwrap(),
+      "test_overlap_multiple_segments"
+    );
     let storage_type = StorageType::Local;
 
     // The log_messages_threshold is set to 2, so that a new segment gets created after every 2 messages.
-    let index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 2, 100, 10)
-        .await
-        .unwrap();
+    let index = Index::new_with_threshold_params(
+      &storage_type,
+      &index_dir_path,
+      &wal_dir_path,
+      1024 * 1024,
+      2,
+      100,
+      10,
+    )
+    .await
+    .unwrap();
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -1724,7 +1867,7 @@ mod tests {
 
     // Create a new index with a low threshold for the segment size.
     let name = &format!("test_concurrent_append_{}", num_segments_in_memory);
-    let (index, index_dir_path) = create_index_with_thresholds(
+    let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) = create_index_with_thresholds(
       name,
       &storage_type,
       search_memory_budget_bytes,
@@ -1788,7 +1931,7 @@ mod tests {
       .await
       .expect("Could not commit index");
 
-    let index = Index::refresh(&storage_type, &index_dir_path, 1024 * 1024)
+    let index = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
       .await
       .expect("Could not refresh index");
     let expected_len = num_threads * num_appends_per_thread;
@@ -1827,7 +1970,7 @@ mod tests {
   #[tokio::test]
   async fn test_reusing_index_when_available() {
     let storage_type = StorageType::Local;
-    let (index, index_dir_path) = create_index_with_thresholds(
+    let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) = create_index_with_thresholds(
       "test_reusing_index_when_available",
       &storage_type,
       1024 * 1024,
@@ -1846,10 +1989,17 @@ mod tests {
     index.commit(true).await.expect("Could not commit index");
 
     // Create one more new index using same dir location
-    let index =
-      Index::new_with_threshold_params(&storage_type, &index_dir_path, 1024 * 1024, 10, 100, 10)
-        .await
-        .unwrap();
+    let index = Index::new_with_threshold_params(
+      &storage_type,
+      &index_dir_path,
+      &wal_dir_path,
+      1024 * 1024,
+      10,
+      100,
+      10,
+    )
+    .await
+    .unwrap();
 
     let query_message = r#"{
         "query": {
@@ -1882,11 +2032,20 @@ mod tests {
     // Create a new index in an empty directory - this should work.
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let storage_type = StorageType::Local;
 
-    let index =
-      Index::new_with_threshold_params(&storage_type, index_dir_path, 1024 * 1024, 10, 100, 10)
-        .await;
+    let index = Index::new_with_threshold_params(
+      &storage_type,
+      index_dir_path,
+      wal_dir_path,
+      1024 * 1024,
+      10,
+      100,
+      10,
+    )
+    .await;
     assert!(index.is_ok());
   }
 
@@ -1900,15 +2059,16 @@ mod tests {
     let storage_type = StorageType::Local;
     let some_segment_size_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * some_segment_size_bytes;
-    let (index, _index_dir_path) = create_index_with_thresholds(
-      "test_limited_memory",
-      &storage_type,
-      search_memory_budget_bytes,
-      2,
-      100,
-      10,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_limited_memory",
+        &storage_type,
+        search_memory_budget_bytes,
+        2,
+        100,
+        10,
+      )
+      .await;
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -1929,13 +2089,18 @@ mod tests {
         .append_log_message(end, &HashMap::new(), message_end)
         .await
         .expect("Could not append log message");
-      index.commit(true).await.expect("Could not commit index");
+      index.commit(false).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
     assert_eq!(index.all_segments_summaries.len() as u64, num_segments + 1);
 
     // We shouldn't have more than specified segments in memory.
+    println!(
+      "##### memory = {}, num segments in memory = {}",
+      index.memory_segments_map.len(),
+      num_segments_in_memory
+    );
     assert!(index.memory_segments_map.len() as u64 <= num_segments_in_memory);
 
     // Check the queries return results as expected.
@@ -1977,7 +2142,7 @@ mod tests {
   #[tokio::test]
   async fn test_delete_segment_in_memory() {
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path) =
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
       create_index("test_delete_segment_in_memory", &storage_type).await;
     let message = "test_message";
     index
@@ -2006,15 +2171,16 @@ mod tests {
     let segment_size_approx_bytes = (0.0003 * 1024.0 * 1024.0) as u64;
     let search_memory_budget_bytes = num_segments_in_memory * segment_size_approx_bytes;
     let storage_type = StorageType::Local;
-    let (index, _index_dir_path) = create_index_with_thresholds(
-      "test_delete_multiple_segments",
-      &storage_type,
-      search_memory_budget_bytes,
-      2,
-      20,
-      100,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_delete_multiple_segments",
+        &storage_type,
+        search_memory_budget_bytes,
+        2,
+        20,
+        100,
+      )
+      .await;
 
     // Setting it high to test out that there is no single-threaded deadlock while commiting.
     // Note that if you change this value, some of the assertions towards the end of this test
@@ -2061,15 +2227,16 @@ mod tests {
     let storage_type = StorageType::Local;
     let log_messages_threshold = 1000;
     let uncommitted_segments_threshold = 10;
-    let (index, _index_dir_path) = create_index_with_thresholds(
-      "test_uncommitted_segments",
-      &storage_type,
-      5 * 1024 * 1024,
-      log_messages_threshold,
-      10000,
-      uncommitted_segments_threshold,
-    )
-    .await;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_uncommitted_segments",
+        &storage_type,
+        5 * 1024 * 1024,
+        log_messages_threshold,
+        10000,
+        uncommitted_segments_threshold,
+      )
+      .await;
 
     // The below will create exactly uncommitted_segments_threshold segments.
     let num_messages = log_messages_threshold * uncommitted_segments_threshold;

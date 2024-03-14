@@ -1126,7 +1126,11 @@ mod tests {
     let storage_type = StorageType::Local;
     let index_dir = TempDir::new("index_test").unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
-    let index = Index::new(&storage_type, &index_dir_path).await.unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = format!("{}/{}", wal_dir.path().to_str().unwrap(), name);
+    let index = Index::new(&storage_type, &index_dir_path, &wal_dir_path)
+      .await
+      .unwrap();
 
     // Append metric points to the index.
     let timestamp = Utc::now().timestamp_millis() as u64;

@@ -6,6 +6,7 @@ use std::vec::Vec;
 
 use dashmap::DashMap;
 use log::debug;
+use serde_json::json;
 
 use super::metadata::Metadata;
 use super::search_logs::QueryLogMessage;
@@ -14,12 +15,13 @@ use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
+use crate::segment_manager::wal::WriteAheadLog;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
 use crate::utils::error::QueryError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
-use crate::utils::sync::{Arc, RwLock, TokioMutex};
+use crate::utils::sync::{Arc, Mutex, RwLock, TokioMutex};
 use crate::utils::trie::Trie;
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
@@ -59,11 +61,16 @@ pub struct Segment {
   /// Primarily used for efficient prefix searches on log message terms.
   /// The Trie is protected by an Arc (atomic reference counting) and RwLock to ensure concurrent access and modification safety.
   trie: Arc<RwLock<Trie>>,
+
+  // Write ahead log.
+  wal: Arc<Mutex<WriteAheadLog>>,
 }
 
 impl Segment {
   /// Create an empty segment.
-  pub fn new() -> Self {
+  pub fn new(wal_file_path: &str) -> Self {
+    let wal = WriteAheadLog::new(wal_file_path).unwrap();
+    let wal = Arc::new(Mutex::new(wal));
     Segment {
       metadata: Metadata::new(),
       terms: DashMap::new(),
@@ -73,6 +80,7 @@ impl Segment {
       time_series_map: TimeSeriesMap::new(),
       commit_lock: TokioMutex::new(()),
       trie: Arc::new(RwLock::new(Trie::new())),
+      wal,
     }
   }
 
@@ -178,13 +186,22 @@ impl Segment {
   }
 
   /// Append a log message with timestamp to the segment (inverted as well as forward map).
+  // Note that this function isn't async - this helps with testing and esuring correctness.
   pub fn append_log_message(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
   ) -> Result<(), CoreDBError> {
-    let log_message: LogMessage = LogMessage::new_with_fields_and_text(time, fields, text);
+    // Write to write-ahead-log.
+    let wal_entry = json!({"type": "log", "time": time, "fields": fields, "text": text});
+    {
+      let wal_clone = self.wal.clone();
+      let wal = &mut wal_clone.lock();
+      wal.append(wal_entry).unwrap();
+    }
+
+    let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
     // Increment the number of log messages appended so far, and get the id for this log message.
@@ -217,6 +234,7 @@ impl Segment {
   }
 
   /// Append a metric point with specified time and value to the segment.
+  // Note that this function isn't async - this helps with testing and esuring correctness.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
@@ -224,6 +242,15 @@ impl Segment {
     time: u64,
     value: f64,
   ) -> Result<(), CoreDBError> {
+    // Write to write-ahead-log.
+    let wal_entry = json!({"type": "metric", "time": time, "metric_name": metric_name,
+      "name_value_labels": name_value_labels, "value": value});
+    {
+      let wal_clone = self.wal.clone();
+      let wal = &mut wal_clone.lock();
+      wal.append(wal_entry).unwrap();
+    }
+
     // Increment the number of metric points appended so far.
     self.metadata.fetch_increment_metric_point_count();
 
@@ -334,6 +361,8 @@ impl Segment {
       TimeSeriesMap,
     ) = storage.read(&segment_path).await?;
     let commit_lock = TokioMutex::new(());
+    let wal = WriteAheadLog::new("/tmp/x").unwrap();
+    let wal = Arc::new(Mutex::new(wal));
 
     // Create a new thread-safe trie
     let mut temp_trie = Trie::new();
@@ -355,6 +384,7 @@ impl Segment {
       time_series_map,
       commit_lock,
       trie,
+      wal,
     };
 
     Ok(segment)
@@ -418,11 +448,27 @@ impl Segment {
   pub fn get_metadata_file_name() -> String {
     METADATA_FILE_NAME.to_owned()
   }
-}
 
-impl Default for Segment {
-  fn default() -> Self {
-    Self::new()
+  /// Remove the write ahead log - typically called when after a segment is committed and will
+  /// no longer be written to.
+  pub fn remove_wal(&self) -> Result<(), CoreDBError> {
+    let wal_clone = self.wal.clone();
+    let wal = &mut wal_clone.lock();
+    wal.remove()
+  }
+
+  /// Flush write ahead log to disk.
+  pub fn flush_wal(&self) -> Result<(), CoreDBError> {
+    let wal_clone = self.wal.clone();
+    let wal = &mut wal_clone.lock();
+    wal.flush()
+  }
+
+  #[cfg(test)]
+  /// Create a new segment with a temporary WAL file.
+  pub fn new_with_temp_wal() -> Self {
+    let wal_file_path = format!("/tmp/{}.tmp", uuid::Uuid::new_v4());
+    Self::new(&wal_file_path)
   }
 }
 
@@ -464,7 +510,7 @@ mod tests {
   async fn test_new_segment() {
     is_sync_send::<Segment>();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     assert!(segment.is_empty());
 
     let query_node_result = create_term_test_node("doesnotexist");
@@ -483,7 +529,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_default_segment() {
-    let segment = Segment::default();
+    let segment = Segment::new_with_temp_wal();
     assert!(segment.is_empty());
 
     let query_node_result = create_term_test_node("doesnotexist");
@@ -502,7 +548,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_commit_refresh() {
-    let original_segment = Segment::new();
+    let original_segment = Segment::new_with_temp_wal();
     let segment_dir = TempDir::new("segment_test").unwrap();
     let segment_dir_path = segment_dir.path().to_str().unwrap();
     let storage = Storage::new(&StorageType::Local)
@@ -654,9 +700,9 @@ mod tests {
     assert_eq!(from_disk_segment.metadata.get_label_count(), 2);
   }
 
-  #[test]
-  fn test_one_log_message() {
-    let segment = Segment::new();
+  #[tokio::test]
+  async fn test_one_log_message() {
+    let segment = Segment::new_with_temp_wal();
     let time = Utc::now().timestamp_millis() as u64;
 
     segment
@@ -669,7 +715,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_one_metric_point() {
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     let time = Utc::now().timestamp_millis() as u64;
     let mut label_map = HashMap::new();
     label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
@@ -695,10 +741,10 @@ mod tests {
     assert_eq!(results.len(), 1)
   }
 
-  #[test]
-  fn test_multiple_log_messages() {
+  #[tokio::test]
+  async fn test_multiple_log_messages() {
     let num_messages = 1000;
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     let start_time = Utc::now().timestamp_millis() as u64;
     for _ in 0..num_messages {
@@ -720,7 +766,7 @@ mod tests {
   async fn test_concurrent_append_metric_points() {
     let num_threads = 20;
     let num_metric_points_per_thread = 5000;
-    let segment = Arc::new(Segment::new());
+    let segment = Arc::new(Segment::new_with_temp_wal());
     let start_time = Utc::now().timestamp_millis() as u64;
     let expected = Arc::new(RwLock::new(Vec::new()));
 
@@ -776,7 +822,7 @@ mod tests {
     let num_log_messages_per_thread = 500;
 
     // Shared segment and trie for concurrent testing.
-    let segment = Arc::new(Segment::new());
+    let segment = Arc::new(Segment::new_with_temp_wal());
     let trie = Arc::clone(&segment.trie);
 
     // Shared vector to collect expected words for trie verification.
@@ -834,10 +880,10 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_range_overlap() {
+  #[tokio::test]
+  async fn test_range_overlap() {
     let (start, end) = (1000, 2000);
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     segment
       .append_log_message(start, &HashMap::new(), "message_1")
@@ -869,7 +915,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_duplicates() {
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     segment
       .append_log_message(1000, &HashMap::new(), "hello world")
