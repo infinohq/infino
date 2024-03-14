@@ -3,31 +3,37 @@ use std::sync::Arc;
 use chrono::Utc;
 use log::{debug, error, info};
 
-use tokio::io::Join;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::AppState;
 use crate::IS_SHUTDOWN;
 
+// Returns true if the specified join handle is not none and is not finished.
+fn is_join_handle_running(handle: &Option<JoinHandle<()>>) -> bool {
+  match handle {
+    Some(handle) => {
+      if handle.is_finished() {
+        // The thread cooresponding to this handle is finished.
+        return false;
+      }
+    }
+    None => return false, // Handle isn't initialized yet - so no thread corresponding to
+                          // this handle is running.
+  }
+
+  // None of the above conditions are true, so the thread corresponding to this handle
+  // is running
+  true
+}
+
 /// Function to flush WAL by starting a new thread as necessory.
-async fn check_and_start_flush_wal_thread(
+fn check_and_start_flush_wal_thread(
   state: Arc<AppState>,
   flush_wal_handle: &mut Option<JoinHandle<()>>,
 ) {
-  // Check if a new thread for flushing WAL should be started. A new thread needs to be started if
-  // the flush_wal_handle is not set, or it points to a thread that has finished.
-  let mut start_flush_wal_thread = false;
-  match flush_wal_handle {
-    Some(handle) => {
-      if handle.is_finished() {
-        start_flush_wal_thread = true;
-      }
-    }
-    None => start_flush_wal_thread = true,
-  }
-
-  if start_flush_wal_thread {
+  if !is_join_handle_running(flush_wal_handle) {
+    // The thread to flush WAL isn't started or has finished.
     // Start a new thread for flushing WAL, and update the flush_wal_handle.
     *flush_wal_handle = Some(tokio::spawn(async move {
       state.coredb.flush_wal().await;
@@ -35,80 +41,106 @@ async fn check_and_start_flush_wal_thread(
   }
 }
 
-/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
-/// can be asyncronously committed), and triggers retention policy every hour
-pub async fn commit_in_loop(state: Arc<AppState>) {
-  let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
-  let policy_interval_ms = 3600000; // 1hr in ms
-  let mut flush_wal_handle: Option<JoinHandle<()>> = None;
-  let mut commit_handle: Option<JoinHandle<()>> = None;
-
-  loop {
-    check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
-
-    // Check if we need to shut down (typically triggered by the user by sending Ctrl-C on Infino server).
-    let is_shutdown = IS_SHUTDOWN.load();
-
-    // Part 2 -
-    // Commit the index to object store. Set commit_current_segment to is_shutdown -- i.e.,
-    // commit the current segment only when the server is shutting down.
-
-    // TODO-------- start here
-    let state_clone = state.clone();
-    let is_shutdown_clone = is_shutdown;
-    commit_handle = tokio::spawn(async move {
-      let result = state_clone.coredb.commit(is_shutdown_clone).await;
+/// Function to commit indices by starting a new thread as necessory.
+fn check_and_start_commit_thread(
+  state: Arc<AppState>,
+  commit_handle: &mut Option<JoinHandle<()>>,
+  is_shutdown: bool,
+) {
+  if !is_join_handle_running(commit_handle) {
+    // The thread to flush WAL isn't started or has finished.
+    // Start a new thread for commit, and update the commit_handle.
+    *commit_handle = Some(tokio::spawn(async move {
+      let result = state.coredb.commit(is_shutdown).await;
 
       // Handle the result of the commit operation
       match result {
         Ok(_) => debug!("Commit successful"),
         Err(e) => error!("Commit failed: {}", e),
       }
-    });
+    }));
+  }
+}
 
-    // Exit from the loop if is_shutdown is set.
-    if is_shutdown {
-      // Wait for wal flush thread to finish and check for errors.
-      let result = flush_wal_handle.await;
-      match result {
-        Ok(_) => {
-          info!("Write ahead log flush thread completed successfully");
-        }
-        Err(e) => {
-          error!("Error while joining write ahead log flush thread {}", e);
-        }
-      }
-
-      // Wait for commit thread to finish and check for errors.
-      let result = commit_handle.await;
-      match result {
-        Ok(_) => {
-          info!("Commit thread completed successfully");
-        }
-        Err(e) => {
-          error!("Error while joining commit thread {}", e);
-        }
-      }
-      break;
-    }
-
-    let current_time = Utc::now().timestamp_millis() as u64;
-    // TODO: make trigger policy interval configurable
-    if current_time - last_trigger_policy_time > policy_interval_ms {
+/// Function to execute retention policy by starting a new thread as necessory.
+/// Returns true if a new retention thread was started, returns false otherwise.
+fn check_and_start_retention_thread(
+  state: Arc<AppState>,
+  retention_handle: &mut Option<JoinHandle<()>>,
+) -> bool {
+  if !is_join_handle_running(retention_handle) {
+    // The thread to run retention policy isn't started or has finished.
+    // Start a new thread for executing retention policy, and update the retention_handle.
+    *retention_handle = Some(tokio::spawn(async move {
       info!("Triggering retention policy on index in coredb");
       let result = state.coredb.trigger_retention().await;
-
       if let Err(e) = result {
         error!(
           "Error triggering retention policy on index in coredb: {}",
           e
         );
       }
+    }));
 
-      last_trigger_policy_time = current_time;
+    return true;
+  }
+
+  false
+}
+
+/// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
+/// can be asyncronously committed), and triggers retention policy every hour
+pub async fn commit_in_loop(state: Arc<AppState>) {
+  let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
+  let mut flush_wal_handle: Option<JoinHandle<()>> = None;
+  let mut commit_handle: Option<JoinHandle<()>> = None;
+  let mut retention_handle: Option<JoinHandle<()>> = None;
+
+  // TODO: make trigger policy interval configurable
+  let policy_interval_ms = 3600000; // 1hr in ms
+
+  loop {
+    // Start flush log thread - if one isn't running already.
+    check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
+
+    // Check if we need to shut down (typically triggered by the user by sending Ctrl-C on Infino server).
+    // We can check for this anywhere in the loop, but we check just before commit to avoid extra work
+    // (such as running retention policy even after user initiates shutdown).
+    let is_shutdown = IS_SHUTDOWN.load();
+
+    // Start commit thread - if one isn't running already.
+    check_and_start_commit_thread(state.clone(), &mut commit_handle, is_shutdown);
+
+    // Exit from the loop after shutting down background threads if is_shutdown is set.
+    if is_shutdown {
+      let temp_flush_wal_handle =
+        flush_wal_handle.expect("Could not get handle for flush wal thread");
+      let temp_commit_handle = commit_handle.expect("Could not get handle for commit thread");
+      let temp_retention_handle = retention_handle.expect("Could not get handle for commit thread");
+
+      // Wait for wal flush thread and commit thread to finish and check for errors.
+      tokio::try_join!(
+        temp_flush_wal_handle,
+        temp_commit_handle,
+        temp_retention_handle
+      )
+      .expect("Could not wait for the background threads to finish");
+
+      break;
+    }
+
+    // Start retention thread - if one isn't running already.
+    let current_time = Utc::now().timestamp_millis() as u64;
+    if current_time - last_trigger_policy_time > policy_interval_ms {
+      let new_retention_thread_started =
+        check_and_start_retention_thread(state.clone(), &mut retention_handle);
+      if new_retention_thread_started {
+        // Update last_trigger_policy_time only if a new retention thread was started.
+        last_trigger_policy_time = current_time;
+      }
     }
 
     // Sleep for some time before committing again.
     sleep(Duration::from_millis(1000)).await;
-  } // end loop {..}
-}
+  }
+} // end loop {..}
