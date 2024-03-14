@@ -140,6 +140,27 @@ impl Segment {
     Ok(results)
   }
 
+  /// Sets the fieldname based on the given node
+  fn set_fieldname<'a>(&self, node: Pair<'a, Rule>, fieldname: &mut Option<&'a str>) {
+    if let Some(field) = node.into_inner().next() {
+      *fieldname = Some(field.as_str());
+    }
+  }
+
+  /// Sets the case_insensitive flag based on the given node
+  fn set_case_insensitive(&self, node: Pair<'_, Rule>, case_insensitive: &mut bool, default: bool) {
+    if let Some(value) = node.into_inner().next() {
+      *case_insensitive = value.as_str().parse().unwrap_or(default);
+    }
+  }
+
+  /// Extracts the query text from the given node
+  fn extract_query_text<'a>(&self, node: Pair<'a, Rule>, query_text: &mut Option<&'a str>) {
+    if query_text.is_none() {
+      *query_text = node.into_inner().next().map(|v| v.as_str());
+    }
+  }
+
   // Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
   async fn process_bool_query(
     &self,
@@ -281,25 +302,13 @@ impl Segment {
 
     let mut fieldname: Option<&str> = None;
     let mut query_text: Option<&str> = None;
-    let mut case_insensitive = true;
+    let mut case_insensitive = false;
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
-        Rule::value => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::case_insensitive => {
-          case_insensitive = node
-            .into_inner()
-            .next()
-            .map(|v| v.as_str().parse::<bool>().unwrap_or(false))
-            .unwrap_or(false);
-        }
+        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
+        Rule::value => self.extract_query_text(node, &mut query_text),
+        Rule::case_insensitive => self.set_case_insensitive(node, &mut case_insensitive, false),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -351,11 +360,7 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
+        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
         Rule::field_element => {
           query_values.push(node.into_inner().next().map(|v| v.as_str()).unwrap_or(""));
         }
@@ -417,24 +422,12 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
+        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
         Rule::operator => {
           term_operator = node.into_inner().next().map_or("OR", |v| v.as_str());
         }
-        Rule::match_string | Rule::query => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::case_insensitive => {
-          case_insensitive = node
-            .into_inner()
-            .next()
-            .map(|v| v.as_str().parse::<bool>().unwrap_or(true))
-            .unwrap_or(true);
-        }
+        Rule::match_string | Rule::query => self.extract_query_text(node, &mut query_text),
+        Rule::case_insensitive => self.set_case_insensitive(node, &mut case_insensitive, true),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -483,14 +476,8 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
-        Rule::match_phrase_string | Rule::query => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
+        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
+        Rule::match_phrase_string | Rule::query => self.extract_query_text(node, &mut query_text),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -554,21 +541,9 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
-        Rule::prefix_string | Rule::value => {
-          prefix_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::case_insensitive => {
-          case_insensitive = node
-            .into_inner()
-            .next()
-            .map(|v| v.as_str().parse::<bool>().unwrap_or(false))
-            .unwrap_or(true);
-        }
+        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
+        Rule::prefix_string | Rule::value => self.extract_query_text(node, &mut prefix_text),
+        Rule::case_insensitive => self.set_case_insensitive(node, &mut case_insensitive, false),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -579,76 +554,32 @@ impl Segment {
 
     match (fieldname, prefix_text) {
       (Some(field), Some(prefix_text_str)) => {
-        let analyzed_query: Vec<String> =
+        let prefix_phrase_terms: Vec<String> =
           analyze_query_text(prefix_text_str, Some(field), case_insensitive).await;
 
-        if analyzed_query.len() == 1 {
-          // If there's only a single term, directly get the terms with prefix
-          let prefix_matches = self.get_terms_with_prefix(&analyzed_query[0], case_insensitive);
-
-          let or_doc_ids = self.search_inverted_index(prefix_matches, "OR").await?;
-
-          // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
-          // and return the specific document IDs
-          let matching_document_ids = self.get_bool_prefix_matches(
-            &or_doc_ids,
+        match self
+          .retrieve_doc_ids_with_prefix_phrase(
+            prefix_phrase_terms,
             field,
             prefix_text_str.trim_matches('"'),
             case_insensitive,
-          );
+          )
+          .await
+        {
+          Ok(matching_document_ids) => {
+            let mut results = QueryDSLDocIds::new();
+            let execution_time = check_query_time(timeout, query_start_time)?;
+            results.set_execution_time(execution_time);
+            results.set_ids(matching_document_ids);
 
-          let mut results = QueryDSLDocIds::new();
-          let execution_time = check_query_time(timeout, query_start_time)?;
-          results.set_execution_time(execution_time);
-          results.set_ids(matching_document_ids);
+            debug!(
+              "QueryDSL: Returning results from prefix query {:?}",
+              results
+            );
 
-          debug!(
-            "QueryDSL: Returning results from prefix query {:?}",
-            results
-          );
-
-          Ok(results)
-        } else {
-          // Get all prefix matches for the last term
-          let prefix_matches =
-            self.get_terms_with_prefix(analyzed_query.last().unwrap(), case_insensitive);
-
-          // Prepare a list to store document IDs from OR operations
-          let mut or_doc_ids: Vec<u32> = Vec::new();
-
-          // Perform AND operations on n-1 terms from analyzed_query and the last term's prefix matches
-          for term in prefix_matches {
-            let mut and_query = analyzed_query.clone();
-            and_query.pop(); // Remove the last term from analyzed_query
-            and_query.push(term.clone()); // Add the current term from prefix_matches
-
-            let and_search_result = self.search_inverted_index(and_query, "AND").await?;
-            or_doc_ids.extend(and_search_result);
+            Ok(results)
           }
-
-          // Remove duplicates from the list of document IDs
-          or_doc_ids.dedup();
-
-          // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
-          // and return the specific document IDs
-          let matching_document_ids = self.get_bool_prefix_matches(
-            &or_doc_ids,
-            field,
-            prefix_text_str.trim_matches('"'),
-            case_insensitive,
-          );
-
-          let mut results = QueryDSLDocIds::new();
-          let execution_time = check_query_time(timeout, query_start_time)?;
-          results.set_execution_time(execution_time);
-          results.set_ids(matching_document_ids);
-
-          debug!(
-            "QueryDSL: Returning results from match phrase query {:?}",
-            results
-          );
-
-          Ok(results)
+          Err(err) => Err(err),
         }
       }
       (None, _) => Err(QueryError::UnsupportedQuery(

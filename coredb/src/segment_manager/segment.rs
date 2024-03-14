@@ -196,7 +196,7 @@ impl Segment {
     terms.into_iter().for_each(|term| {
       let term_id = *self
         .terms
-        .entry(term.to_owned())
+        .entry(term.clone())
         .or_insert_with(|| self.metadata.fetch_increment_term_count());
 
       self
