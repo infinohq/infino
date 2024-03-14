@@ -15,7 +15,7 @@
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
 
-mod commit;
+mod background_threads;
 mod queue_manager;
 mod utils;
 
@@ -53,7 +53,7 @@ use coredb::utils::error::{CoreDBError, QueryError};
 use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
-use crate::commit::commit_in_loop;
+use crate::background_threads::check_and_start_background_threads;
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
@@ -163,8 +163,9 @@ async fn app(
   });
 
   // Start a thread to periodically commit coredb.
-  info!("Spawning new thread to periodically commit");
-  let commit_thread_handle = tokio::spawn(commit_in_loop(shared_state.clone()));
+  info!("Spawning background threads for commit, and other tasks...");
+  let background_threads_handle =
+    tokio::spawn(check_and_start_background_threads(shared_state.clone()));
 
   // Build our application with a route
   let router: Router = Router::new()
@@ -192,7 +193,7 @@ async fn app(
     // Make the default for body to be 5MB (instead of 2MB http default.)
     .layer(DefaultBodyLimit::max(5 * 1024 * 1024));
 
-  (router, commit_thread_handle, shared_state)
+  (router, background_threads_handle, shared_state)
 }
 
 async fn run_server() {
@@ -204,7 +205,8 @@ async fn run_server() {
   let image_tag = "3";
 
   // Create app.
-  let (app, commit_thread_handle, shared_state) = app(config_dir_path, image_name, image_tag).await;
+  let (app, background_threads_handle, shared_state) =
+    app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -238,7 +240,7 @@ async fn run_server() {
   // Set the flag to indicate the commit thread to shutdown, and wait for it to finish.
   IS_SHUTDOWN.store(true);
   info!("Shutting down commit thread and waiting for it to finish...");
-  commit_thread_handle
+  background_threads_handle
     .await
     .expect("Error while completing the commit thread");
 

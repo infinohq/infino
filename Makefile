@@ -89,7 +89,7 @@ docker-push: docker-check
 # `make example-apache-logs file=../datasets/apache-tiny.log count=100000`
 example-apache-logs:
 	cd examples/rust-apache-logs && \
-	cargo run $(release) --bin rust-apache-logs -- --file $(file) --count $(count)
+	cargo run --bin rust-apache-logs -- --file $(file) --count $(count)
 
 # Start Infino server for memory profiling using dhat.
 run-profile-server:

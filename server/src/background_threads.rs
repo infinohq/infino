@@ -90,7 +90,7 @@ fn check_and_start_retention_thread(
 
 /// Periodically commits CoreDB to disk (typically called in a thread so that CoreDB
 /// can be asyncronously committed), and triggers retention policy every hour
-pub async fn commit_in_loop(state: Arc<AppState>) {
+pub async fn check_and_start_background_threads(state: Arc<AppState>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let mut flush_wal_handle: Option<JoinHandle<()>> = None;
   let mut commit_handle: Option<JoinHandle<()>> = None;
@@ -101,7 +101,7 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
 
   loop {
     // Start flush log thread - if one isn't running already.
-    check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
+    /*check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
 
     // Check if we need to shut down (typically triggered by the user by sending Ctrl-C on Infino server).
     // We can check for this anywhere in the loop, but we check just before commit to avoid extra work
@@ -127,10 +127,10 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
       .expect("Could not wait for the background threads to finish");
 
       break;
-    }
+    }*/
 
     // Start retention thread - if one isn't running already.
-    let current_time = Utc::now().timestamp_millis() as u64;
+    /*let current_time = Utc::now().timestamp_millis() as u64;
     if current_time - last_trigger_policy_time > policy_interval_ms {
       let new_retention_thread_started =
         check_and_start_retention_thread(state.clone(), &mut retention_handle);
@@ -138,7 +138,7 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
         // Update last_trigger_policy_time only if a new retention thread was started.
         last_trigger_policy_time = current_time;
       }
-    }
+    }*/
 
     // Sleep for some time before committing again.
     sleep(Duration::from_millis(1000)).await;
