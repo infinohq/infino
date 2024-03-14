@@ -49,12 +49,16 @@ static ELASTICSEARCH_SEARCH_QUERIES: &[&str] = &[
 struct Opt {
   #[structopt(short, long)]
   stop_after_infino: bool,
+
+  #[structopt(short, long)]
+  stop_after_infino_rest: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let opt = Opt::from_args();
   println!("{:#?}", opt.stop_after_infino);
+  println!("{:#?}", opt.stop_after_infino_rest);
 
   // Path to the input data to index from. Points to a log file - where each line is indexed
   // as a separate document in the elasticsearch index and the infino index.
@@ -117,6 +121,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await;
 
   // INFINO REST END
+
+  if opt.stop_after_infino_rest {
+    println!("stop_after_infino_rest is set. Stopping now...");
+    return Ok(());
+  }
 
   // CLICKHOUSE START
   println!("\n\n***Now running Clickhouse***");

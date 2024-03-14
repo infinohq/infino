@@ -54,7 +54,7 @@ impl InfinoEngine {
         }
       }
 
-      self.coredb.commit().await.expect("Could not commit coredb");
+      self.coredb.commit(false).await.expect("Could not commit coredb");
     }
     let elapsed = now.elapsed().as_micros();
     println!(
@@ -79,7 +79,7 @@ impl InfinoEngine {
           "Infino time required for searching logs {} is : {} microseconds. Num of results {}",
           query,
           elapsed,
-          result.len()
+          result.get_messages().len()
         );
         elapsed
       }
