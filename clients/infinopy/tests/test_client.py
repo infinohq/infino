@@ -54,7 +54,7 @@ class InfinoClientTestCase(unittest.TestCase):
         # Test the search_logs method.
         # Query for text that is present in both the payloads.
         response = self.client.search_logs("default",
-            text="my message", start_time=current_time - 10, end_time=current_time + 10
+            q="my message", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
@@ -62,7 +62,7 @@ class InfinoClientTestCase(unittest.TestCase):
 
         # Test backwards-compatibility
         response = self.client.search_log("default",
-            text="my message", start_time=current_time - 10, end_time=current_time + 10
+            q="my message", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
@@ -70,14 +70,14 @@ class InfinoClientTestCase(unittest.TestCase):
 
         # Query for text that is present in only one payload.
         response = self.client.search_logs("default",
-            text="two", start_time=current_time - 10, end_time=current_time + 10
+            q="two", start_time=current_time - 10, end_time=current_time + 10
         )
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 1)
 
         # Test that default values for start and end time work.
-        response = self.client.search_logs("default", text="my message")
+        response = self.client.search_logs("default", q="my message")
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 2)
@@ -85,7 +85,7 @@ class InfinoClientTestCase(unittest.TestCase):
         # Test the summarize api.
         # We haven't set OPENAI_API_KEY while starting the container, so this should fail.
         response = self.client.summarize("default",
-          text="my message",
+          q="my message",
           start_time=current_time - 10,
           end_time=current_time + 10,
         )

@@ -69,7 +69,7 @@ term        = { value ~ (comma ~ boost)? ~ (comma ~ case_insensitive)? }
 
 // Terms Queries: https://opensearch.org/docs/latest/query-dsl/term/terms/
 terms_query        = { start_brace ~ quote ~ "terms" ~ quote ~ colon ~ terms_search ~ end_brace }
-terms_search       = { start_brace ~ (fieldname | boost) ~ colon ~ start_bracket ~ (terms | terms_array_values) ~ end_bracket ~ end_brace }
+terms_search       = { start_brace ~ fieldname ~ colon ~ start_bracket ~ (terms | terms_array_values) ~ end_bracket ~ (comma ~ boost)? ~ end_brace }
 terms              = { index ~ comma ~ id ~ comma ~ path ~ (comma ~ routing)? }
 terms_array_values = { (field_element ~ (comma ~ field_element)*)? }
 

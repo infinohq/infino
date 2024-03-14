@@ -962,14 +962,15 @@ mod tests {
     let segment = create_mock_segment();
 
     let query_dsl_query = r#"{
-      "query": {
-        "terms": {
-          "field1": [
-            "field1value",
-            "field2value"
-          ]
+        "query": {
+            "terms": {
+                "field1": [
+                    "field1value",
+                    "field2value"
+                ],
+                "boost": 1.0
+            }
         }
-      }
     }
     "#;
 

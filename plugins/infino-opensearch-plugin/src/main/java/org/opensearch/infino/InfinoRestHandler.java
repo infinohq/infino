@@ -269,6 +269,7 @@ public class InfinoRestHandler extends BaseRestHandler {
      */
     @Override
     public List<Route> routes() {
+        // TODO: change metrics path to PromQL: /api/v1/query and /api/v1/query_range
         return unmodifiableList(asList(new Route(GET, "/infino/{infinoIndex}/{infinoPath}"), // Search a collection
                 new Route(GET, "/infino/{infinoIndex}/logs/{infinoPath}"), // Search logs on a collection
                 new Route(GET, "/infino/{infinoIndex}/metrics/{infinoPath}"), // Search metrics on a collection

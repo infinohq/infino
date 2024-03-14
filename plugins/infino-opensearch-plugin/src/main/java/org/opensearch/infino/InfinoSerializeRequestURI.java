@@ -140,26 +140,28 @@ public class InfinoSerializeRequestURI {
         }
     }
 
+    // TODO: Generate a proper error message to the caller for incorrect parameters
     private String constructGetUrl() {
-        // Constructing URL for GET requests
+        String baseUrl = infinoEndpoint + "/" + indexName;
         switch (path) {
             case "_ping":
                 return infinoEndpoint + "/ping";
             case "_search":
-                return switch (indexType) {
-                    case METRICS -> infinoEndpoint + "/" + indexName + "/search_metrics?" + buildQueryString(
+                if (indexType == InfinoIndexType.METRICS) {
+                    return baseUrl + "/search_metrics?" + buildQueryString(
                             "name", params.get("name"),
                             "value", params.get("value"),
                             "start_time", startTime,
                             "end_time", endTime);
-                    default -> infinoEndpoint + "/" + indexName + "/search_logs?" + buildQueryString(
-                            "text", params.get("text"),
+                } else {
+                    return baseUrl + "/search_logs?" + buildQueryString(
+                            "q", params.get("q"),
                             "start_time", startTime,
                             "end_time", endTime);
-                };
+                }
             case "_summarize":
-                return infinoEndpoint + "/" + indexName + "/summarize?" + buildQueryString(
-                        "text", params.get("text"),
+                return baseUrl + "/summarize?" + buildQueryString(
+                        "q", params.get("q"),
                         "start_time", startTime,
                         "end_time", endTime);
             default:
@@ -315,18 +317,30 @@ public class InfinoSerializeRequestURI {
 
     // Helper method to build query strings
     private String buildQueryString(String... params) {
-        StringBuilder queryBuilder = new StringBuilder();
-        for (int i = 0; i < params.length; i += 2) {
-            if (i > 0) {
-                queryBuilder.append("&");
+
+        // Initialize a new StringBuilder for the query string
+        StringBuilder queryString = new StringBuilder();
+        if (params != null && params.length % 2 == 0) { // Ensure there's a key for every value
+            for (int i = 0; i < params.length; i += 2) {
+                String key = params[i];
+                String value = params[i + 1];
+                if (value != null && !value.isEmpty()) { // Check if the value is not null and not empty
+                    if (queryString.length() > 0) {
+                        queryString.append("&");
+                    }
+                    queryString.append(key).append("=").append(encodeParam(value));
+                }
             }
-            queryBuilder.append(params[i]).append("=").append(encodeParam(params[i + 1]));
         }
-        return queryBuilder.toString();
+        return queryString.toString();
     }
 
     // Helper method to encode URL parameters
     private String encodeParam(String param) {
+        if (param == null) {
+            logger.warn("Attempted to encode a null parameter.");
+            return "";
+        }
         try {
             return URLEncoder.encode(param, StandardCharsets.UTF_8.toString());
         } catch (UnsupportedEncodingException e) {

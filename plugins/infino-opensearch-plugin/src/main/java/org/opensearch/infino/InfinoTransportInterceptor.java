@@ -68,6 +68,8 @@ import java.lang.InstantiationException;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
 import org.opensearch.action.OriginalIndices;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
@@ -421,15 +423,17 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             String responseBody = response.body();
             int responseCode = response.statusCode();
 
-            logger.info("Response from Infino is " + responseBody);
+            logger.debug("Response from Infino is " + responseBody);
 
             if (responseBody == null || responseBody.isEmpty()) {
                 throw new IOException("Response body is empty");
             }
 
             // TODO: Parse the error response from Infino
-            if (responseCode >= 400 && responseCode <= 599) {
-                throw new IOException("Error returned from Infino index");
+            if (responseCode >= 400 && responseCode <= 499) {
+                throw new IllegalAccessException("Request denied by Infino index");
+            } else if (responseCode >= 500 && responseCode <= 599) {
+                throw new IOException("Server error returned from Infino index");
             }
 
             Gson gson = new Gson();
@@ -450,8 +454,6 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             float maxScore = hitsObject.get("max_score").getAsFloat();
             TotalHits totalHits = new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO);
 
-            // Placeholder for creating QuerySearchResult
-            // You might populate it with relevant query stats from 'rootObj' if available
             QuerySearchResult queryResult = new QuerySearchResult();
 
             List<SearchHit> searchHitsList = new ArrayList<>();
@@ -487,6 +489,23 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
             SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
 
+            // You might need to convert your SearchHits to Lucene's TopDocs for the
+            // QuerySearchResult
+            ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
+            for (int i = 0; i < searchHitsList.size(); i++) {
+                SearchHit hit = searchHitsList.get(i);
+                // Note: ScoreDoc requires docID (int) and score (float); adjust as needed.
+                // This is a simplified example. You might have more relevant docID and score
+                // info based on your actual data.
+                scoreDocs[i] = new ScoreDoc(i, hit.getScore());
+            }
+            TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
+
+            // Assuming you can create TopDocsAndMaxScore from TopDocs
+            TopDocsAndMaxScore topDocsAndMaxScore = new TopDocsAndMaxScore(topDocs, maxScore);
+            queryResult.topDocs(topDocsAndMaxScore, null); // Assuming no sortValueFormats
+            queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
+
             ShardSearchContextId contextId = new ShardSearchContextId("contextIdString", 1L);
             SearchShardTarget shardTarget = new SearchShardTarget("nodeId", new ShardId(indexName, "indexUuid", 1),
                     "clusterAlias", OriginalIndices.NONE);
@@ -497,6 +516,8 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             // Create QueryFetchSearchResult with both query and fetch results
             QueryFetchSearchResult queryFetchSearchResult = new QueryFetchSearchResult(queryResult, fetchSearchResult);
             queryFetchSearchResult.setSearchShardTarget(shardTarget);
+
+            logger.debug("Response to Search Request is " + queryFetchSearchResult);
 
             // Send the QueryFetchSearchResult back to the listener
             listener.onResponse(queryFetchSearchResult);

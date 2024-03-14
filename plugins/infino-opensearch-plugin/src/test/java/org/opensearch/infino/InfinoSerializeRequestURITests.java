@@ -47,7 +47,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testLogsSearchEndpoint() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/logs/_search?text=hello&start_time=123&end_time=456";
+        String urlString = "http://opensearch/infino/test-index/logs/_search?q=hello&start_time=123&end_time=456";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(GET);
 
@@ -58,7 +58,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
         InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
         assertEquals("test-index", infinoSerializeRequestURI.indexName);
         assertEquals("_search", infinoSerializeRequestURI.path);
-        assertEquals(infinoSerializeRequestURI.params.get("text"), "hello");
+        assertEquals(infinoSerializeRequestURI.params.get("q"), "hello");
         assertEquals(infinoSerializeRequestURI.params.get("start_time"), "123");
         assertEquals(infinoSerializeRequestURI.params.get("end_time"), "456");
         assertEquals("GET", infinoSerializeRequestURI.method.name());
@@ -100,7 +100,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testDefaultTimeRange() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/logs/_search?text=error";
+        String urlString = "http://opensearch/infino/test-index/logs/_search?q=error";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
 
@@ -143,7 +143,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testEncodeParameters() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/logs/_search?text=hello world&start_time=123&end_time=456";
+        String urlString = "http://opensearch/infino/test-index/logs/_search?q=hello world&start_time=123&end_time=456";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
 
@@ -153,6 +153,23 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
         InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
         assertTrue("URL should encode query parameters", infinoSerializeRequestURI.finalUrl.contains("hello+world"));
+    }
+
+    public void testEncodeParametersNoParams() throws Exception {
+        HttpRequest mockHttpRequest = mock(HttpRequest.class);
+        String urlString = "http://opensearch/infino/test-index/logs/_search";
+        when(mockHttpRequest.uri()).thenReturn(urlString);
+        when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
+
+        RestRequest restRequest = RestRequest.request(null, mockHttpRequest, null);
+        restRequest.params().put("infinoIndex", "test-index");
+        restRequest.params().put("infinoPath", "logs/_search");
+
+        InfinoSerializeRequestURI infinoSerializeRequestURI = new InfinoSerializeRequestURI(restRequest);
+        assertTrue("URL should encode query parameters", infinoSerializeRequestURI.finalUrl.contains("search_logs"));
+        assertTrue("URL should encode query parameters", infinoSerializeRequestURI.finalUrl.contains("start_time"));
+        assertTrue("URL should encode query parameters", infinoSerializeRequestURI.finalUrl.contains("end_time"));
+        assertFalse("URL should encode query parameters", infinoSerializeRequestURI.finalUrl.contains("q"));
     }
 
     public void testPostAppendLogEndpoint() throws Exception {
@@ -197,7 +214,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testUndefinedIndexType() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/_search?text=<error>";
+        String urlString = "http://opensearch/infino/test-index/_search?q=<error>";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
 
@@ -235,7 +252,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testMissingStartTimeDefaultHandling() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/logs/_search?text=error";
+        String urlString = "http://opensearch/infino/test-index/logs/_search?q=error";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
 
@@ -249,7 +266,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testMissingEndTimeDefaultHandling() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/logs/_search?text=error";
+        String urlString = "http://opensearch/infino/test-index/logs/_search?q=error";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
 
@@ -263,7 +280,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testInvalidParameterEncoding() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/logs/_search?text=<error>";
+        String urlString = "http://opensearch/infino/test-index/logs/_search?q=<error>";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
 
@@ -278,7 +295,7 @@ public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
     public void testMethodTypeHandling() throws Exception {
         HttpRequest mockHttpRequest = mock(HttpRequest.class);
-        String urlString = "http://opensearch/infino/test-index/logs/_summarize?text=<error>";
+        String urlString = "http://opensearch/infino/test-index/logs/_summarize?q=<error>";
         when(mockHttpRequest.uri()).thenReturn(urlString);
         when(mockHttpRequest.method()).thenReturn(RestRequest.Method.GET);
 

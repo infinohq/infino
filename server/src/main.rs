@@ -35,7 +35,7 @@ use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::response::IntoResponse;
 use axum::routing::{delete, put};
 use axum::{extract::State, routing::get, routing::post, Json, Router};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use coredb::request_manager::query_dsl_object::QueryDSLObject;
 use crossbeam::atomic::AtomicCell;
 use hyper::StatusCode;
@@ -77,9 +77,9 @@ struct AppState {
 #[derive(Debug, Deserialize, Serialize)]
 /// Represents a logs query.
 struct LogsQuery {
-  text: String,
-  start_time: Option<u64>,
-  end_time: Option<u64>,
+  q: Option<String>,
+  start_time: Option<String>,
+  end_time: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -514,17 +514,30 @@ async fn search_logs(
     logs_query, json_body
   );
 
-  // Pass the deserialized JSON object directly to coredb.search_logs
+  // Attempt to parse start_time if provided
+  let start_time = logs_query
+    .start_time
+    .as_ref()
+    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or_else(|| 0);
+
+  // Attempt to parse end_time if provided
+  let end_time = logs_query
+    .end_time
+    .as_ref()
+    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
+
   let results = state
     .coredb
     .search_logs(
       &index_name,
-      &logs_query.text,
+      &logs_query.q.unwrap_or_default(),
       &json_body,
-      logs_query.start_time.unwrap_or(0),
-      logs_query
-        .end_time
-        .unwrap_or(Utc::now().timestamp_millis() as u64),
+      start_time,
+      end_time,
     )
     .await;
 
@@ -921,14 +934,16 @@ mod tests {
   ) -> Result<(), CoreDBError> {
     let query_start_time = query
       .start_time
+      .as_ref()
       .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
     let query_end_time = query
       .end_time
+      .as_ref()
       .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value))
       .to_owned();
     let query_string = format!(
-      "text={}{}{}",
-      encode(&query.text),
+      "q={}{}{}",
+      encode(&query.q.unwrap().to_string()),
       query_start_time,
       query_end_time
     );
@@ -983,10 +998,23 @@ mod tests {
     sleep(Duration::from_millis(2000)).await;
 
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
-    let start_time = query.start_time.unwrap_or(0);
+    // Attempt to parse start_time if provided
+    let start_time = query
+      .start_time
+      .clone()
+      .as_ref()
+      .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+      .map(|dt| dt.timestamp_millis() as u64)
+      .unwrap_or_else(|| 0);
+
+    // Attempt to parse end_time if provided
     let end_time = query
       .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64);
+      .clone()
+      .as_ref()
+      .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+      .map(|dt| dt.timestamp_millis() as u64)
+      .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
 
     // Handle errors from search_logs
     let log_messages_result = refreshed_coredb
@@ -1303,7 +1331,7 @@ mod tests {
       let query = LogsQuery {
         start_time: None,
         end_time: None,
-        text: search_query.to_owned(),
+        q: Some(search_query.to_owned()),
       };
 
       let index_str = format!("{}+{}", index_name, i);
@@ -1380,7 +1408,7 @@ mod tests {
     let query = LogsQuery {
       start_time: None,
       end_time: None,
-      text: search_query.to_owned(),
+      q: Some(search_query.to_owned()),
     };
     check_search_logs(
       &mut app,
@@ -1394,9 +1422,9 @@ mod tests {
 
     // End time in this query is too old - this should yield 0 results.
     let query_too_old = LogsQuery {
-      start_time: Some(1),
-      end_time: Some(10000),
-      text: search_query.to_owned(),
+      start_time: Some(1.to_string()),
+      end_time: Some(10000.to_string()),
+      q: Some(search_query.to_owned()),
     };
     check_search_logs(
       &mut app,
