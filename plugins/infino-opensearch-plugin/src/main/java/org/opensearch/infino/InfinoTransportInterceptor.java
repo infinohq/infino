@@ -439,6 +439,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             QuerySearchResult queryResult = new QuerySearchResult();
 
             List<SearchHit> searchHitsList = new ArrayList<>();
+
             ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
             SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
             SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
@@ -469,9 +470,11 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                     }
                 }
 
-                SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
-                searchHitsList.add(searchHit);
-                scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
+                if (searchHitsList.size() != 0) {
+                    SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
+                    searchHitsList.add(searchHit);
+                    scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
+                }
                 i++;
             }
 
