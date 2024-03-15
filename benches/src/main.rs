@@ -5,6 +5,7 @@ use crate::logs::clickhouse::ClickhouseEngine;
 use crate::logs::es::ElasticsearchEngine;
 use crate::logs::infino::InfinoEngine;
 use crate::logs::infino_rest::InfinoApiClient;
+use crate::logs::infino_os_rest::InfinoOSApiClient;
 use crate::utils::io::get_directory_size;
 
 use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
@@ -51,14 +52,14 @@ struct Opt {
   stop_after_infino: bool,
 
   #[structopt(short, long)]
-  stop_after_infino_rest: bool,
+  stop_after_infino_os: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let opt = Opt::from_args();
   println!("{:#?}", opt.stop_after_infino);
-  println!("{:#?}", opt.stop_after_infino_rest);
+  println!("{:#?}", opt.stop_after_infino_os);
 
   // Path to the input data to index from. Points to a log file - where each line is indexed
   // as a separate document in the elasticsearch index and the infino index.
@@ -69,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // Maximum number of documents to index. Set this to -1 to index all the documents.
   let max_docs = -1;
-
+ 
   // INFINO START
   println!("\n\n***Now running Infino via CoreDB library***");
 
@@ -122,8 +123,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // INFINO REST END
 
-  if opt.stop_after_infino_rest {
-    println!("stop_after_infino_rest is set. Stopping now...");
+  // INFINO OS REST START
+  println!("\n\n***Now running Infino OpenSearch via the REST API client***");
+
+  // Index the data using infino and find the output size.
+  let infino_os_rest = InfinoOSApiClient::new();
+  let cell_infino_os_rest_index_time = infino_os_rest.index_lines(input_data_path, max_docs).await;
+
+  // Perform search on infino index
+  let cell_infino_os_rest_search_time = 0;
+  let cell_infino_os_rest_search_time = infino_os_rest
+    .search_multiple_queries(INFINO_SEARCH_QUERIES)
+    .await;
+
+  // INFINO OS REST END
+  if opt.stop_after_infino_os {
+    println!("stop_after_infino_os is set. Stopping now...");
     return Ok(());
   }
 
