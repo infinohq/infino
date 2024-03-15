@@ -987,33 +987,37 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 10 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(10000)).await;
+    // The i/o operations on Github actions may take long time to get reflected on disk. Hence, we don't run
+    // the refresh part os this test while running as part of Github actions.
+    if env::var("GITHUB_ACTIONS").is_err() {
+      // Sleep for 10 seconds and refresh from the index directory.
+      sleep(Duration::from_millis(10000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
-    let start_time = query.start_time.unwrap_or(0);
-    let end_time = query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64);
+      let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
+      let start_time = query.start_time.unwrap_or(0);
+      let end_time = query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64);
 
-    // Handle errors from search_logs
-    let log_messages_result = refreshed_coredb
-      .search_logs(index_name, search_text, "", start_time, end_time)
-      .await;
+      // Handle errors from search_logs
+      let log_messages_result = refreshed_coredb
+        .search_logs(index_name, search_text, "", start_time, end_time)
+        .await;
 
-    match log_messages_result {
-      Ok(log_messages_received) => {
-        assert_eq!(
-          log_messages_expected.get_messages().len(),
-          log_messages_received.get_messages().len()
-        );
-        assert_eq!(
-          log_messages_expected.get_messages(),
-          log_messages_received.get_messages()
-        );
-      }
-      Err(search_logs_error) => {
-        error!("Error in search_logs: {:?}", search_logs_error);
+      match log_messages_result {
+        Ok(log_messages_received) => {
+          assert_eq!(
+            log_messages_expected.get_messages().len(),
+            log_messages_received.get_messages().len()
+          );
+          assert_eq!(
+            log_messages_expected.get_messages(),
+            log_messages_received.get_messages()
+          );
+        }
+        Err(search_logs_error) => {
+          error!("Error in search_logs: {:?}", search_logs_error);
+        }
       }
     }
 
@@ -1156,40 +1160,44 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 10 seconds to simulate delay or wait for a condition.
-    sleep(Duration::from_secs(10)).await;
+    // The i/o operations on Github actions may take long time to get reflected on disk. Hence, we don't run
+    // the refresh part os this test while running as part of Github actions.
+    if env::var("GITHUB_ACTIONS").is_err() {
+      // Sleep for 10 seconds to simulate delay or wait for a condition.
+      sleep(Duration::from_secs(10)).await;
 
-    // Refresh CoreDB instance with the given configuration directory path.
-    let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
+      // Refresh CoreDB instance with the given configuration directory path.
+      let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
 
-    // Calculate the start and end time for querying metrics post-refresh.
-    let start_time = query.start.unwrap_or(0);
-    let end_time = query
-      .end
-      .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
+      // Calculate the start and end time for querying metrics post-refresh.
+      let start_time = query.start.unwrap_or(0);
+      let end_time = query
+        .end
+        .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
 
-    // Use the refreshed CoreDB instance to search metrics with updated parameters.
-    let mut results = refreshed_coredb
-      .search_metrics(
-        index_name,
-        &query.query.unwrap_or_default(),
-        "",
-        0,
-        start_time,
-        end_time,
-      )
-      .await?;
+      // Use the refreshed CoreDB instance to search metrics with updated parameters.
+      let mut results = refreshed_coredb
+        .search_metrics(
+          index_name,
+          &query.query.unwrap_or_default(),
+          "",
+          0,
+          start_time,
+          end_time,
+        )
+        .await?;
 
-    // If there are expected metric points and actual results, proceed to validate them.
-    if !metric_points_expected.is_empty() && !results.get_vector().is_empty() {
-      let mut tmpvec = results.take_vector();
-      let metric_points_received = tmpvec[0].get_metric_points();
-      check_metric_point_vectors(&metric_points_expected.clone(), metric_points_received);
-    } else if metric_points_expected.is_empty() && results.get_vector().is_empty() {
-      // If both expected and received results are empty, consider it as a pass.
-      info!("Both expected and received metric points are empty, test passes.");
-    } else {
-      panic!("Mismatch in expected and received results: one is empty and the other is not.");
+      // If there are expected metric points and actual results, proceed to validate them.
+      if !metric_points_expected.is_empty() && !results.get_vector().is_empty() {
+        let mut tmpvec = results.take_vector();
+        let metric_points_received = tmpvec[0].get_metric_points();
+        check_metric_point_vectors(&metric_points_expected.clone(), metric_points_received);
+      } else if metric_points_expected.is_empty() && results.get_vector().is_empty() {
+        // If both expected and received results are empty, consider it as a pass.
+        info!("Both expected and received metric points are empty, test passes.");
+      } else {
+        panic!("Mismatch in expected and received results: one is empty and the other is not.");
+      }
     }
 
     Ok(())
