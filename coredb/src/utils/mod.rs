@@ -13,3 +13,4 @@ pub mod request;
 pub mod sync;
 pub mod time;
 pub mod tokenize;
+pub mod trie;

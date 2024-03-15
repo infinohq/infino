@@ -127,6 +127,28 @@ fn get_args() -> (String, i64, String, bool) {
   (file.clone(), *count, infino_url.clone(), *coredb_only)
 }
 
+async fn create_index(client: &Client, create_index_url: &str) {
+  let response = client
+    .put(create_index_url)
+    .header("Content-Type", "application/json")
+    .body(Body::from(serde_json::to_string("").unwrap()))
+    .send()
+    .await;
+  let status = response.as_ref().unwrap().status();
+  assert_eq!(status, 200);
+}
+
+async fn delete_index(client: &Client, delete_index_url: &str) {
+  let response = client
+    .delete(delete_index_url)
+    .header("Content-Type", "application/json")
+    .body(Body::from(serde_json::to_string("").unwrap()))
+    .send()
+    .await;
+  let status = response.as_ref().unwrap().status();
+  assert_eq!(status, 200);
+}
+
 async fn index_logs_batch(client: &Client, append_url: &str, logs_batch: &Vec<ApacheLogEntry>) {
   loop {
     let response = client
@@ -160,16 +182,20 @@ async fn index(
   let mut logs_batch = Vec::new();
   let now = Instant::now();
   let append_url = &format!("{}/max_docs/append_log", infino_url);
+  let create_delete_index_url = &format!("{}/max_docs", infino_url);
   let client = reqwest::Client::new();
-
-  // User only when coredb_only is set to true.
   let config_dir_path = "../../config";
   let coredb = CoreDB::new(config_dir_path).await.unwrap();
   let index_name = "max_docs";
 
-  let create_result = coredb.create_index(index_name).await;
-  if create_result.is_err() {
-    println!("Received create index error from CoreDB",);
+  // Create index.
+  if coredb_only {
+    let create_result = coredb.create_index(index_name).await;
+    if create_result.is_err() {
+      println!("Received create index error from CoreDB",);
+    }
+  } else {
+    create_index(&client, create_delete_index_url).await;
   }
 
   let file = File::open(file_path).await.unwrap();
@@ -236,9 +262,14 @@ async fn index(
     elapsed, throughout
   );
 
-  let delete_result = coredb.delete_index(index_name).await;
-  if delete_result.is_err() {
-    println!("Received delete index error from CoreDB",);
+  // Delete index.
+  if coredb_only {
+    let delete_result = coredb.delete_index(index_name).await;
+    if delete_result.is_err() {
+      println!("Received delete index error from CoreDB",);
+    }
+  } else {
+    delete_index(&client, create_delete_index_url).await;
   }
 
   Ok(())

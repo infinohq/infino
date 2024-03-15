@@ -280,9 +280,9 @@ impl CoreDB {
   }
 
   /// Commit the index to disk.
-  pub async fn commit(&self, commit_current_segment: bool) -> Result<(), CoreDBError> {
+  pub async fn commit(&self, is_shutdown: bool) -> Result<(), CoreDBError> {
     for index_entry in self.get_index_map() {
-      index_entry.value().commit(commit_current_segment).await?
+      index_entry.value().commit(is_shutdown).await?
     }
 
     Ok(())
@@ -410,7 +410,7 @@ impl CoreDB {
     Ok(())
   }
 
-  /// Flush write ahead log.
+  /// Flush write ahead log for all indices.
   pub async fn flush_wal(&self) {
     // Flush the WAL for the indexes.
     for index_entry in self.get_index_map() {
@@ -473,7 +473,7 @@ mod tests {
   async fn test_coredb_basic() -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "index_test";
+    let index_name = "test_coredb_basic";
     let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();

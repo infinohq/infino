@@ -128,6 +128,7 @@ impl Index {
     let storage = Storage::new(storage_type).await?;
     if !storage.check_path_exists(index_dir_path).await {
       // Index directory does not exist - create it.
+      info!("Creating index directory {}", index_dir_path);
       storage.create_dir(index_dir_path)?;
     }
 
@@ -135,6 +136,7 @@ impl Index {
     let wal_storage = Storage::new(&StorageType::Local).await?;
     if !wal_storage.check_path_exists(wal_dir_path).await {
       // WAL directory does not exist - create it.
+      info!("Creating WAL directory {}", wal_dir_path);
       wal_storage.create_dir(wal_dir_path)?;
     }
 
@@ -941,9 +943,9 @@ mod tests {
   ) -> (Index, String, String, TempDir, TempDir) {
     config_test_logger();
 
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new(&format!("index_test_{}", name)).unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
-    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir = TempDir::new(&format!("wal_test_{}", name)).unwrap();
     let wal_dir_path = format!("{}/{}", wal_dir.path().to_str().unwrap(), name);
     let index = Index::new(storage_type, &index_dir_path, &wal_dir_path)
       .await
@@ -991,7 +993,7 @@ mod tests {
   async fn test_empty_index() {
     is_sync_send::<Index>();
 
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_empty_index").unwrap();
     let index_dir_path = format!(
       "{}/{}",
       index_dir.path().to_str().unwrap(),
@@ -1234,12 +1236,21 @@ mod tests {
     append_metric_point: bool,
   ) -> Result<(), CoreDBError> {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
-    for _ in 0..10 {
+    for i in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
-      let name = &format!("test_two_segments_{}_{}", append_log, append_metric_point);
-      let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      let name = &format!(
+        "test_two_segments_{}_{}_{}",
+        append_log, append_metric_point, i
+      );
+      let (index, index_dir_path, wal_dir_path, index_dir, wal_dir) =
         create_index_with_thresholds(name, &storage_type, 1024 * 1024, 1000, 50000, 10).await;
+
+      info!(
+        "Using index directory {:?} and wal directory {:?}",
+        index_dir.path(),
+        wal_dir.path()
+      );
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path = index.get_segment_dir_path(original_segment_number);
@@ -1715,7 +1726,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_index_dir_does_not_exist() {
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_index_dir_does_not_exist").unwrap();
     let storage_type = StorageType::Local;
 
     // Create a path within index_dir that does not exist.
@@ -1731,7 +1742,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_refresh_does_not_exist() {
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_refresh_does_not_exist").unwrap();
     let temp_path_buf = index_dir.path().join("doesnotexist");
     let storage_type = StorageType::Local;
     let storage = Storage::new(&storage_type)
@@ -1786,7 +1797,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_overlap_multiple_segments() {
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_overlap_multiple_segments").unwrap();
     let index_dir_path = format!(
       "{}/{}",
       index_dir.path().to_str().unwrap(),
@@ -2030,7 +2041,7 @@ mod tests {
   #[tokio::test]
   async fn test_empty_directory_without_metadata() {
     // Create a new index in an empty directory - this should work.
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_empty_directory_without_metadata").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
