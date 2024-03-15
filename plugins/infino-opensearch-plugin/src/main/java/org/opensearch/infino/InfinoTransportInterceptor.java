@@ -34,8 +34,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.text.ParseException;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -43,21 +41,16 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
-import org.opensearch.core.common.io.stream.BytesStreamInput;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
-import org.opensearch.core.common.text.Text;
 import org.opensearch.core.index.shard.ShardId;
-import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.transport.TransportResponse;
-import org.opensearch.index.mapper.ObjectMapper;
 import org.opensearch.infino.InfinoSerializeTransportRequest.InfinoOperation;
 
 import java.lang.reflect.Constructor;
@@ -75,20 +68,15 @@ import org.opensearch.action.OriginalIndices;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.opensearch.action.index.IndexRequest;
-import org.opensearch.action.search.SearchContextId;
 import org.opensearch.action.search.SearchRequest;
-import org.opensearch.action.support.master.AcknowledgedResponse;
 import org.opensearch.common.document.DocumentField;
 import org.opensearch.common.lucene.search.TopDocsAndMaxScore;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.rest.RestRequest;
-import org.opensearch.search.DocValueFormat;
-import org.opensearch.search.RescoreDocIds;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
-import org.opensearch.search.SearchPhaseResult;
 import org.opensearch.search.SearchShardTarget;
 import org.opensearch.search.fetch.FetchSearchResult;
 import org.opensearch.search.fetch.QueryFetchSearchResult;
@@ -106,12 +94,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-import org.json.simple.JSONArray;
-
-import org.opensearch.search.fetch.subphase.FetchSourceContext;
 
 /**
  * Handle transport requests.
@@ -237,7 +219,6 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             @Override
             public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
                 logger.debug("-----------------Received request--------------- " + request.toString());
-
                 if (shouldBeIntercepted(request)) {
                     processTransportActions(request, new ActionListener<TransportResponse>() {
                         @Override
@@ -412,6 +393,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             String indexName,
             InfinoOperation operation,
             TransportRequest transportRequest) {
+
         if (Thread.currentThread().isInterrupted()) {
             logger.warn("Infino Plugin Rest handler thread interrupted. Exiting...");
             Exception e = new Exception("Infino request thread was interrupted.");
@@ -431,9 +413,9 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             // TODO: Parse the error response from Infino
             if (responseCode >= 400 && responseCode <= 499) {
-                throw new IllegalAccessException("Request denied by Infino index");
+                throw new IllegalAccessException("Request denied by Infino index.");
             } else if (responseCode >= 500 && responseCode <= 599) {
-                throw new IOException("Server error returned from Infino index");
+                throw new IOException("Server error returned from Infino index.");
             }
 
             Gson gson = new Gson();
@@ -457,7 +439,12 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             QuerySearchResult queryResult = new QuerySearchResult();
 
             List<SearchHit> searchHitsList = new ArrayList<>();
+            ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
+            SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
+            SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
+            TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
 
+            int i = 0;
             for (JsonElement hitElement : hitsArray) {
                 JsonObject hitObj = hitElement.getAsJsonObject();
                 JsonObject sourceObj = hitObj.getAsJsonObject("_source");
@@ -484,24 +471,10 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
                 SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
                 searchHitsList.add(searchHit);
+                scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
+                i++;
             }
 
-            SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
-            SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
-
-            // You might need to convert your SearchHits to Lucene's TopDocs for the
-            // QuerySearchResult
-            ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
-            for (int i = 0; i < searchHitsList.size(); i++) {
-                SearchHit hit = searchHitsList.get(i);
-                // Note: ScoreDoc requires docID (int) and score (float); adjust as needed.
-                // This is a simplified example. You might have more relevant docID and score
-                // info based on your actual data.
-                scoreDocs[i] = new ScoreDoc(i, hit.getScore());
-            }
-            TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
-
-            // Assuming you can create TopDocsAndMaxScore from TopDocs
             TopDocsAndMaxScore topDocsAndMaxScore = new TopDocsAndMaxScore(topDocs, maxScore);
             queryResult.topDocs(topDocsAndMaxScore, null); // Assuming no sortValueFormats
             queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
@@ -519,7 +492,6 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             logger.debug("Response to Search Request is " + queryFetchSearchResult);
 
-            // Send the QueryFetchSearchResult back to the listener
             listener.onResponse(queryFetchSearchResult);
         } catch (JsonParseException | IOException e) {
             logger.error("Error parsing or retrieving Infino response", e);

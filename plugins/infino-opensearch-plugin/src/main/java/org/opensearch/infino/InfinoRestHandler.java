@@ -287,10 +287,8 @@ public class InfinoRestHandler extends BaseRestHandler {
      * node.
      *
      * The first half of the method (before the thread executor) is parallellized by
-     * OpenSearch's
-     * REST thread pool so we can serialize in parallel. However network calls use
-     * our own
-     * privileged thread factory.
+     * OpenSearch's REST thread pool so we can serialize in parallel. However
+     * network calls use our own privileged thread factory.
      *
      * We exponentially backoff for 429, 503, and 504 responses
      *
