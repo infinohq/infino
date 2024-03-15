@@ -1160,16 +1160,11 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-<<<<<<< HEAD
     // The i/o operations on Github actions may take long time to get reflected on disk. Hence, we don't run
     // the refresh part os this test while running as part of Github actions.
     if env::var("GITHUB_ACTIONS").is_err() {
       // Sleep for 10 seconds to simulate delay or wait for a condition.
       sleep(Duration::from_secs(10)).await;
-=======
-    // Sleep for 10 seconds to simulate delay or wait for a condition.
-    sleep(Duration::from_secs(10)).await;
->>>>>>> origin
 
       // Refresh CoreDB instance with the given configuration directory path.
       let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
