@@ -985,8 +985,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 2 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(2000)).await;
+    // Sleep for 5 seconds and refresh from the index directory.
+    sleep(Duration::from_millis(5000)).await;
 
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
@@ -1154,8 +1154,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 2 seconds to simulate delay or wait for a condition.
-    sleep(Duration::from_secs(2)).await;
+    // Sleep for 5 seconds to simulate delay or wait for a condition.
+    sleep(Duration::from_secs(5)).await;
 
     // Refresh CoreDB instance with the given configuration directory path.
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
