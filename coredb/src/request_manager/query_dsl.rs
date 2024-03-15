@@ -141,23 +141,36 @@ impl Segment {
   }
 
   /// Sets the fieldname based on the given node
-  fn set_fieldname<'a>(&self, node: Pair<'a, Rule>, fieldname: &mut Option<&'a str>) {
-    if let Some(field) = node.into_inner().next() {
-      *fieldname = Some(field.as_str());
+  fn set_fieldname(&self, node: &Pair<'_, Rule>, fieldname: &mut Option<&str>) {
+    if let Some(field) = node.clone().into_inner().next() {
+      let cloned_field = field.as_str().to_string();
+      *fieldname = Some(Box::leak(cloned_field.into_boxed_str()));
+    } else {
+      *fieldname = None;
     }
   }
 
   /// Sets the case_insensitive flag based on the given node
-  fn set_case_insensitive(&self, node: Pair<'_, Rule>, case_insensitive: &mut bool, default: bool) {
-    if let Some(value) = node.into_inner().next() {
+  fn set_case_insensitive(
+    &self,
+    node: &Pair<'_, Rule>,
+    case_insensitive: &mut bool,
+    default: bool,
+  ) {
+    if let Some(value) = node.clone().into_inner().next() {
       *case_insensitive = value.as_str().parse().unwrap_or(default);
+    } else {
+      *case_insensitive = default;
     }
   }
 
   /// Extracts the query text from the given node
-  fn extract_query_text<'a>(&self, node: Pair<'a, Rule>, query_text: &mut Option<&'a str>) {
-    if query_text.is_none() {
-      *query_text = node.into_inner().next().map(|v| v.as_str());
+  fn set_query_text(&self, node: &Pair<'_, Rule>, query_text: &mut Option<&str>) {
+    if let Some(value) = node.clone().into_inner().next() {
+      let cloned_value = value.as_str().to_string();
+      *query_text = Some(Box::leak(cloned_value.into_boxed_str()));
+    } else {
+      *query_text = None;
     }
   }
 
@@ -306,9 +319,9 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
-        Rule::value => self.extract_query_text(node, &mut query_text),
-        Rule::case_insensitive => self.set_case_insensitive(node, &mut case_insensitive, false),
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::value => self.set_query_text(&node, &mut query_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, false),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -360,7 +373,7 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
         Rule::field_element => {
           query_values.push(node.into_inner().next().map(|v| v.as_str()).unwrap_or(""));
         }
@@ -422,12 +435,12 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
         Rule::operator => {
           term_operator = node.into_inner().next().map_or("OR", |v| v.as_str());
         }
-        Rule::match_string | Rule::query => self.extract_query_text(node, &mut query_text),
-        Rule::case_insensitive => self.set_case_insensitive(node, &mut case_insensitive, true),
+        Rule::match_string | Rule::query => self.set_query_text(&node, &mut query_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, true),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -476,8 +489,8 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
-        Rule::match_phrase_string | Rule::query => self.extract_query_text(node, &mut query_text),
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::match_phrase_string | Rule::query => self.set_query_text(&node, &mut query_text),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -541,9 +554,9 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => self.set_fieldname(node, &mut fieldname),
-        Rule::prefix_string | Rule::value => self.extract_query_text(node, &mut prefix_text),
-        Rule::case_insensitive => self.set_case_insensitive(node, &mut case_insensitive, false),
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::prefix_string | Rule::value => self.set_query_text(&node, &mut prefix_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, false),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -558,7 +571,7 @@ impl Segment {
           analyze_query_text(prefix_text_str, Some(field), case_insensitive).await;
 
         match self
-          .retrieve_doc_ids_with_prefix_phrase(
+          .get_doc_ids_with_prefix_phrase(
             prefix_phrase_terms,
             field,
             prefix_text_str.trim_matches('"'),

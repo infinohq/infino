@@ -207,7 +207,7 @@ impl Segment {
     // Increment the number of log messages appended so far, and get the id for this log message.
     let log_message_id = self.metadata.fetch_increment_log_message_count();
 
-    let trie = Arc::clone(&self.trie);
+    let trie = self.trie.clone();
 
     // Update the inverted map.
     terms.into_iter().for_each(|term| {

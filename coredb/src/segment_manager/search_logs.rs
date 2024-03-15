@@ -538,7 +538,7 @@ impl Segment {
   /// * `prefix_text_str` - The exact prefix text string to match.
   /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
   ///
-  pub async fn retrieve_doc_ids_with_prefix_phrase(
+  pub async fn get_doc_ids_with_prefix_phrase(
     &self,
     prefix_phrase_terms: Vec<String>,
     field: &str,
