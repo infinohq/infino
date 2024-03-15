@@ -149,10 +149,6 @@ impl CoreDB {
     &self.index_map
   }
 
-  pub fn get_index_map(&self) -> &DashMap<String, Index> {
-    &self.index_map
-  }
-
   pub async fn append_log_message(
     &self,
     index_name: &str,
@@ -416,13 +412,10 @@ impl CoreDB {
 
   /// Flush write ahead log.
   pub async fn flush_wal(&self) {
-    // Get the default index.
-    let default_index_name = self.get_default_index_name();
-    let temp_reference = self.index_map.get(default_index_name).unwrap();
-    let index = temp_reference.value();
-
-    // Flush the WAL for the index.
-    index.flush_wal().await;
+    // Flush the WAL for the indexes.
+    for index_entry in self.get_index_map() {
+      index_entry.value().flush_wal().await;
+    }
   }
 }
 
