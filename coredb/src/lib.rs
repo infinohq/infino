@@ -412,8 +412,9 @@ impl CoreDB {
 
   /// Flush write ahead log for all indices.
   pub async fn flush_wal(&self) {
+    // Flush the WAL for the indexes.
     for index_entry in self.get_index_map() {
-      index_entry.value().flush_wal().await
+      index_entry.value().flush_wal().await;
     }
   }
 }
