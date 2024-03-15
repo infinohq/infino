@@ -50,12 +50,33 @@ $ cd benches
 $ cargo run -r
 ```
 
-## Run only Infino
+## Run only specific benchmarks
 
 Sometimes, you may want to run only Infino to see its resource usage, or profile the code. In this scenario, to run only Infino, use:
+Sometimes, you may want to run only specific benchmarks, for example only Infino via REST API and Elastic, or only Infino via REST API. To do so you can use,
 ```
-$ cargo run -r -- --stop-after-infino
+$ cargo run -r -- --infino-rest --elastic
 ```
+
+## Run with different datasets
+To use a different log file as input data use `--input-file` option as shown below.
+```
+$ cargo run -r -- --infino-rest --input-file=data/Apache_2G.log
+```
+
+## All run time option
+Below are the options to run the benchmarks.
+```
+--infino
+--infino-rest
+--infino-os
+--elastic
+--clickhouse
+--infino-metrics
+--prometheus
+--input-file=<path to input file>
+```
+
 
 ## Results (Apache log - small):
 
