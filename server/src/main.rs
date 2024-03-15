@@ -755,6 +755,7 @@ async fn search_metrics(
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
+  let _ = state.coredb.flush_wal().await;
   let result = state.coredb.commit(true).await;
 
   match result {
