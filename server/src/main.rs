@@ -15,7 +15,7 @@
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
 
-mod commit;
+mod background_threads;
 mod queue_manager;
 mod utils;
 
@@ -53,7 +53,7 @@ use coredb::utils::error::{CoreDBError, QueryError};
 use coredb::utils::request::parse_time_range;
 use coredb::CoreDB;
 
-use crate::commit::commit_in_loop;
+use crate::background_threads::check_and_start_background_threads;
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
@@ -163,8 +163,9 @@ async fn app(
   });
 
   // Start a thread to periodically commit coredb.
-  info!("Spawning new thread to periodically commit");
-  let commit_thread_handle = tokio::spawn(commit_in_loop(shared_state.clone()));
+  info!("Spawning background threads for commit, and other tasks...");
+  let background_threads_handle =
+    tokio::spawn(check_and_start_background_threads(shared_state.clone()));
 
   // Build our application with a route
   let router: Router = Router::new()
@@ -192,7 +193,7 @@ async fn app(
     // Make the default for body to be 5MB (instead of 2MB http default.)
     .layer(DefaultBodyLimit::max(5 * 1024 * 1024));
 
-  (router, commit_thread_handle, shared_state)
+  (router, background_threads_handle, shared_state)
 }
 
 async fn run_server() {
@@ -204,7 +205,8 @@ async fn run_server() {
   let image_tag = "3";
 
   // Create app.
-  let (app, commit_thread_handle, shared_state) = app(config_dir_path, image_name, image_tag).await;
+  let (app, background_threads_handle, shared_state) =
+    app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -235,12 +237,12 @@ async fn run_server() {
       .expect("Could not stop rabbitmq container");
   }
 
-  // Set the flag to indicate the commit thread to shutdown, and wait for it to finish.
+  // Set the flag to indicate the background threads to shutdown, and wait for them to finish.
   IS_SHUTDOWN.store(true);
-  info!("Shutting down commit thread and waiting for it to finish...");
-  commit_thread_handle
+  info!("Shutting down background threads and waiting for it to finish...");
+  background_threads_handle
     .await
-    .expect("Error while completing the commit thread");
+    .expect("Error while shutting down the background threads");
 
   info!("Completed Infino server shutdown");
 }
@@ -753,6 +755,7 @@ async fn search_metrics(
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
+  let _ = state.coredb.flush_wal().await;
   let result = state.coredb.commit(true).await;
 
   match result {
@@ -982,8 +985,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 2 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(2000)).await;
+    // Sleep for 5 seconds and refresh from the index directory.
+    sleep(Duration::from_millis(5000)).await;
 
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
@@ -1151,8 +1154,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 2 seconds to simulate delay or wait for a condition.
-    sleep(Duration::from_secs(2)).await;
+    // Sleep for 5 seconds to simulate delay or wait for a condition.
+    sleep(Duration::from_secs(5)).await;
 
     // Refresh CoreDB instance with the given configuration directory path.
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
