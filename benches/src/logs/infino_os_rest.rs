@@ -88,7 +88,7 @@ impl InfinoOSApiClient {
   /// Searches the given term and returns the time required in microseconds
   pub async fn search_logs(&self, text: &str, range_start_time: u64, range_end_time: u64) -> u128 {
     let query_url = &format!(
-      "http://localhost:9200/infino/perfindex/logs?text={}&startTime={}&endTime={}",
+      "http://localhost:9200/infino/perfindex/logs/_search?text={}&startTime={}&endTime={}",
       text, range_start_time, range_end_time
     );
 
