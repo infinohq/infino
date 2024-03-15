@@ -50,7 +50,7 @@ use tracing_subscriber::EnvFilter;
 
 use coredb::utils::environment::load_env;
 use coredb::utils::error::{CoreDBError, QueryError};
-use coredb::utils::request::parse_time_range;
+use coredb::utils::request::{check_query_time, parse_time_range};
 use coredb::CoreDB;
 
 use crate::background_threads::check_and_start_background_threads;
@@ -325,12 +325,17 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
 }
 
 /// Append log data to CoreDB.
+#[allow(unused_assignments)]
 async fn append_log(
   State(state): State<Arc<AppState>>,
   Path(index_name): Path<String>,
   Json(log_json): Json<serde_json::Value>,
-) -> Result<(), (StatusCode, String)> {
+) -> Result<String, (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
+
+  let append_start_time = Utc::now().timestamp_millis() as u64;
+
+  let mut response = String::new();
 
   state
     .wal_file
@@ -350,6 +355,8 @@ async fn append_log(
 
   let server_settings = state.settings.get_server_settings();
   let timestamp_key = server_settings.get_timestamp_key();
+
+  let mut items = Vec::new(); // Initialize vector to store items in bulk response
 
   for obj in log_json_objects {
     let obj_string = serde_json::to_string(&obj).unwrap();
@@ -391,19 +398,60 @@ async fn append_log(
       .append_log_message(&index_name, timestamp, &fields, &text)
       .await;
 
-    if let Err(error) = result {
-      match error {
-        CoreDBError::TooManyAppendsError() => {
-          return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
-        }
-        _ => {
-          println!("An unexpected error occurred.");
-        }
+    match result {
+      Ok(doc_id) => {
+        debug!("-----------------------result from append {:?}", result);
+
+        let index_item = json!({
+            "index": {
+                "_index": "my_index",
+                "_type": "_doc",
+                "_id": doc_id,
+                "_version": 1,
+                "result": "created",
+                "_shards": {
+                    "total": 1,
+                    "successful": 1,
+                    "failed": 0
+                },
+                "_seq_no": 0,
+                "_primary_term": 1
+            }
+        });
+        items.push(index_item);
+      }
+      Err(error) => {
+        match error {
+          CoreDBError::TooManyAppendsError() => {
+            return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()))
+          }
+          CoreDBError::IndexNotFound(_) => {
+            return Err((StatusCode::BAD_REQUEST, "Could not find index".to_string()))
+          }
+          _ => {
+            return Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "An unexpected error occurred".to_string(),
+            ));
+          }
+        };
       }
     }
   }
 
-  Ok(())
+  // Constructing the bulk response JSON
+  let response_json = json!({
+      // Check_query_time will not throw an error when timeout is 0. Fine to unwrap().
+      "took": check_query_time(0, append_start_time).unwrap(),
+      "errors": false,
+      "items": items
+  });
+
+  // Serialize the JSON response
+  response =
+    serde_json::to_string(&response_json).expect("Could not convert append response to JSON");
+
+  Ok(response)
 }
 
 /// Append metric data to CoreDB.

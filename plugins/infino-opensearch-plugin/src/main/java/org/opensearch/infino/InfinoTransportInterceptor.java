@@ -419,83 +419,89 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             }
 
             Gson gson = new Gson();
-            JsonElement element = gson.fromJson(responseBody, JsonElement.class);
-            if (!element.isJsonObject()) {
-                throw new JsonParseException("Expected JSON object but found different structure");
-            }
 
-            JsonObject rootObj = element.getAsJsonObject();
-
-            JsonObject hitsObject = rootObj.getAsJsonObject("hits");
-            if (hitsObject == null) {
-                throw new JsonParseException("Response JSON does not contain 'hits' object");
-            }
-
-            JsonArray hitsArray = hitsObject.getAsJsonArray("hits");
-            long totalHitsValue = hitsObject.getAsJsonObject("total").get("value").getAsLong();
-            float maxScore = hitsObject.get("max_score").getAsFloat();
-            TotalHits totalHits = new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO);
-
-            QuerySearchResult queryResult = new QuerySearchResult();
-
-            List<SearchHit> searchHitsList = new ArrayList<>();
-
-            ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
-            SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
-            SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
-            TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
-
-            int i = 0;
-            for (JsonElement hitElement : hitsArray) {
-                JsonObject hitObj = hitElement.getAsJsonObject();
-                JsonObject sourceObj = hitObj.getAsJsonObject("_source");
-
-                String id = hitObj.get("_id").getAsString();
-                int docId = Integer.parseInt(id); // Ensure this ID parsing is what you intend, or handle exceptions
-
-                Map<String, DocumentField> documentFields = new HashMap<>();
-                Map<String, DocumentField> metaFields = new HashMap<>();
-
-                for (Map.Entry<String, JsonElement> entry : sourceObj.entrySet()) {
-                    documentFields.put(entry.getKey(),
-                            new DocumentField(entry.getKey(),
-                                    Collections.singletonList(entry.getValue().getAsString())));
+            if (operation == InfinoOperation.SEARCH_DOCUMENTS) {
+                JsonElement element = gson.fromJson(responseBody, JsonElement.class);
+                if (!element.isJsonObject()) {
+                    throw new JsonParseException("Expected JSON object but found different structure");
                 }
 
-                for (Map.Entry<String, JsonElement> entry : hitObj.entrySet()) {
-                    if (!entry.getKey().equals("_source")) {
-                        metaFields.put(entry.getKey(),
+                JsonObject rootObj = element.getAsJsonObject();
+
+                JsonObject hitsObject = rootObj.getAsJsonObject("hits");
+                if (hitsObject == null) {
+                    throw new JsonParseException("Response JSON does not contain 'hits' object");
+                }
+
+                JsonArray hitsArray = hitsObject.getAsJsonArray("hits");
+                long totalHitsValue = hitsObject.getAsJsonObject("total").get("value").getAsLong();
+                float maxScore = hitsObject.get("max_score").getAsFloat();
+                TotalHits totalHits = new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO);
+
+                QuerySearchResult queryResult = new QuerySearchResult();
+
+                List<SearchHit> searchHitsList = new ArrayList<>();
+
+                ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
+                SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
+                SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
+                TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
+
+                int i = 0;
+                for (JsonElement hitElement : hitsArray) {
+                    JsonObject hitObj = hitElement.getAsJsonObject();
+                    JsonObject sourceObj = hitObj.getAsJsonObject("_source");
+
+                    String id = hitObj.get("_id").getAsString();
+                    int docId = Integer.parseInt(id); // Ensure this ID parsing is what you intend, or handle exceptions
+
+                    Map<String, DocumentField> documentFields = new HashMap<>();
+                    Map<String, DocumentField> metaFields = new HashMap<>();
+
+                    for (Map.Entry<String, JsonElement> entry : sourceObj.entrySet()) {
+                        documentFields.put(entry.getKey(),
                                 new DocumentField(entry.getKey(),
-                                        Collections.singletonList(entry.getValue().toString())));
+                                        Collections.singletonList(entry.getValue().getAsString())));
                     }
+
+                    for (Map.Entry<String, JsonElement> entry : hitObj.entrySet()) {
+                        if (!entry.getKey().equals("_source")) {
+                            metaFields.put(entry.getKey(),
+                                    new DocumentField(entry.getKey(),
+                                            Collections.singletonList(entry.getValue().toString())));
+                        }
+                    }
+
+                    if (searchHitsList.size() != 0) {
+                        SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
+                        searchHitsList.add(searchHit);
+                        scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
+                    }
+                    i++;
                 }
 
-                if (searchHitsList.size() != 0) {
-                    SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
-                    searchHitsList.add(searchHit);
-                    scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
-                }
-                i++;
+                TopDocsAndMaxScore topDocsAndMaxScore = new TopDocsAndMaxScore(topDocs, maxScore);
+                queryResult.topDocs(topDocsAndMaxScore, null); // Assuming no sortValueFormats
+                queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
+
+                ShardSearchContextId contextId = new ShardSearchContextId("contextIdString", 1L);
+                SearchShardTarget shardTarget = new SearchShardTarget("nodeId", new ShardId(indexName, "indexUuid", 1),
+                        "clusterAlias", OriginalIndices.NONE);
+
+                FetchSearchResult fetchSearchResult = new FetchSearchResult(contextId, shardTarget);
+                fetchSearchResult.hits(searchHits);
+
+                // Create QueryFetchSearchResult with both query and fetch results
+                QueryFetchSearchResult queryFetchSearchResult = new QueryFetchSearchResult(queryResult,
+                        fetchSearchResult);
+                queryFetchSearchResult.setSearchShardTarget(shardTarget);
+
+                logger.debug("Response to Search Request is " + queryFetchSearchResult);
+
+                listener.onResponse(queryFetchSearchResult);
+            } else if (operation == InfinoOperation.INDEX_DOCUMENTS) {
+                
             }
-
-            TopDocsAndMaxScore topDocsAndMaxScore = new TopDocsAndMaxScore(topDocs, maxScore);
-            queryResult.topDocs(topDocsAndMaxScore, null); // Assuming no sortValueFormats
-            queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
-
-            ShardSearchContextId contextId = new ShardSearchContextId("contextIdString", 1L);
-            SearchShardTarget shardTarget = new SearchShardTarget("nodeId", new ShardId(indexName, "indexUuid", 1),
-                    "clusterAlias", OriginalIndices.NONE);
-
-            FetchSearchResult fetchSearchResult = new FetchSearchResult(contextId, shardTarget);
-            fetchSearchResult.hits(searchHits);
-
-            // Create QueryFetchSearchResult with both query and fetch results
-            QueryFetchSearchResult queryFetchSearchResult = new QueryFetchSearchResult(queryResult, fetchSearchResult);
-            queryFetchSearchResult.setSearchShardTarget(shardTarget);
-
-            logger.debug("Response to Search Request is " + queryFetchSearchResult);
-
-            listener.onResponse(queryFetchSearchResult);
         } catch (JsonParseException | IOException e) {
             logger.error("Error parsing or retrieving Infino response", e);
             listener.onFailure(e);
