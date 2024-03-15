@@ -868,6 +868,7 @@ mod tests {
   fn create_test_config(
     config_dir_path: &str,
     index_dir_path: &str,
+    wal_dir_path: &str,
     container_name: &str,
     use_rabbitmq: bool,
   ) {
@@ -879,6 +880,7 @@ mod tests {
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let default_index_name = format!("default_index_name = \"{}\"\n", "default");
+      let wal_dir_path_line = format!("wal_dir_path = \"{}\"\n", wal_dir_path);
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = use_rabbitmq
         .then(|| "yes".to_string())
@@ -896,6 +898,7 @@ mod tests {
       // Write coredb section.
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file.write_all(wal_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name.as_bytes()).unwrap();
       file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file.write_all(b"metric_points_threshold = 1000\n").unwrap();
@@ -1232,11 +1235,14 @@ mod tests {
     let index_name = "index_test";
     let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
 
     create_test_config(
       config_dir_path,
       index_dir_path,
+      wal_dir_path,
       container_name,
       use_rabbitmq,
     );
@@ -1551,9 +1557,17 @@ mod tests {
     let index_name = "index_test";
     let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
 
-    create_test_config(config_dir_path, index_dir_path, container_name, false);
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      wal_dir_path,
+      container_name,
+      false,
+    );
 
     // Create the app.
     let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
@@ -1608,6 +1622,8 @@ mod tests {
     let index_name = "index_test";
     let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
     let storage = Storage::new(&StorageType::Local)
       .await
@@ -1616,6 +1632,7 @@ mod tests {
     create_test_config(
       config_dir_path,
       index_dir_path,
+      wal_dir_path,
       container_name,
       use_rabbitmq,
     );

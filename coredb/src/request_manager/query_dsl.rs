@@ -545,10 +545,10 @@ mod tests {
   use super::*;
   use pest::Parser;
 
-  fn create_mock_segment() -> Segment {
+  async fn create_mock_segment() -> Segment {
     config_test_logger();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     let log_messages = [
       ("log 1", "this is a test log message"),
@@ -571,7 +571,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_must_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -611,7 +611,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_should_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -652,7 +652,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_must_not_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -685,7 +685,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_boolean_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
         "query": {
@@ -730,7 +730,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -768,7 +768,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_phrase_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -810,7 +810,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_all_query_with_multiple_terms_anded() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
         "query": {
@@ -852,7 +852,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_all_query_with_multiple_terms() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -893,7 +893,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_all_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -926,7 +926,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_term_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -959,7 +959,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_terms_array_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
         "query": {
@@ -995,7 +995,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_nested_boolean_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
         "query": {

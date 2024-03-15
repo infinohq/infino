@@ -45,6 +45,7 @@ class InfinoClientTestCase(unittest.TestCase):
         # Test the append_log method
         payload = {"date": current_time, "message": "my message one"}
         response = self.client.append_log("default", payload)
+        response = self.client.append_log("default", payload)
         self.assertEqual(response.status_code, 200)
 
         payload = {"date": current_time, "message": "my message two"}
