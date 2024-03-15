@@ -943,9 +943,9 @@ mod tests {
   ) -> (Index, String, String, TempDir, TempDir) {
     config_test_logger();
 
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new(&format!("index_test_{}", name)).unwrap();
     let index_dir_path = format!("{}/{}", index_dir.path().to_str().unwrap(), name);
-    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir = TempDir::new(&format!("wal_test_{}", name)).unwrap();
     let wal_dir_path = format!("{}/{}", wal_dir.path().to_str().unwrap(), name);
     let index = Index::new(storage_type, &index_dir_path, &wal_dir_path)
       .await
@@ -993,7 +993,7 @@ mod tests {
   async fn test_empty_index() {
     is_sync_send::<Index>();
 
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_empty_index").unwrap();
     let index_dir_path = format!(
       "{}/{}",
       index_dir.path().to_str().unwrap(),
@@ -1717,7 +1717,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_index_dir_does_not_exist() {
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_index_dir_does_not_exist").unwrap();
     let storage_type = StorageType::Local;
 
     // Create a path within index_dir that does not exist.
@@ -1733,7 +1733,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_refresh_does_not_exist() {
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_refresh_does_not_exist").unwrap();
     let temp_path_buf = index_dir.path().join("doesnotexist");
     let storage_type = StorageType::Local;
     let storage = Storage::new(&storage_type)
@@ -1788,7 +1788,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_overlap_multiple_segments() {
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_overlap_multiple_segments").unwrap();
     let index_dir_path = format!(
       "{}/{}",
       index_dir.path().to_str().unwrap(),
@@ -2032,7 +2032,7 @@ mod tests {
   #[tokio::test]
   async fn test_empty_directory_without_metadata() {
     // Create a new index in an empty directory - this should work.
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_dir = TempDir::new("test_empty_directory_without_metadata").unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();

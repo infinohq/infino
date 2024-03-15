@@ -1,0 +1,1554 @@
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.90s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.28s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.98s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.10s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.09s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.27s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.25s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.14s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.05s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.61s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.45s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.22s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.40s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.42s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.21s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.20s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.28s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.17s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.18s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.23s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.54s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.42s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.27s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.24s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.03s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.31s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.27s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.29s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.31s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.63s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.60s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.40s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.58s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.62s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.37s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.36s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.44s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.34s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.41s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.05s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.29s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.15s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.43s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.30s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.13s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.30s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.39s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.49s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.27s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.32s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.28s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.17s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.19s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.20s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.28s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.26s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.23s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.26s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.29s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.52s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.81s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.42s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.11s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.57s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.10s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.08s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.21s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.26s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.33s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.32s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.23s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.23s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.27s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.24s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.18s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.26s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.27s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.28s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.25s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.28s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.26s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.97s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.27s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.27s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.27s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 148.17s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+    Finished dev [unoptimized + debuginfo] target(s) in 0.20s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.02s
+
+    Finished test [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test tests::test_body_limit ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds
+test tests::test_basic_main::do_not_use_rabbitmq ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.65s
+
+     Running tests/startup.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/startup-d7085ee46717fadc)
+
+running 1 test
+   Compiling infino v0.1.0 (/Users/vinaykakade/ws/infinohq/infino/server)
+    Finished dev [unoptimized + debuginfo] target(s) in 4.21s
+     Running `/Users/vinaykakade/ws/infinohq/infino/target/debug/infino infino`
+test test_cargo_run_infino has been running for over 60 seconds
+test test_cargo_run_infino ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.01s
+
+   Compiling infino v0.1.0 (/Users/vinaykakade/ws/infinohq/infino/server)
+    Finished test [unoptimized + debuginfo] target(s) in 3.01s
+     Running unittests src/main.rs (/Users/vinaykakade/ws/infinohq/infino/target/debug/deps/infino-1994bfa68c7eb54f)
+
+running 11 tests
+test utils::openai_helper::tests::test_summarize_no_openai_key ... ok
+test utils::settings::tests::test_settings ... ok
+test utils::docker::tests::test_start_error ... ok
+test utils::docker::tests::test_stop_error ... ok
+test utils::docker::tests::test_remove_error ... ok
+test tests::test_create_delete_index::do_not_use_rabbitmq ... ok
+test utils::openai_helper::tests::test_summarize_invalid_openai_key ... ok
+test tests::test_body_limit ... ok
+test utils::docker::tests::test_commands ... ok
+test queue_manager::queue::tests::test_queue ... ok
+test tests::test_basic_main::do_not_use_rabbitmq has been running for over 60 seconds

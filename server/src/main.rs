@@ -756,6 +756,8 @@ async fn search_metrics(
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
   let _ = state.coredb.flush_wal().await;
+
+  // Flush entire index, including the current segment.
   let result = state.coredb.commit(true).await;
 
   match result {
@@ -951,7 +953,7 @@ mod tests {
     let result = app.call(request).await;
 
     if let Ok(response) = result {
-      // assert_eq!(response.status(), StatusCode::OK);
+      assert_eq!(response.status(), StatusCode::OK);
       let body = response.into_body();
       let max_body_size = 10 * 1024 * 1024; // Example: 10MB limit
       let bytes = to_bytes(body, max_body_size)
@@ -985,8 +987,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 5 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(5000)).await;
+    // Sleep for 10 seconds and refresh from the index directory.
+    sleep(Duration::from_millis(10000)).await;
 
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
     let start_time = query.start_time.unwrap_or(0);
@@ -1154,8 +1156,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 5 seconds to simulate delay or wait for a condition.
-    sleep(Duration::from_secs(5)).await;
+    // Sleep for 10 seconds to simulate delay or wait for a condition.
+    sleep(Duration::from_secs(10)).await;
 
     // Refresh CoreDB instance with the given configuration directory path.
     let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
@@ -1200,7 +1202,7 @@ mod tests {
   async fn test_basic_main(use_rabbitmq: bool) -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "index_test";
+    let index_name = "test_basic_main_test";
     let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
