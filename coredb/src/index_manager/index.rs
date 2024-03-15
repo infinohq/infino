@@ -1236,12 +1236,21 @@ mod tests {
     append_metric_point: bool,
   ) -> Result<(), CoreDBError> {
     // We run this test multiple times, as it works well to find deadlocks (and doesn't take as much as time as a full test using loom).
-    for _ in 0..10 {
+    for i in 0..10 {
       let storage_type = StorageType::Local;
       let storage = Storage::new(&storage_type).await?;
-      let name = &format!("test_two_segments_{}_{}", append_log, append_metric_point);
-      let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      let name = &format!(
+        "test_two_segments_{}_{}_{}",
+        append_log, append_metric_point, i
+      );
+      let (index, index_dir_path, wal_dir_path, index_dir, wal_dir) =
         create_index_with_thresholds(name, &storage_type, 1024 * 1024, 1000, 50000, 10).await;
+
+      info!(
+        "Using index directory {:?} and wal directory {:?}",
+        index_dir.path(),
+        wal_dir.path()
+      );
 
       let original_segment_number = index.metadata.get_current_segment_number();
       let original_segment_path = index.get_segment_dir_path(original_segment_number);
