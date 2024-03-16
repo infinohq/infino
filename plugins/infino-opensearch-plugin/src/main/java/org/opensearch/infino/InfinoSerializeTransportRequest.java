@@ -18,6 +18,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.common.xcontent.XContentFactory;
@@ -27,7 +28,6 @@ import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.internal.ShardSearchRequest;
-import org.opensearch.transport.TransportRequest;
 
 import static org.opensearch.rest.RestRequest.Method.*;
 
@@ -87,30 +87,28 @@ public class InfinoSerializeTransportRequest {
      * Constructor. Takes a request and serializes it to the protected member
      * {@code finalUrl}.
      *
-     * @param request The request to be serialized.
+     * @param request   The request to be serialized.
+     * @param operation the operation associated with the request
      * @throws IOException If an I/O error occurs during the serialization process.
      */
-    public InfinoSerializeTransportRequest(TransportRequest request) throws IOException {
-        if (request instanceof IndexRequest) {
-            IndexRequest indexRequest = (IndexRequest) request;
-            parseRequest(indexRequest);
-            constructInfinoRequestURI();
-        } else if (request instanceof ShardSearchRequest) {
-            ShardSearchRequest searchRequest = (ShardSearchRequest) request;
-            parseRequest(searchRequest);
-            constructInfinoRequestURI();
-        } else if (request instanceof CreateIndexRequest) {
-            CreateIndexRequest createIndexRequest = (CreateIndexRequest) request;
-            parseRequest(createIndexRequest);
-            constructInfinoRequestURI();
-        } else if (request instanceof DeleteIndexRequest) {
-            DeleteIndexRequest deleteIndexRequest = (DeleteIndexRequest) request;
-            parseRequest(deleteIndexRequest);
-            constructInfinoRequestURI();
-        } else {
-            throw new IllegalArgumentException(
-                    "Unsupported transport request type: " + request.getClass().getSimpleName());
-        }
+    public InfinoSerializeTransportRequest(BulkShardRequest request, InfinoOperation operation) throws IOException {
+        this.operation = operation;
+        parseRequest(request);
+        constructInfinoRequestURI();
+    }
+
+    /**
+     * Constructor. Takes a request and serializes it to the protected member
+     * {@code finalUrl}.
+     *
+     * @param request   The request to be serialized.
+     * @param operation the operation associated with the request
+     * @throws IOException If an I/O error occurs during the serialization process.
+     */
+    public InfinoSerializeTransportRequest(ShardSearchRequest request, InfinoOperation operation) throws IOException {
+        this.operation = operation;
+        parseRequest(request);
+        constructInfinoRequestURI();
     }
 
     /**
@@ -135,6 +133,8 @@ public class InfinoSerializeTransportRequest {
 
             if (getIndexName().startsWith("metrics-")) {
                 setIndexType(InfinoIndexType.METRICS);
+            } else if (getIndexName().startsWith("logs-")) {
+                setIndexType(InfinoIndexType.LOGS);
             }
         } catch (IOException e) {
             throw new IOException("Failed to serialize SearchSourceBuilder to JSON", e);
@@ -152,17 +152,19 @@ public class InfinoSerializeTransportRequest {
      * @throws IOException If there is an error serializing the index request body
      *                     to JSON.
      */
-    private void parseRequest(IndexRequest indexRequest) throws IOException {
-        setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
+    private void parseRequest(BulkShardRequest indexRequest) throws IOException {
         setIndexName(indexRequest.indices()[0]);
+        setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setOperation(InfinoOperation.INDEX_DOCUMENTS);
         setMethod(POST);
 
         try {
             setIndexBody(indexRequest);
 
-            if (this.getIndexName().startsWith("metrics-")) {
+            if (getIndexName().startsWith("metrics-")) {
                 setIndexType(InfinoIndexType.METRICS);
+            } else if (getIndexName().startsWith("logs-")) {
+                setIndexType(InfinoIndexType.LOGS);
             }
         } catch (IOException e) {
             throw new IOException("Failed to serialize SearchSourceBuilder to JSON", e);
@@ -188,8 +190,10 @@ public class InfinoSerializeTransportRequest {
         try {
             setCreateIndexBody(createIndexRequest);
 
-            if (this.getIndexName().startsWith("metrics-")) {
+            if (getIndexName().startsWith("metrics-")) {
                 setIndexType(InfinoIndexType.METRICS);
+            } else if (getIndexName().startsWith("logs-")) {
+                setIndexType(InfinoIndexType.LOGS);
             }
 
         } catch (IOException e) {
@@ -314,9 +318,8 @@ public class InfinoSerializeTransportRequest {
      * @param indexRequest - the index request object
      * @throws IOException - could not build request body
      */
-    protected void setIndexBody(IndexRequest indexRequest) throws IOException {
+    protected void setIndexBody(BulkShardRequest indexRequest) throws IOException {
         try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
-            builder.value(indexRequest.sourceAsMap());
             this.body = BytesReference.bytes(builder);
         } catch (IOException e) {
             throw new IOException("Failed to serialize IndexRequest to JSON", e);

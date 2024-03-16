@@ -370,12 +370,13 @@ async fn append_log(
         .unwrap();
     }
 
-    let result = get_timestamp(&obj, timestamp_key);
-    if result.is_err() {
-      error!("Timestamp error, ignoring entry {:?}", obj);
-      continue;
-    }
-    let timestamp = result.unwrap();
+    let timestamp = get_timestamp(&obj, timestamp_key).unwrap_or_else(|err| {
+      error!(
+        "Timestamp error, adding current time stamp. Entry {:?}: {}",
+        obj, err
+      );
+      chrono::Utc::now().timestamp_millis() as u64
+    });
 
     let mut fields: HashMap<String, String> = HashMap::new();
     let mut text = String::new();
@@ -400,8 +401,6 @@ async fn append_log(
 
     match result {
       Ok(doc_id) => {
-        debug!("-----------------------result from append {:?}", result);
-
         let index_item = json!({
             "index": {
                 "_index": "my_index",

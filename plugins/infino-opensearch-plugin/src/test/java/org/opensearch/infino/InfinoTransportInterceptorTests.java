@@ -6,8 +6,10 @@ import org.apache.logging.log4j.Logger;
 import org.junit.After;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.search.internal.ShardSearchRequest;
+import org.opensearch.tasks.Task;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
@@ -99,7 +101,14 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
             }
 
             @Override
-            protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(TransportRequest request) {
+            protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(BulkShardRequest request,
+                    InfinoOperation operation) {
+                return mockInfinoSerializeTransportRequest;
+            }
+
+            @Override
+            protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(ShardSearchRequest request,
+                    InfinoOperation operation) {
                 return mockInfinoSerializeTransportRequest;
             }
         };
@@ -246,51 +255,45 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
     }
 
     public void testSuccessfulShardSearchRequest() throws Exception {
+        // Mock setup
         mockBody = "{\n" +
-                "        \"took\": 30,\n" +
-                "        \"timed_out\": false,\n" +
-                "        \"_shards\": {\n" +
-                "          \"total\": 5,\n" +
-                "          \"successful\": 5,\n" +
-                "          \"skipped\": 0,\n" +
-                "          \"failed\": 0\n" +
-                "        },\n" +
-                "        \"hits\": {\n" +
-                "          \"total\": {\n" +
-                "            \"value\": 1,\n" +
-                "            \"relation\": \"eq\"\n" +
-                "          },\n" +
-                "          \"max_score\": 1.0,\n" +
-                "          \"hits\": [\n" +
-                "            {\n" +
-                "              \"_index\": \"my_index\",\n" +
-                "              \"_type\": \"_doc\",\n" +
-                "              \"_id\": \"1\",\n" +
-                "              \"_score\": 1.0,\n" +
-                "              \"_source\": {\n" +
-                "                \"title\": \"Example document\",\n" +
-                "                \"content\": \"This is an example document stored in OpenSearch.\",\n" +
-                "                \"date\": \"2023-03-09\"\n" +
-                "              }\n" +
-                "            }\n" +
-                "          ]\n" +
+                "  \"took\": 30,\n" +
+                "  \"timed_out\": false,\n" +
+                "  \"_shards\": {\n" +
+                "    \"total\": 5,\n" +
+                "    \"successful\": 5,\n" +
+                "    \"skipped\": 0,\n" +
+                "    \"failed\": 0\n" +
+                "  },\n" +
+                "  \"hits\": {\n" +
+                "    \"total\": {\n" +
+                "      \"value\": 1,\n" +
+                "      \"relation\": \"eq\"\n" +
+                "    },\n" +
+                "    \"max_score\": 1.0,\n" +
+                "    \"hits\": [\n" +
+                "      {\n" +
+                "        \"_index\": \"my_index\",\n" +
+                "        \"_type\": \"_doc\",\n" +
+                "        \"_id\": \"1\",\n" +
+                "        \"_score\": 1.0,\n" +
+                "        \"_source\": {\n" +
+                "          \"title\": \"Example document\",\n" +
+                "          \"content\": \"This is an example document stored in OpenSearch.\",\n" +
+                "          \"date\": \"2023-03-09\"\n" +
                 "        }\n" +
-                "      }";
-
-        // Given
-        when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
-        when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
+                "      }\n" +
+                "    ]\n" +
+                "  }\n" +
+                "}";
 
         ShardSearchRequest mockShardSearchRequest = mock(ShardSearchRequest.class);
         when(mockShardSearchRequest.indices()).thenReturn(new String[] { "test-index" });
-
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchQuery("field", "value"));
         when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
-        when(mockShardSearchRequest.indices()).thenReturn(new String[] { "test-index" });
 
         final CountDownLatch latch = new CountDownLatch(1);
-
         final boolean[] onResponseCalled = { false };
         final boolean[] onFailureCalled = { false };
 
@@ -308,13 +311,11 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
             }
         };
 
-        // When
-        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
 
-        // Then
         assertTrue("onResponse was not called as expected", onResponseCalled[0]);
         assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
     }
@@ -372,7 +373,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -417,7 +418,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -478,7 +479,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
@@ -522,7 +523,7 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         };
 
         // When
-        interceptor.processTransportActions(mockShardSearchRequest, listener);
+        interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
         // asyncSender.sendRequest(null, null, mockShardSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
