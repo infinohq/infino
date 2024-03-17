@@ -76,6 +76,12 @@ impl SegmentSummary {
     self.start_time.store(start_time);
     self.end_time.store(end_time);
   }
+
+  #[cfg(test)]
+  pub fn update_uncompressed_size(&mut self, size: u64) {
+    self.uncompressed_size = size;
+  }
+
   /// Returns true if this segment summary overlaps with the given range.
   pub fn is_overlap(&self, range_start_time: u64, range_end_time: u64) -> bool {
     crate::utils::range::is_overlap(

@@ -48,6 +48,13 @@ pub async fn commit_in_loop(state: Arc<AppState>) {
         );
       }
 
+      info!("Triggering merge policy on index in coredb");
+      let result = state.coredb.trigger_merge().await;
+
+      if let Err(e) = result {
+        error!("Error triggering merge policy on index in coredb: {}", e);
+      }
+
       last_trigger_policy_time = current_time;
     }
 

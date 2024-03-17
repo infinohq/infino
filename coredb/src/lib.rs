@@ -18,11 +18,13 @@ use ::log::{debug, info};
 use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pest::error::Error as PestError;
+use policy_manager::merge_policy::{MergePolicy, SizeBasedMerge};
 use policy_manager::retention_policy::TimeBasedRetention;
 use request_manager::promql::Rule;
 use request_manager::promql_object::PromQLObject;
 use request_manager::query_dsl_object::QueryDSLObject;
 use storage_manager::storage::Storage;
+use utils::constants;
 
 use crate::index_manager::index::Index;
 use crate::policy_manager::retention_policy::RetentionPolicy;
@@ -36,11 +38,16 @@ impl From<PestError<Rule>> for QueryError {
   }
 }
 
+enum PolicyType {
+  Retention(Box<dyn RetentionPolicy>),
+  Merge(Box<dyn MergePolicy>),
+}
+
 /// Database for storing telemetry data, mapping string keys to index objects.
 pub struct CoreDB {
   index_map: DashMap<String, Index>,
   settings: Settings,
-  policy: Box<dyn RetentionPolicy>,
+  policy: HashMap<String, PolicyType>,
 }
 
 impl CoreDB {
@@ -119,10 +126,21 @@ impl CoreDB {
           }
         }
 
+        let mut policy = HashMap::new();
         // Ideally decide which Retention object to create based on the config file
         let retention_period = coredb_settings.get_retention_days();
-        let policy = Box::new(TimeBasedRetention::new(retention_period));
+        let merge_limit = coredb_settings.get_target_segment_size_bytes();
 
+        let retention_policy = Box::new(TimeBasedRetention::new(retention_period));
+        let merge_policy = Box::new(SizeBasedMerge::new(merge_limit));
+        policy.insert(
+          constants::RETENTION_POLICY_TRIGGER.to_string(),
+          PolicyType::Retention(retention_policy),
+        );
+        policy.insert(
+          constants::MERGE_POLICY_TRIGGER.to_string(),
+          PolicyType::Merge(merge_policy),
+        );
         let coredb = CoreDB {
           index_map,
           settings,
@@ -297,8 +315,21 @@ impl CoreDB {
     let index_map = DashMap::new();
     index_map.insert(default_index_name.to_string(), index);
 
-    let retention_period = settings.get_coredb_settings().get_retention_days();
-    let policy = Box::new(TimeBasedRetention::new(retention_period));
+    let mut policy = HashMap::new();
+    // Ideally decide which Retention object to create based on the config file
+    let retention_period = coredb_settings.get_retention_days();
+    let merge_limit = coredb_settings.get_target_segment_size_bytes();
+
+    let retention_policy = Box::new(TimeBasedRetention::new(retention_period));
+    let merge_policy = Box::new(SizeBasedMerge::new(merge_limit));
+    policy.insert(
+      constants::RETENTION_POLICY_TRIGGER.to_string(),
+      PolicyType::Retention(retention_policy),
+    );
+    policy.insert(
+      constants::MERGE_POLICY_TRIGGER.to_string(),
+      PolicyType::Merge(merge_policy),
+    );
 
     Ok(CoreDB {
       index_map,
@@ -366,8 +397,31 @@ impl CoreDB {
     self.settings.get_coredb_settings().get_default_index_name()
   }
 
-  pub fn get_retention_policy(&self) -> &dyn RetentionPolicy {
-    self.policy.as_ref()
+  fn get_retention_policy(&self) -> Option<&PolicyType> {
+    self.policy.get(constants::RETENTION_POLICY_TRIGGER)
+  }
+
+  fn get_merge_policy(&self) -> Option<&PolicyType> {
+    self.policy.get(constants::MERGE_POLICY_TRIGGER)
+  }
+
+  pub async fn trigger_merge(&self) -> Result<(), CoreDBError> {
+    let default_index_name = self.get_default_index_name();
+    let temp_reference = self.index_map.get(default_index_name).unwrap();
+    let index = temp_reference.value();
+    // Assuming a method to safely retrieve and ensure we're getting a merge policy
+    let merge_policy = self.get_merge_policy().unwrap();
+    let all_segments_summaries = index.get_all_segments_summaries().await?;
+    // Get all the keys of the segments in memory
+    let segments_in_memory = index.get_memory_segments_keys();
+    // Apply the merge policy directly here based on the enum variant
+    let segment_ids_to_merge = match merge_policy {
+      PolicyType::Merge(policy) => policy.apply(&all_segments_summaries, segments_in_memory),
+      _ => return Err(CoreDBError::InvalidPolicy()),
+    };
+    index.merge_segments(segment_ids_to_merge).await?;
+
+    Ok(())
   }
 
   /// Function to help with triggering the retention policy
@@ -375,13 +429,16 @@ impl CoreDB {
     let default_index_name = self.get_default_index_name();
     let temp_reference = self.index_map.get(default_index_name).unwrap();
     let index = temp_reference.value();
-
-    // TODO: this does not need to read all_segments_summaries from disk - can use the one already
-    // in memory in Index::all_segments_summaries()
+    // Assuming a method to safely retrieve and ensure we're getting a retention policy
+    let retention_policy = self.get_retention_policy().unwrap();
     let all_segments_summaries = index.get_all_segments_summaries().await?;
-
-    let segment_ids_to_delete = self.get_retention_policy().apply(&all_segments_summaries);
-
+    // Apply the retention policy directly here based on the enum variant
+    let segment_ids_to_delete = match retention_policy {
+      PolicyType::Retention(policy) => {
+        policy.apply(&all_segments_summaries) // Directly use the apply method of the retention policy
+      }
+      _ => return Err(CoreDBError::InvalidPolicy()),
+    };
     let mut deletion_futures: FuturesUnordered<_> = segment_ids_to_delete
       .into_iter()
       .map(|segment_id| index.delete_segment(segment_id))

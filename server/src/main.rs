@@ -879,6 +879,7 @@ mod tests {
         .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
+      file.write_all(b"target_segment_size = 1024\n").unwrap();
 
       // Write server section.
       file.write_all(b"[server]\n").unwrap();

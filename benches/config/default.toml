@@ -4,6 +4,7 @@ default_index_name = ".default"
 num_log_messages_threshold = 100000
 num_metric_points_threshold = 100000
 retention_days = 30
+target_segment_size_megabytes = 1024
 
 [server]
 port = 3000

@@ -68,6 +68,15 @@ pub enum CoreDBError {
 
   #[error("Too many append requests, slow down so that commit thread can keep up")]
   TooManyAppendsError(),
+
+  #[error("Segment merge failed")]
+  SegmentMergeFailed(),
+
+  #[error("Policy not found")]
+  PolicyNotFound(),
+
+  #[error("Invalid policy")]
+  InvalidPolicy(),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

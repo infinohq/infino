@@ -202,6 +202,15 @@ impl Index {
     &self.memory_segments_map
   }
 
+  // Get all the keys of segments in memory
+  pub fn get_memory_segments_keys(&self) -> Vec<u32> {
+    self
+      .memory_segments_map
+      .iter()
+      .map(|entry| *entry.key())
+      .collect()
+  }
+
   /// Possibly remove older segments from the memory segments map, so that the memory consumed is
   /// within the search_memory_budget_bytes.
   fn shrink_to_fit(&self) {
@@ -814,6 +823,53 @@ impl Index {
       // Return error saying that the segment is in memory
       return Err(CoreDBError::SegmentInMemory(segment_number));
     }
+    Ok(())
+  }
+
+  pub async fn merge_segments(&self, segment_list: Vec<u32>) -> Result<(), CoreDBError> {
+    // Fetch list of segments to merge from segment_list
+    let segment_list_clone = segment_list.clone();
+    let mut segments: Vec<Segment> = Vec::new();
+    for segment_number in segment_list {
+      let segment = self.refresh_segment(segment_number).await?;
+      segments.push(segment);
+    }
+
+    // Get the segments to be merged
+    while segments.len() > 1 {
+      let segment1 = segments.pop().unwrap();
+      let segment2 = segments.pop().unwrap();
+      let merged_segment = Segment::merge(segment1, segment2);
+      segments.push(merged_segment);
+    }
+
+    // Check if segments contains a single segment, if not return an error
+    if segments.len() != 1 {
+      return Err(CoreDBError::SegmentMergeFailed());
+    }
+
+    // Commit the merged segment
+    let merged_segment = segments.pop().unwrap();
+    let merged_segment_number = self.metadata.fetch_increment_segment_count();
+    let segment_dir_path = io::get_joined_path(
+      &self.index_dir_path,
+      merged_segment_number.to_string().as_str(),
+    );
+
+    let (uncompressed, compressed) = merged_segment
+      .commit(&self.storage, segment_dir_path.as_str())
+      .await?;
+
+    info!(
+      "Merged segment with segment_number {}, id {}, start_time {}, end_time {}, uncompressed_size {}, compressed_size {} from segments with segment numbers {:?}",
+      merged_segment_number,
+      merged_segment.get_id(),
+      merged_segment.get_start_time(),
+      merged_segment.get_end_time(),
+      uncompressed,
+      compressed,
+      segment_list_clone
+    );
     Ok(())
   }
 }

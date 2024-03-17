@@ -219,7 +219,10 @@ impl Segment {
     let mut my_labels = Vec::new();
 
     // Push the metric name label.
-    my_labels.push(TimeSeries::get_label_for_metric_name(metric_name));
+    // check if metric name is empty
+    if !metric_name.is_empty() {
+      my_labels.push(TimeSeries::get_label_for_metric_name(metric_name));
+    }
 
     // Push the rest of the name-value labels.
     for (name, value) in name_value_labels.iter() {
@@ -387,6 +390,69 @@ impl Segment {
   #[cfg(test)]
   pub fn get_metadata_file_name() -> String {
     METADATA_FILE_NAME.to_owned()
+  }
+
+  // Take two segments and merge them into one.
+  pub fn merge(segment1: Segment, segment2: Segment) -> Segment {
+    let merged_segment = Segment::new();
+    // Merge log messages
+    let mut log_messages: Vec<_> = segment1
+      .forward_map
+      .iter()
+      .chain(segment2.forward_map.iter())
+      .map(|ref_multi| (*ref_multi.key(), ref_multi.value().clone()))
+      .collect();
+
+    log_messages.sort_by_key(|(_, log_message)| log_message.get_time());
+
+    for (_, log_message) in log_messages {
+      merged_segment
+        .append_log_message(
+          log_message.get_time(),
+          log_message.get_fields(),
+          log_message.get_text(),
+        )
+        .unwrap();
+    }
+
+    merged_segment.copy_time_series_from_segment(&segment1);
+    merged_segment.copy_time_series_from_segment(&segment2);
+
+    merged_segment
+  }
+
+  fn copy_time_series_from_segment(&self, source: &Segment) {
+    // Iterate over labels of the source
+    for entry in source.get_labels().iter() {
+      let label = entry.key();
+      let label_id = entry.value();
+      let mut metric_name = String::new();
+      let mut name_value_labels = HashMap::new();
+      // Check if the label is metric name label
+      if TimeSeries::is_metric(label) {
+        metric_name = TimeSeries::extract_metric_name(label);
+      } else {
+        let (name, value) = TimeSeries::extract_label(label);
+        name_value_labels.insert(name, value);
+      }
+
+      let time_series = source
+        .get_time_series_map()
+        .get_time_series(*label_id)
+        .unwrap();
+      let metric_points = time_series.read().flatten();
+
+      for metric_point in metric_points {
+        self
+          .append_metric_point(
+            metric_name.as_str(),
+            &name_value_labels,
+            metric_point.get_time(),
+            metric_point.get_value(),
+          )
+          .unwrap();
+      }
+    }
   }
 }
 
