@@ -235,6 +235,19 @@ impl Segment {
 
   /// Append a metric point with specified time and value to the segment.
   // Note that this function isn't async - this helps with testing and esuring correctness.
+  //
+  // As an example, say empty segment, say s, is called as follows:
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="1", value="1")
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="2", value="2")
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":500, "path":"/user", time="3", value="2")
+  //
+  // This will results into labels "__metric_name__~http_get", "status_code~200", "status_code~500", "path~/user". At the end of the
+  // 3 calls, the label_count would be 4.
+  //
+  // The metric_name_count as of now just computes the number of metric points published, so would be 3, corresponding to the three
+  // invocations. A prior implementation would track different metric points seperately per label (so a total of 12 metric points)
+  // in the above example). It isn't clear how exactly we should use the metric points, so keeping it simple for now - and this may
+  // change in future.
   pub fn append_metric_point(
     &self,
     metric_name: &str,
