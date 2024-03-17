@@ -124,6 +124,7 @@ impl ElasticsearchEngine {
               );
             }
             #[allow(unused)]
+            //let flush = self.client.indices.flush(IndicesFlushParts::Index(&[INDEX_NAME])).send().await.unwrap();
             let insert = self
               .client
               .bulk(BulkParts::Index(INDEX_NAME))
