@@ -79,10 +79,12 @@ mod tests {
   fn test_apply() {
     let segment_summaries: DashMap<u32, SegmentSummary> = DashMap::new();
     let current_secs = get_current_time_in_seconds(SystemTime::now());
+    let temp_file = tempfile::NamedTempFile::new().unwrap();
+    let path = temp_file.path().to_str().unwrap();
 
     // Create three segments: one from 9 days ago, one from 8 days ago and one from 7 day ago
     let days_to_secs = |days: u64| days * 24 * 60 * 60_u64;
-    let segment = Segment::new();
+    let segment = Segment::new(path);
     let mut segment1 = SegmentSummary::new(0, &segment);
     segment1.update_start_end_time_test(
       current_secs - days_to_secs(9),
@@ -116,10 +118,12 @@ mod tests {
   fn test_apply_with_memory_segments() {
     let segment_summaries: DashMap<u32, SegmentSummary> = DashMap::new();
     let current_secs = get_current_time_in_seconds(SystemTime::now());
+    let temp_file = tempfile::NamedTempFile::new().unwrap();
+    let path = temp_file.path().to_str().unwrap();
 
     // Create three segments: one from 9 days ago, one from 8 days ago and one from 7 day ago
     let days_to_secs = |days: u64| days * 24 * 60 * 60_u64;
-    let segment = Segment::new();
+    let segment = Segment::new(path);
     let mut segment1 = SegmentSummary::new(0, &segment);
     segment1.update_start_end_time_test(
       current_secs - days_to_secs(9),

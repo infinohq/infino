@@ -30,10 +30,8 @@ import java.net.http.HttpResponse.BodyHandler;
 import java.net.http.HttpResponse.PushPromiseHandler;
 import java.net.http.HttpHeaders;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -273,8 +271,7 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
     }
 
     // We use our own FakeRestChannel (from BaseRestHandler tests) because we need
-    // to
-    // access latch to wait on threads in the handler.
+    // to access latch to wait on threads in the handler.
     public final class FakeRestChannel extends AbstractRestChannel {
         protected final CountDownLatch latch;
         private final AtomicInteger responses = new AtomicInteger();

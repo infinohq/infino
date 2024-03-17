@@ -34,18 +34,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.io.IOException;
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -77,8 +73,10 @@ import static org.opensearch.rest.RestRequest.Method.*;
  * This effectively serves as the public API for Infino.
  *
  * Notes:
- * 1. Search window defaults to the past 30 days if not specified by the request.
- * 2. To access Infino indexes, the REST caller must prefix the index name with '/infino/'.
+ * 1. Search window defaults to the past 30 days if not specified by the
+ * request.
+ * 2. To access Infino indexes, the REST caller must prefix the index name with
+ * '/infino/'.
  * 3. Index creation or deletion is mirrored on Infino and in OpenSarch.
  * 4. We use our own thread pool to manage Infino requests.
  *
@@ -105,8 +103,10 @@ public class InfinoRestHandler extends BaseRestHandler {
     private static final Logger logger = LogManager.getLogger(InfinoRestHandler.class);
 
     /**
-     * Using a custom thread factory that can be used by the ScheduledExecutorService.
-     * We do this to add custom prefixes to the thread name. This will make debugging
+     * Using a custom thread factory that can be used by the
+     * ScheduledExecutorService.
+     * We do this to add custom prefixes to the thread name. This will make
+     * debugging
      * easier, if we ever have to debug.
      */
     protected static final class CustomThreadFactory implements ThreadFactory {
@@ -269,6 +269,7 @@ public class InfinoRestHandler extends BaseRestHandler {
      */
     @Override
     public List<Route> routes() {
+        // TODO: change metrics path to PromQL: /api/v1/query and /api/v1/query_range
         return unmodifiableList(asList(new Route(GET, "/infino/{infinoIndex}/{infinoPath}"), // Search a collection
                 new Route(GET, "/infino/{infinoIndex}/logs/{infinoPath}"), // Search logs on a collection
                 new Route(GET, "/infino/{infinoIndex}/metrics/{infinoPath}"), // Search metrics on a collection
@@ -286,10 +287,8 @@ public class InfinoRestHandler extends BaseRestHandler {
      * node.
      *
      * The first half of the method (before the thread executor) is parallellized by
-     * OpenSearch's
-     * REST thread pool so we can serialize in parallel. However network calls use
-     * our own
-     * privileged thread factory.
+     * OpenSearch's REST thread pool so we can serialize in parallel. However
+     * network calls use our own privileged thread factory.
      *
      * We exponentially backoff for 429, 503, and 504 responses
      *
@@ -306,7 +305,7 @@ public class InfinoRestHandler extends BaseRestHandler {
         InfinoSerializeRequestURI infinoSerializeRequestURI = null;
         HttpClient httpClient = getHttpClient();
 
-        logger.info("Serializing REST request for Infino");
+        logger.info("Infino REST Handler: Serializing REST request for Infino");
 
         // Serialize the request to a valid Infino URL
         try {
@@ -320,7 +319,8 @@ public class InfinoRestHandler extends BaseRestHandler {
         method = infinoSerializeRequestURI.getMethod();
         indexName = infinoSerializeRequestURI.getIndexName();
 
-        logger.info("Serialized REST request for Infino to " + infinoSerializeRequestURI.getFinalUrl());
+        logger.info("Infino REST Handler: Serialized REST request for Infino to "
+                + infinoSerializeRequestURI.getFinalUrl());
 
         // Create Lucene mirror index for the Infino collection if it doesn't exist
         if (method == PUT)
@@ -332,7 +332,7 @@ public class InfinoRestHandler extends BaseRestHandler {
                         HttpRequest.BodyPublishers.ofString(request.content().utf8ToString()))
                 .build();
 
-        logger.info("Sending HTTP Request to Infino: " + infinoSerializeRequestURI.getFinalUrl());
+        logger.info("Infino REST Handler: Sending HTTP Request to Infino: " + infinoSerializeRequestURI.getFinalUrl());
 
         // Send request to Infino server and create a listener to handle the response.
         // Execute the HTTP request using our own thread factory.
@@ -364,7 +364,6 @@ public class InfinoRestHandler extends BaseRestHandler {
         int statusCode = response.statusCode();
         if (shouldRetry(statusCode)) {
             long retryAfter = getRetryAfter(response, attempt);
-            // Use schedule method to retry after a delay
             infinoThreadPool.schedule(() -> sendRequestWithBackoff(processHttpClient, request, channel, client,
                     indexName, method, attempt + 1), retryAfter, TimeUnit.MILLISECONDS);
         } else {
@@ -380,8 +379,6 @@ public class InfinoRestHandler extends BaseRestHandler {
         return response.headers().firstValueAsLong("Retry-After").orElse((long) Math.pow(2, attempt) * 1000L);
     }
 
-    // Modify handleException and handleResponse methods to use the above utility
-    // methods
     private Void handleException(Throwable e, RestChannel channel, NodeClient client, String indexName,
             RestRequest.Method method) {
         logger.error("Error in async HTTP call", e);

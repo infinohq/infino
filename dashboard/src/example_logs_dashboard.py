@@ -42,7 +42,7 @@ def search_logs(infino_server_url, user_query, show_summary):
     client = InfinoClient(infino_server_url)
     if show_summary:
         # show_summary is set, execute the summarization query
-        response = client.summarize(text=user_query)
+        response = client.summarize(q=user_query)
         if response.status_code != 200:
             st.error("Could not execute summarization query")
             return None, None, None
@@ -54,7 +54,7 @@ def search_logs(infino_server_url, user_query, show_summary):
         df = pd.DataFrame(results["results"])
     else:
         # show_summary is set, execute the search_logs query
-        response = client.search_logs(text=user_query)
+        response = client.search_logs(q=user_query)
         if response.status_code != 200:
             st.error("Could not execute search_logs query")
             return None, None, None

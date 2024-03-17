@@ -67,6 +67,8 @@ impl LogMessage {
   // TODO: This function could be optimized to reduce string operations. We process
   // the strings dynamically (e.g., changing case, adding FIELD_DELIMITER, etc) so it
   // it isn't as straightforward.
+  //
+  // Note: The case information for the text is also being lost here.
   pub fn get_terms(&self) -> Vec<String> {
     let text = self.text.to_lowercase();
     let mut terms: Vec<String> = Vec::new();

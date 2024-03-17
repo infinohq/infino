@@ -15,7 +15,7 @@
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
 
-mod commit;
+mod background_threads;
 mod queue_manager;
 mod utils;
 
@@ -31,16 +31,16 @@ use std::io::Write;
 use std::result::Result;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query};
+use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::response::IntoResponse;
 use axum::routing::{delete, put};
 use axum::{extract::State, routing::get, routing::post, Json, Router};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use coredb::request_manager::query_dsl_object::QueryDSLObject;
 use crossbeam::atomic::AtomicCell;
 use hyper::StatusCode;
 use lazy_static::lazy_static;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
@@ -50,10 +50,10 @@ use tracing_subscriber::EnvFilter;
 
 use coredb::utils::environment::load_env;
 use coredb::utils::error::{CoreDBError, QueryError};
-use coredb::utils::request::parse_time_range;
+use coredb::utils::request::{check_query_time, parse_time_range};
 use coredb::CoreDB;
 
-use crate::commit::commit_in_loop;
+use crate::background_threads::check_and_start_background_threads;
 use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
@@ -77,9 +77,9 @@ struct AppState {
 #[derive(Debug, Deserialize, Serialize)]
 /// Represents a logs query.
 struct LogsQuery {
-  text: String,
-  start_time: Option<u64>,
-  end_time: Option<u64>,
+  q: Option<String>,
+  start_time: Option<String>,
+  end_time: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -163,31 +163,39 @@ async fn app(
   });
 
   // Start a thread to periodically commit coredb.
-  info!("Spawning new thread to periodically commit");
-  let commit_thread_handle = tokio::spawn(commit_in_loop(shared_state.clone()));
+  info!("Spawning background threads for commit, and other tasks...");
+  let background_threads_handle =
+    tokio::spawn(check_and_start_background_threads(shared_state.clone()));
 
   // Build our application with a route
+  // TODO: Support use case when index is not specified in the bulk call
   let router: Router = Router::new()
     // GET methods
-    .route("/get_index_dir", get(get_index_dir))
+    .route("/:index_name/get_index_dir", get(get_index_dir))
     .route("/ping", get(ping))
     .route("/", get(ping))
-    .route("/search_logs", get(search_logs))
-    .route("/search_metrics", get(search_metrics))
-    .route("/summarize", get(summarize))
+    .route("/:index_name/search_logs", get(search_logs))
+    .route("/:index_name/search_metrics", get(search_metrics))
+    .route("/:index_name/summarize", get(summarize))
     //---
     // POST methods
-    // TODO: all the APIs should have index name
-    .route("/append_log", post(append_log))
-    .route("/append_metric", post(append_metric))
+    .route("/:index_name/append_log", post(append_log))
+    .route("/:index_name/append_metric", post(append_metric))
+    .route("/:index_name/bulk", post(bulk))
     .route("/flush", post(flush))
-    // POST methods to create and delete index
+    // PUT and DELETE methods
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
+    // ---
+    // State that is passed to each request.
     .with_state(shared_state.clone())
-    .layer(TraceLayer::new_for_http());
+    // ---
+    // Layer for tracing in debug mode.
+    .layer(TraceLayer::new_for_http())
+    // Make the default for body to be 5MB (instead of 2MB http default.)
+    .layer(DefaultBodyLimit::max(5 * 1024 * 1024));
 
-  (router, commit_thread_handle, shared_state)
+  (router, background_threads_handle, shared_state)
 }
 
 async fn run_server() {
@@ -199,7 +207,8 @@ async fn run_server() {
   let image_tag = "3";
 
   // Create app.
-  let (app, commit_thread_handle, shared_state) = app(config_dir_path, image_name, image_tag).await;
+  let (app, background_threads_handle, shared_state) =
+    app(config_dir_path, image_name, image_tag).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -230,12 +239,12 @@ async fn run_server() {
       .expect("Could not stop rabbitmq container");
   }
 
-  // Set the flag to indicate the commit thread to shutdown, and wait for it to finish.
+  // Set the flag to indicate the background threads to shutdown, and wait for them to finish.
   IS_SHUTDOWN.store(true);
-  info!("Shutting down commit thread and waiting for it to finish...");
-  commit_thread_handle
+  info!("Shutting down background threads and waiting for it to finish...");
+  background_threads_handle
     .await
-    .expect("Error while completing the commit thread");
+    .expect("Error while shutting down the background threads");
 
   info!("Completed Infino server shutdown");
 }
@@ -317,12 +326,67 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
   Ok(timestamp)
 }
 
+// Helper function to append log messages
+async fn append_single_log_message(
+  obj: Map<String, Value>,
+  is_queue: bool,
+  index_name: &str,
+  state: Arc<AppState>,
+  timestamp_key: &str,
+) -> Result<(), CoreDBError> {
+  let obj_string = serde_json::to_string(&obj).unwrap();
+  if is_queue {
+    state
+      .queue
+      .as_ref()
+      .unwrap()
+      .publish(&obj_string)
+      .await
+      .unwrap();
+  }
+
+  let timestamp = get_timestamp(&obj, timestamp_key).unwrap_or_else(|err| {
+    warn!(
+      "Timestamp error, adding current time stamp. Entry {:?}: {}",
+      obj, err
+    );
+    chrono::Utc::now().timestamp_millis() as u64
+  });
+
+  let mut fields: HashMap<String, String> = HashMap::new();
+  let mut text = String::new();
+  let count = obj.len();
+  for (i, (key, value)) in obj.iter().enumerate() {
+    if key != timestamp_key && value.is_string() {
+      let value_str = value.as_str().unwrap();
+      fields.insert(key.to_owned(), value_str.to_owned());
+      text.push_str(value_str);
+
+      if i != count - 1 {
+        // Seperate different field entries in text by space, so that they can be tokenized.
+        text.push(' ');
+      }
+    }
+  }
+
+  state
+    .coredb
+    .append_log_message(index_name, timestamp, &fields, &text)
+    .await
+}
+
 /// Append log data to CoreDB.
+#[allow(unused_assignments)]
 async fn append_log(
   State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
   Json(log_json): Json<serde_json::Value>,
-) -> Result<(), (StatusCode, String)> {
+) -> Result<String, (StatusCode, String)> {
   debug!("Appending log entry {}", log_json);
+
+  let append_start_time = Utc::now().timestamp_millis() as u64;
+
+  let mut response = String::new();
 
   state
     .wal_file
@@ -343,66 +407,72 @@ async fn append_log(
   let server_settings = state.settings.get_server_settings();
   let timestamp_key = server_settings.get_timestamp_key();
 
+  let mut items = Vec::new();
+
+  // Append each entry
+  // TODO: Skip logs with errors instead of throwing
   for obj in log_json_objects {
-    let obj_string = serde_json::to_string(&obj).unwrap();
-    if is_queue {
-      state
-        .queue
-        .as_ref()
-        .unwrap()
-        .publish(&obj_string)
-        .await
-        .unwrap();
-    }
+    let result =
+      append_single_log_message(obj, is_queue, &index_name, state.clone(), timestamp_key).await;
 
-    let result = get_timestamp(&obj, timestamp_key);
-    if result.is_err() {
-      error!("Timestamp error, ignoring entry {:?}", obj);
-      continue;
-    }
-    let timestamp = result.unwrap();
-
-    let mut fields: HashMap<String, String> = HashMap::new();
-    let mut text = String::new();
-    let count = obj.len();
-    for (i, (key, value)) in obj.iter().enumerate() {
-      if key != timestamp_key && value.is_string() {
-        let value_str = value.as_str().unwrap();
-        fields.insert(key.to_owned(), value_str.to_owned());
-        text.push_str(value_str);
-
-        if i != count - 1 {
-          // Seperate different field entries in text by space, so that they can be tokenized.
-          text.push(' ');
-        }
+    match result {
+      Ok(doc_id) => {
+        let index_item = json!({
+            "index": {
+                "_index": "my_index",
+                "_type": "_doc",
+                "_id": doc_id,
+                "_version": 1,
+                "result": "created",
+                "_shards": {
+                    "total": 1,
+                    "successful": 1,
+                    "failed": 0
+                },
+                "_seq_no": 0,
+                "_primary_term": 1
+            }
+        });
+        items.push(index_item);
       }
-    }
-
-    let result = state
-      .coredb
-      .append_log_message(timestamp, &fields, &text)
-      .await;
-
-    if let Err(error) = result {
-      match error {
-        CoreDBError::TooManyAppendsError() => {
-          // Handle the TooManyAppendsError specifically
-          return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
-        }
-        _ => {
-          // Catch-all for other errors
-          println!("An unexpected error occurred.");
-        }
+      Err(error) => {
+        match error {
+          CoreDBError::TooManyAppendsError() => {
+            return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()))
+          }
+          CoreDBError::IndexNotFound(_) => {
+            return Err((StatusCode::BAD_REQUEST, "Could not find index".to_string()))
+          }
+          _ => {
+            return Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "An unexpected error occurred".to_string(),
+            ));
+          }
+        };
       }
     }
   }
 
-  Ok(())
+  // Constructing the bulk response JSON
+  let response_json = json!({
+      // Check_query_time will not throw an error when timeout is 0. Fine to unwrap().
+      "took": check_query_time(0, append_start_time).unwrap(),
+      "errors": false,
+      "items": items
+  });
+
+  // Serialize the JSON response
+  response =
+    serde_json::to_string(&response_json).expect("Could not convert append response to JSON");
+
+  Ok(response)
 }
 
 /// Append metric data to CoreDB.
 async fn append_metric(
   State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
   Json(ts_json): Json<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending metric entry: {:?}", ts_json);
@@ -477,17 +547,15 @@ async fn append_metric(
 
         let result = state
           .coredb
-          .append_metric_point(key, &labels, timestamp, value_f64)
+          .append_metric_point(&index_name, key, &labels, timestamp, value_f64)
           .await;
 
         if let Err(error) = result {
           match error {
             CoreDBError::TooManyAppendsError() => {
-              // Handle the TooManyAppendsError specifically
               return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
             }
             _ => {
-              // Catch-all for other errors
               println!("An unexpected error occurred.");
             }
           }
@@ -499,10 +567,167 @@ async fn append_metric(
   Ok(())
 }
 
+/// Bulk append data to CoreDB.
+#[allow(unused_assignments)]
+#[allow(dead_code)]
+async fn bulk(
+  State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
+  Json(request_json): Json<serde_json::Value>,
+) -> Result<String, (StatusCode, String)> {
+  debug!("Executing bulk append request {}", request_json);
+
+  let append_start_time = Utc::now().timestamp_millis() as u64;
+
+  let mut response = String::new();
+
+  state
+    .wal_file
+    .clone()
+    .write_all(&request_json.to_string().into_bytes()[..])
+    .unwrap();
+
+  let is_queue = state.queue.is_some();
+
+  if !request_json.is_array() {
+    let msg =
+      "Invalid bulk append request format: Expected an array of actions and documents.".to_string();
+    error!("{}", msg);
+    return Err((StatusCode::BAD_REQUEST, msg));
+  }
+
+  let server_settings = state.settings.get_server_settings();
+  let timestamp_key = server_settings.get_timestamp_key();
+
+  let mut items = Vec::new();
+  let actions = request_json.as_array().unwrap();
+  let mut i = 0;
+
+  while i < actions.len() {
+    let action_obj = &actions[i];
+    i += 1; // Move to the next item, potentially the document.
+
+    let operation = action_obj.as_object().and_then(|obj| {
+      obj.keys().next().map(String::from) // Gets the first key as the operation type.
+    });
+
+    match operation.as_deref() {
+      Some("index") | Some("create") => {
+        if i >= actions.len() {
+          let msg = "Missing document for index/create operation.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+        let document = &actions[i];
+        i += 1; // Move past the document for the next iteration.
+
+        // Ensure document is an object and convert to Map<String, Value>
+        if let Some(doc_map) = document.as_object() {
+          let result = append_single_log_message(
+            doc_map.clone(),
+            is_queue,
+            &index_name,
+            state.clone(),
+            timestamp_key,
+          )
+          .await;
+
+          match result {
+            Ok(doc_id) => {
+              let index_item = json!({
+                  "index": {
+                      "_index": "my_index",
+                      "_type": "_doc",
+                      "_id": doc_id,
+                      "_version": 1,
+                      "result": "created",
+                      "_shards": {
+                          "total": 1,
+                          "successful": 1,
+                          "failed": 0
+                      },
+                      "_seq_no": 0,
+                      "_primary_term": 1
+                  }
+              });
+              items.push(index_item);
+            }
+            Err(error) => {
+              match error {
+                CoreDBError::TooManyAppendsError() => {
+                  return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()))
+                }
+                CoreDBError::IndexNotFound(_) => {
+                  return Err((StatusCode::BAD_REQUEST, error.to_string()))
+                }
+                _ => {
+                  return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string()));
+                }
+              };
+            }
+          }
+        } else {
+          let msg = "Document for index/create operation is not a valid JSON object.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+      }
+      Some("delete") => {
+        let msg = "Missing document for update operation.".to_string();
+        warn!("{}", msg);
+        continue;
+      }
+      Some("update") => {
+        if i >= actions.len() {
+          let msg = "Missing document for update operation.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+        let update_doc = &actions[i];
+        i += 1; // Move past the document for the next iteration.
+
+        if let Some(doc) = update_doc.as_object() {
+          if doc.contains_key("doc") || doc.contains_key("doc_as_upsert") {
+            // Current unsupported
+          } else {
+            let msg = "Invalid update document format.".to_string();
+            error!("{}", msg);
+            return Err((StatusCode::BAD_REQUEST, msg));
+          }
+        } else {
+          let msg = "Update operation requires a valid JSON object.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+      }
+      _ => {
+        let msg = "Unknown or unsupported action in bulk append request.".to_string();
+        error!("{}", msg);
+        return Err((StatusCode::BAD_REQUEST, msg));
+      }
+    }
+  }
+
+  // Constructing the bulk response JSON
+  let response_json = json!({
+      // Check_query_time will not throw an error when timeout is 0. Fine to unwrap().
+      "took": check_query_time(0, append_start_time).unwrap(),
+      "errors": false,
+      "items": items
+  });
+
+  // Serialize the JSON response
+  response =
+    serde_json::to_string(&response_json).expect("Could not convert append response to JSON");
+
+  Ok(response)
+}
+
 /// Search logs in CoreDB.
 async fn search_logs(
   State(state): State<Arc<AppState>>,
   Query(logs_query): Query<LogsQuery>,
+  Path(index_name): Path<String>,
   json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
@@ -510,16 +735,30 @@ async fn search_logs(
     logs_query, json_body
   );
 
-  // Pass the deserialized JSON object directly to coredb.search_logs
+  let start_time = logs_query
+    .start_time
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or(0); // Default to 0 if None
+
+  let end_time = logs_query
+    .end_time
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or_else(|| Utc::now().timestamp_millis() as u64); // Default to current time if None
+
   let results = state
     .coredb
     .search_logs(
-      &logs_query.text,
+      &index_name,
+      &logs_query.q.unwrap_or_default(),
       &json_body,
-      logs_query.start_time.unwrap_or(0),
-      logs_query
-        .end_time
-        .unwrap_or(Utc::now().timestamp_millis() as u64),
+      start_time,
+      end_time,
     )
     .await;
 
@@ -529,21 +768,21 @@ async fn search_logs(
         serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
       Ok(result_json)
     }
-    Err(codedb_error) => {
-      match codedb_error {
-        CoreDBError::QueryError(search_logs_error) => {
+    Err(coredb_error) => {
+      match coredb_error {
+        CoreDBError::QueryError(ref search_logs_error) => {
           // Handle the error and return an appropriate status code and error message.
           match search_logs_error {
             QueryError::JsonParseError(_) => {
-              Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
             }
-            QueryError::TimeOutError(_) => Err((
-              StatusCode::INTERNAL_SERVER_ERROR,
-              "Internal server error".to_string(),
-            )),
-            QueryError::NoQueryProvided => {
-              Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
+            QueryError::IndexNotFoundError(_) => {
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
             }
+            QueryError::TimeOutError(_) => {
+              Err((StatusCode::INTERNAL_SERVER_ERROR, coredb_error.to_string()))
+            }
+            QueryError::NoQueryProvided => Err((StatusCode::BAD_REQUEST, coredb_error.to_string())),
             _ => Err((
               StatusCode::INTERNAL_SERVER_ERROR,
               "Internal server error".to_string(),
@@ -562,6 +801,7 @@ async fn search_logs(
 async fn summarize(
   State(state): State<Arc<AppState>>,
   Query(summarize_query): Query<SummarizeQuery>,
+  Path(index_name): Path<String>,
   json_body: String,
 ) -> Result<String, (StatusCode, String)> {
   debug!(
@@ -576,6 +816,7 @@ async fn summarize(
   let results = state
     .coredb
     .search_logs(
+      &index_name,
       &summarize_query.text,
       &json_body,
       summarize_query.start_time.unwrap_or(0),
@@ -644,6 +885,7 @@ async fn summarize(
 async fn search_metrics(
   State(state): State<Arc<AppState>>,
   Query(metrics_query): Query<MetricsQuery>,
+  Path(index_name): Path<String>,
   json_body: String,
 ) -> impl IntoResponse {
   debug!("MAIN: Search metrics for HTTP query: {:?}", metrics_query);
@@ -675,6 +917,7 @@ async fn search_metrics(
   let results = state
     .coredb
     .search_metrics(
+      &index_name,
       text_ref,
       &json_body,
       timeout.num_seconds() as u64,
@@ -741,6 +984,9 @@ async fn search_metrics(
 
 /// Flush the index to disk.
 async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, String)> {
+  let _ = state.coredb.flush_wal().await;
+
+  // Flush entire index, including the current segment.
   let result = state.coredb.commit(true).await;
 
   match result {
@@ -755,8 +1001,11 @@ async fn flush(State(state): State<Arc<AppState>>) -> Result<(), (StatusCode, St
 }
 
 /// Get index directory used by CoreDB.
-async fn get_index_dir(State(state): State<Arc<AppState>>) -> String {
-  state.coredb.get_index_dir()
+async fn get_index_dir(
+  State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
+) -> String {
+  state.coredb.get_index_dir(&index_name)
 }
 
 /// Ping to check if the server is up.
@@ -769,7 +1018,7 @@ async fn create_index(
   state: State<Arc<AppState>>,
   Path(index_name): Path<String>,
 ) -> Result<(), (StatusCode, String)> {
-  debug!("Creating index {}", index_name);
+  info!("Creating index {}", index_name);
 
   let result = state.coredb.create_index(&index_name).await;
 
@@ -787,7 +1036,7 @@ async fn delete_index(
   State(state): State<Arc<AppState>>,
   Path(index_name): Path<String>,
 ) -> Result<(), (StatusCode, String)> {
-  debug!("Deleting index {}", index_name);
+  info!("Deleting index {}", index_name);
 
   let result = state.coredb.delete_index(&index_name).await;
   if result.is_err() {
@@ -805,10 +1054,10 @@ mod tests {
   use std::io::Write;
 
   use axum::{
-    body::Body,
+    body::{to_bytes, Body},
     http::{self, Request, StatusCode},
   };
-  use chrono::Utc;
+  use chrono::{TimeZone, Utc};
   use serde_json::json;
   use tempdir::TempDir;
   use test_case::test_case;
@@ -840,6 +1089,7 @@ mod tests {
   fn create_test_config(
     config_dir_path: &str,
     index_dir_path: &str,
+    wal_dir_path: &str,
     container_name: &str,
     use_rabbitmq: bool,
   ) {
@@ -850,7 +1100,8 @@ mod tests {
       get_joined_path(config_dir_path, Settings::get_default_config_file_name());
     {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
-      let default_index_name = format!("default_index_name = \"{}\"\n", ".default");
+      let default_index_name = format!("default_index_name = \"{}\"\n", "default");
+      let wal_dir_path_line = format!("wal_dir_path = \"{}\"\n", wal_dir_path);
       let container_name_line = format!("container_name = \"{}\"\n", container_name);
       let use_rabbitmq_str = use_rabbitmq
         .then(|| "yes".to_string())
@@ -868,6 +1119,7 @@ mod tests {
       // Write coredb section.
       file.write_all(b"[coredb]\n").unwrap();
       file.write_all(index_dir_path_line.as_bytes()).unwrap();
+      file.write_all(wal_dir_path_line.as_bytes()).unwrap();
       file.write_all(default_index_name.as_bytes()).unwrap();
       file.write_all(b"log_messages_threshold = 1000\n").unwrap();
       file.write_all(b"metric_points_threshold = 1000\n").unwrap();
@@ -899,52 +1151,69 @@ mod tests {
 
   async fn check_search_logs(
     app: &mut Router,
+    index_name: &str,
     config_dir_path: &str,
     search_text: &str,
     query: LogsQuery,
     log_messages_expected: QueryDSLObject,
   ) -> Result<(), CoreDBError> {
-    let query_start_time = query
-      .start_time
-      .map_or_else(|| "".to_owned(), |value| format!("&start_time={}", value));
-    let query_end_time = query
-      .end_time
-      .map_or_else(|| "".to_owned(), |value| format!("&end_time={}", value))
-      .to_owned();
-    let query_string = format!(
-      "text={}{}{}",
-      encode(&query.text),
-      query_start_time,
-      query_end_time
+    debug!(
+      "Calling check_search_logs with index_name {}, config_dir_path {}, search_text {}, query: {:?}, expected log messages length {}",
+      index_name, config_dir_path, search_text, query,
+      log_messages_expected.get_messages().len(),
     );
 
-    let uri = format!("/search_logs?{}", query_string);
+    let query_string = format!(
+      "q={}",
+      encode(&query.q.unwrap_or_else(|| "default_query".to_string())),
+    );
 
-    // Now call search to get the documents.
-    let response = app
-      .call(
-        Request::builder()
-          .method(http::Method::GET)
-          .uri(uri)
-          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-          .body(Body::from(""))
-          .unwrap(),
-      )
-      .await
+    let start_time_query = query
+      .start_time
+      .as_ref()
+      .map(|start_time| format!("&start_time={}", start_time))
+      .unwrap_or_default();
+
+    let end_time_query = query
+      .end_time
+      .as_ref()
+      .map(|end_time| format!("&end_time={}", end_time))
+      .unwrap_or_default();
+
+    let query_string = format!("{}{}{}", query_string, start_time_query, end_time_query);
+
+    let path = format!("/{}/search_logs?{}", index_name, query_string);
+
+    let request = Request::builder()
+      .method(http::Method::GET)
+      .uri(path)
+      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+      .body(Body::from(""))
       .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let result = app.call(request).await;
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-      .await
-      .unwrap();
-    let log_messages_received: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    if let Ok(response) = result {
+      assert_eq!(response.status(), StatusCode::OK);
+      let body = response.into_body();
+      let max_body_size = 10 * 1024 * 1024; // Example: 10MB limit
+      let bytes = to_bytes(body, max_body_size)
+        .await
+        .expect("Failed to read body");
+      let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
+      debug!("Response content: {}", body_str);
 
-    let hits = log_messages_received["hits"]["total"]["value"]
-      .as_u64()
-      .unwrap();
+      let log_messages_received: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
-    assert_eq!(log_messages_expected.get_messages().len() as u64, hits);
+      let hits = log_messages_received["hits"]["total"]["value"]
+        .as_u64()
+        .unwrap();
+
+      assert_eq!(log_messages_expected.get_messages().len() as u64, hits);
+    } else if let Err(e) = result {
+      error!("Failed to make a call: {:?}", e);
+      return Err(CoreDBError::IOError(e.to_string()));
+    }
 
     // Flush the index.
     let response = app
@@ -959,33 +1228,48 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 2 seconds and refresh from the index directory.
-    sleep(Duration::from_millis(2000)).await;
+    // The i/o operations on Github actions may take long time to get reflected on disk. Hence, we don't run
+    // the refresh part os this test while running as part of Github actions.
+    if env::var("GITHUB_ACTIONS").is_err() {
+      // Sleep for 10 seconds and refresh from the index directory.
+      sleep(Duration::from_millis(10000)).await;
 
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
-    let start_time = query.start_time.unwrap_or(0);
-    let end_time = query
-      .end_time
-      .unwrap_or(Utc::now().timestamp_millis() as u64);
+      let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
 
-    // Handle errors from search_logs
-    let log_messages_result = refreshed_coredb
-      .search_logs(search_text, "", start_time, end_time)
-      .await;
+      let start_time = query
+        .start_time
+        .as_deref()
+        .map(|s| s.replace(' ', "+")) // Correct the format by using a char for the space
+        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+        .map(|dt| dt.timestamp_millis() as u64)
+        .unwrap_or(0); // Default to 0 if None
 
-    match log_messages_result {
-      Ok(log_messages_received) => {
-        assert_eq!(
-          log_messages_expected.get_messages().len(),
-          log_messages_received.get_messages().len()
-        );
-        assert_eq!(
-          log_messages_expected.get_messages(),
-          log_messages_received.get_messages()
-        );
-      }
-      Err(search_logs_error) => {
-        error!("Error in search_logs: {:?}", search_logs_error);
+      let end_time = query
+        .end_time
+        .as_deref()
+        .map(|s| s.replace(' ', "+")) // Correct the format by using a char for the space
+        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+        .map(|dt| dt.timestamp_millis() as u64)
+        .unwrap_or_else(|| Utc::now().timestamp_millis() as u64); // Default to current time if None
+                                                                  // Handle errors from search_logs
+      let log_messages_result = refreshed_coredb
+        .search_logs(index_name, search_text, "", start_time, end_time)
+        .await;
+
+      match log_messages_result {
+        Ok(log_messages_received) => {
+          assert_eq!(
+            log_messages_expected.get_messages().len(),
+            log_messages_received.get_messages().len()
+          );
+          assert_eq!(
+            log_messages_expected.get_messages(),
+            log_messages_received.get_messages()
+          );
+        }
+        Err(search_logs_error) => {
+          error!("Error in search_logs: {:?}", search_logs_error);
+        }
       }
     }
 
@@ -1016,6 +1300,7 @@ mod tests {
   // Check that metrics queries adhere to Prometheus input and output format
   async fn check_time_series(
     app: &mut Router,
+    index_name: &str,
     config_dir_path: &str,
     query: MetricsQuery,
     metric_points_expected: Vec<MetricPoint>,
@@ -1038,7 +1323,7 @@ mod tests {
       query_end_time
     );
 
-    let uri = format!("/search_metrics?{}", query_string);
+    let uri = format!("/{}/search_metrics?{}", index_name, query_string);
 
     let response = app
       .call(
@@ -1127,39 +1412,44 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sleep for 2 seconds to simulate delay or wait for a condition.
-    sleep(Duration::from_secs(2)).await;
+    // The i/o operations on Github actions may take long time to get reflected on disk. Hence, we don't run
+    // the refresh part os this test while running as part of Github actions.
+    if env::var("GITHUB_ACTIONS").is_err() {
+      // Sleep for 10 seconds to simulate delay or wait for a condition.
+      sleep(Duration::from_secs(10)).await;
 
-    // Refresh CoreDB instance with the given configuration directory path.
-    let refreshed_coredb = CoreDB::refresh(config_dir_path).await?;
+      // Refresh CoreDB instance with the given configuration directory path.
+      let refreshed_coredb = CoreDB::refresh(index_name, config_dir_path).await?;
 
-    // Calculate the start and end time for querying metrics post-refresh.
-    let start_time = query.start.unwrap_or(0);
-    let end_time = query
-      .end
-      .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
+      // Calculate the start and end time for querying metrics post-refresh.
+      let start_time = query.start.unwrap_or(0);
+      let end_time = query
+        .end
+        .unwrap_or_else(|| Utc::now().timestamp_millis() as u64);
 
-    // Use the refreshed CoreDB instance to search metrics with updated parameters.
-    let mut results = refreshed_coredb
-      .search_metrics(
-        &query.query.unwrap_or_default(),
-        "",
-        0,
-        start_time,
-        end_time,
-      )
-      .await?;
+      // Use the refreshed CoreDB instance to search metrics with updated parameters.
+      let mut results = refreshed_coredb
+        .search_metrics(
+          index_name,
+          &query.query.unwrap_or_default(),
+          "",
+          0,
+          start_time,
+          end_time,
+        )
+        .await?;
 
-    // If there are expected metric points and actual results, proceed to validate them.
-    if !metric_points_expected.is_empty() && !results.get_vector().is_empty() {
-      let mut tmpvec = results.take_vector();
-      let metric_points_received = tmpvec[0].get_metric_points();
-      check_metric_point_vectors(&metric_points_expected.clone(), metric_points_received);
-    } else if metric_points_expected.is_empty() && results.get_vector().is_empty() {
-      // If both expected and received results are empty, consider it as a pass.
-      info!("Both expected and received metric points are empty, test passes.");
-    } else {
-      panic!("Mismatch in expected and received results: one is empty and the other is not.");
+      // If there are expected metric points and actual results, proceed to validate them.
+      if !metric_points_expected.is_empty() && !results.get_vector().is_empty() {
+        let mut tmpvec = results.take_vector();
+        let metric_points_received = tmpvec[0].get_metric_points();
+        check_metric_point_vectors(&metric_points_expected.clone(), metric_points_received);
+      } else if metric_points_expected.is_empty() && results.get_vector().is_empty() {
+        // If both expected and received results are empty, consider it as a pass.
+        info!("Both expected and received metric points are empty, test passes.");
+      } else {
+        panic!("Mismatch in expected and received results: one is empty and the other is not.");
+      }
     }
 
     Ok(())
@@ -1172,13 +1462,17 @@ mod tests {
   async fn test_basic_main(use_rabbitmq: bool) -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_name = "test_basic_main_test";
+    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
 
     create_test_config(
       config_dir_path,
       index_dir_path,
+      wal_dir_path,
       container_name,
       use_rabbitmq,
     );
@@ -1212,7 +1506,107 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // **Part 1**: Test insertion and search of log messages
+    debug!("----------Basic main starting Part 1--------");
+
+    // **Part 1**: Test insertion and search of log messages across many indexes
+    let num_log_messages = 10;
+    for i in 0..num_log_messages {
+      let time = Utc::now().timestamp_millis() as u64;
+
+      let mut log = HashMap::new();
+      log.insert("date", json!(time));
+      log.insert("field12", json!("value1 value2"));
+      log.insert("field34", json!("value3 value4"));
+
+      let index_str = format!("{}+{}", index_name, i);
+
+      // Create a single index.
+      let response = app
+        .call(
+          Request::builder()
+            .method(http::Method::PUT)
+            .uri(&format!("/{}", index_str))
+            .body(Body::from(""))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+      assert_eq!(response.status(), StatusCode::OK);
+
+      let path = format!("/{}/append_log", index_str);
+
+      let response = app
+        .call(
+          Request::builder()
+            .method(http::Method::POST)
+            .uri(path)
+            .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+            .body(Body::from(serde_json::to_string(&log).unwrap()))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+      assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    for i in 0..num_log_messages {
+      let mut log_messages_expected: Vec<QueryLogMessage> = Vec::new();
+
+      let time = Utc::now().timestamp_millis() as u64;
+
+      // Create the expected LogMessage.
+      let mut fields = HashMap::new();
+      fields.insert("field12".to_owned(), "value1 value2".to_owned());
+      fields.insert("field34".to_owned(), "value3 value4".to_owned());
+      let text = "value1 value2 value3 value4";
+      let message = LogMessage::new_with_fields_and_text(time, &fields, text);
+
+      log_messages_expected.push(QueryLogMessage::new_with_params(0, message));
+
+      // Sort the expected log messages in reverse chronological order.
+      log_messages_expected.sort();
+
+      let search_query = &format!("value1 field34{}value4", FIELD_DELIMITER);
+
+      let mut query_object = QueryDSLObject::new();
+      query_object.set_messages(log_messages_expected);
+
+      let query = LogsQuery {
+        start_time: None,
+        end_time: None,
+        q: Some(search_query.to_owned()),
+      };
+
+      let index_str = format!("{}+{}", index_name, i);
+
+      check_search_logs(
+        &mut app,
+        &index_str,
+        config_dir_path,
+        search_query,
+        query,
+        query_object,
+      )
+      .await?;
+    }
+
+    debug!("----------Basic main starting Part 2--------");
+
+    // **Part 2**: Test insertion and search of log messages in single index
+
+    // Create a single index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
     let num_log_messages = 100;
     let mut log_messages_expected: Vec<QueryLogMessage> = Vec::new();
     for i in 0..num_log_messages {
@@ -1223,11 +1617,13 @@ mod tests {
       log.insert("field12", json!("value1 value2"));
       log.insert("field34", json!("value3 value4"));
 
+      let path = format!("/{}/append_log", index_name);
+
       let response = app
         .call(
           Request::builder()
             .method(http::Method::POST)
-            .uri("/append_log")
+            .uri(path)
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
             .body(Body::from(serde_json::to_string(&log).unwrap()))
             .unwrap(),
@@ -1257,18 +1653,42 @@ mod tests {
     let query = LogsQuery {
       start_time: None,
       end_time: None,
-      text: search_query.to_owned(),
-    };
-    check_search_logs(&mut app, config_dir_path, search_query, query, query_object).await?;
-
-    // End time in this query is too old - this should yield 0 results.
-    let query_too_old = LogsQuery {
-      start_time: Some(1),
-      end_time: Some(10000),
-      text: search_query.to_owned(),
+      q: Some(search_query.to_owned()),
     };
     check_search_logs(
       &mut app,
+      index_name,
+      config_dir_path,
+      search_query,
+      query,
+      query_object,
+    )
+    .await?;
+
+    debug!("----------Basic main starting Part 3--------");
+
+    // **Part 3**: End time in this query is too old - this should yield 0 results.
+    let start_time = Utc
+      .timestamp_opt(1, 0) // Creates a DateTime<Utc> at 1 second past the UNIX epoch
+      .single()
+      .expect("Invalid start timestamp")
+      .to_rfc3339(); // Converts the DateTime<Utc> to an RFC 3339 formatted string
+
+    let end_time = Utc
+      .timestamp_opt(10, 0) // Creates a DateTime<Utc> at 10 seconds past the UNIX epoch
+      .single()
+      .expect("Invalid end timestamp")
+      .to_rfc3339(); // Converts the DateTime<Utc> to an RFC 3339 formatted string
+
+    let query_too_old = LogsQuery {
+      start_time: Some(start_time),
+      end_time: Some(end_time),
+      q: Some(search_query.to_owned()),
+    };
+
+    check_search_logs(
+      &mut app,
+      index_name,
       config_dir_path,
       search_query,
       query_too_old,
@@ -1276,7 +1696,9 @@ mod tests {
     )
     .await?;
 
-    // **Part 2**: Test insertion and search of time series metric points.
+    debug!("----------Basic main starting Part 4--------");
+
+    // **Part 4**: Test insertion and search of time series metric points.
     let num_metric_points = 100;
     let mut metric_points_expected = Vec::new();
     let name_for_metric_name_label = "__name__";
@@ -1290,12 +1712,14 @@ mod tests {
       let json_str = format!("{{\"date\": {}, \"{}\":{}}}", time, metric_name, value);
       metric_points_expected.push(metric_point);
 
+      let path = format!("/{}/append_metric", index_name);
+
       // Insert the metric.
       let response = app
         .call(
           Request::builder()
             .method(http::Method::POST)
-            .uri("/append_metric")
+            .uri(path)
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
             .body(Body::from(json_str))
             .unwrap(),
@@ -1316,7 +1740,14 @@ mod tests {
       start: None,
       end: None,
     };
-    check_time_series(&mut app, config_dir_path, query, metric_points_expected).await?;
+    check_time_series(
+      &mut app,
+      index_name,
+      config_dir_path,
+      query,
+      metric_points_expected,
+    )
+    .await?;
 
     // End time in this query is too old - this should yield 0 results.
     // Test legacy Infino syntax here
@@ -1328,7 +1759,7 @@ mod tests {
       start: Some(1),
       end: Some(10000),
     };
-    check_time_series(&mut app, config_dir_path, query, Vec::new()).await?;
+    check_time_series(&mut app, index_name, config_dir_path, query, Vec::new()).await?;
 
     // Check whether the /flush works.
     let response = app
@@ -1349,14 +1780,93 @@ mod tests {
     Ok(())
   }
 
+  #[tokio::test]
+  async fn test_body_limit() -> Result<(), CoreDBError> {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "index_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+    let container_name = "infino-test-main-rs";
+
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      wal_dir_path,
+      container_name,
+      false,
+    );
+
+    // Create the app.
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // We need a http body of >2MB and <5MB for this test.
+    let num_log_messages = 15 * 1024;
+    let mut logs = Vec::new();
+    let value = json!("value1 value2 value3 value4 value5 value6 value7 value8 value9");
+    for i in 0..num_log_messages {
+      let mut log = HashMap::new();
+      log.insert("date", json!(i));
+      log.insert("field1", value.clone());
+      log.insert("field2", value.clone());
+      log.insert("field3", value.clone());
+      logs.push(log);
+    }
+
+    let body = serde_json::to_string(logs.as_slice()).unwrap();
+    // Make sure that the body is >2MB, but <5MB
+    let body_len = body.len();
+    assert!(body_len > 2 * 1024 * 1024 && body_len < 5 * 1024 * 1024);
+
+    // Create an index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let path = format!("/{}/append_log", index_name);
+
+    // Send a large request.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(path)
+          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    let status = response.status();
+
+    // We may return OK or TOO_MANY_REQUESTS as the number of uncommitted segments are too high.
+    // However, we should not return other error codes such as CONTENT_TOO_LARGE.
+    assert!(status == StatusCode::OK || status == StatusCode::TOO_MANY_REQUESTS);
+
+    Ok(())
+  }
+
   /// Write test to test Create and Delete index APIs.
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
   async fn test_create_delete_index(use_rabbitmq: bool) {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_dir = TempDir::new("index_test").unwrap();
+    let index_name = "index_test";
+    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
     let container_name = "infino-test-main-rs";
     let storage = Storage::new(&StorageType::Local)
       .await
@@ -1365,6 +1875,7 @@ mod tests {
     create_test_config(
       config_dir_path,
       index_dir_path,
+      wal_dir_path,
       container_name,
       use_rabbitmq,
     );
@@ -1373,7 +1884,6 @@ mod tests {
     let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
     // Create an index.
-    let index_name = "test_index";
     let response = app
       .call(
         Request::builder()
@@ -1409,5 +1919,79 @@ mod tests {
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
+  }
+
+  #[test_case(false ; "do not use rabbitmq")]
+  #[tokio::test]
+  async fn test_bulk_operation(use_rabbitmq: bool) {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "bulk_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+    let container_name = "infino-test-main-rs";
+
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      wal_dir_path,
+      container_name,
+      use_rabbitmq,
+    );
+
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // Prepare the bulk request body
+    let bulk_request = json!([
+        { "index": { "_index": index_name, "_id": "1" } },
+        { "title": "Document 1", "content": "Example content 1" },
+        { "delete": { "_index": index_name, "_id": "2" } },
+        { "create": { "_index": index_name, "_id": "3" } },
+        { "title": "Document 3", "content": "Example content 3" },
+        { "update": { "_index": index_name, "_id": "1" } },
+        { "doc": { "content": "Updated content 1" } },
+    ]);
+
+    // Create a single index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = serde_json::to_string(&bulk_request).unwrap();
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(path)
+          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Example assertion on the response
+    assert_eq!(response_json["errors"], false);
   }
 }

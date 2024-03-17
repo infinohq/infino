@@ -33,6 +33,8 @@ plugins/.gradle
 # the index created by coredb and server test if default config is used
 data
 server/data
+wal
+server/wal
 
 # the documentation artifacts
 docs/.rustc_info.json

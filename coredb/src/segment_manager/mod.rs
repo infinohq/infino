@@ -9,3 +9,4 @@ mod metadata;
 pub mod search_logs;
 pub(crate) mod search_metrics;
 pub(super) mod segment;
+pub mod wal;

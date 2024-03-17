@@ -6,7 +6,7 @@ index_dir_path = "data"
 # "cloud_storage_region" can be used to set a region for the cloud provider
 
 ### Index configuration.
-default_index_name = ".default"
+default_index_name = "default"
 
 # Maximum number of log messages or metric points in a segment during appends. A new segment
 # will be created after these thresholds are reached.
@@ -26,6 +26,10 @@ retention_days = 30
 
 # Maximum size of segments in megabyte. Merging of older segments cannot exceed more than this size.
 target_segment_size_megabytes = 1024  # 1GB
+
+# Settings for write ahead log.
+wal_dir_path = "wal"
+
 
 [server]
 port = 3000

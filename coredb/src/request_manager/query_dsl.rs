@@ -118,6 +118,9 @@ impl Segment {
       Rule::match_phrase_query => {
         results = self.process_match_phrase_query(node, timeout).await?;
       }
+      Rule::prefix_query => {
+        results = self.process_prefix_query(node, timeout).await?;
+      }
       _ => {
         return Err(QueryError::UnsupportedQuery(format!(
           "Unsupported rule: {:?}",
@@ -135,6 +138,40 @@ impl Segment {
     );
 
     Ok(results)
+  }
+
+  /// Sets the fieldname based on the given node
+  fn set_fieldname(&self, node: &Pair<'_, Rule>, fieldname: &mut Option<&str>) {
+    if let Some(field) = node.clone().into_inner().next() {
+      let cloned_field = field.as_str().to_string();
+      *fieldname = Some(Box::leak(cloned_field.into_boxed_str()));
+    } else {
+      *fieldname = None;
+    }
+  }
+
+  /// Sets the case_insensitive flag based on the given node
+  fn set_case_insensitive(
+    &self,
+    node: &Pair<'_, Rule>,
+    case_insensitive: &mut bool,
+    default: bool,
+  ) {
+    if let Some(value) = node.clone().into_inner().next() {
+      *case_insensitive = value.as_str().parse().unwrap_or(default);
+    } else {
+      *case_insensitive = default;
+    }
+  }
+
+  /// Extracts the query text from the given node
+  fn set_query_text(&self, node: &Pair<'_, Rule>, query_text: &mut Option<&str>) {
+    if let Some(value) = node.clone().into_inner().next() {
+      let cloned_value = value.as_str().to_string();
+      *query_text = Some(Box::leak(cloned_value.into_boxed_str()));
+    } else {
+      *query_text = None;
+    }
   }
 
   // Boolean Query Processor: https://opensearch.org/docs/latest/query-dsl/compound/bool/
@@ -278,25 +315,13 @@ impl Segment {
 
     let mut fieldname: Option<&str> = None;
     let mut query_text: Option<&str> = None;
-    let mut case_insensitive = true;
+    let mut case_insensitive = false;
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
-        Rule::value => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::case_insensitive => {
-          case_insensitive = node
-            .into_inner()
-            .next()
-            .map(|v| v.as_str().parse::<bool>().unwrap_or(false))
-            .unwrap_or(false);
-        }
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::value => self.set_query_text(&node, &mut query_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, false),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -348,11 +373,7 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
         Rule::field_element => {
           query_values.push(node.into_inner().next().map(|v| v.as_str()).unwrap_or(""));
         }
@@ -414,24 +435,12 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
         Rule::operator => {
           term_operator = node.into_inner().next().map_or("OR", |v| v.as_str());
         }
-        Rule::match_string | Rule::query => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
-        Rule::case_insensitive => {
-          case_insensitive = node
-            .into_inner()
-            .next()
-            .map(|v| v.as_str().parse::<bool>().unwrap_or(true))
-            .unwrap_or(true);
-        }
+        Rule::match_string | Rule::query => self.set_query_text(&node, &mut query_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, true),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -480,14 +489,8 @@ impl Segment {
 
     while let Some(node) = stack.pop_front() {
       match node.as_rule() {
-        Rule::fieldname => {
-          if let Some(field) = node.into_inner().next() {
-            fieldname = Some(field.as_str());
-          }
-        }
-        Rule::match_phrase_string | Rule::query => {
-          query_text = node.into_inner().next().map(|v| v.as_str());
-        }
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::match_phrase_string | Rule::query => self.set_query_text(&node, &mut query_text),
         _ => {
           for inner_node in node.into_inner() {
             stack.push_back(inner_node);
@@ -531,6 +534,75 @@ impl Segment {
       )),
     }
   }
+
+  /// Prefix Query Processor: https://opensearch.org/docs/latest/query-dsl/term/prefix/
+  async fn process_prefix_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+    timeout: u64,
+  ) -> Result<QueryDSLDocIds, QueryError> {
+    debug!("QueryDSL: Processing prefix query {:?}", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
+
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut fieldname: Option<&str> = None;
+    let mut prefix_text: Option<&str> = None;
+    let mut case_insensitive = false;
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::prefix_string | Rule::value => self.set_query_text(&node, &mut prefix_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, false),
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    match (fieldname, prefix_text) {
+      (Some(field), Some(prefix_text_str)) => {
+        let prefix_phrase_terms: Vec<String> =
+          analyze_query_text(prefix_text_str, Some(field), case_insensitive).await;
+
+        match self
+          .get_doc_ids_with_prefix_phrase(
+            prefix_phrase_terms,
+            field,
+            prefix_text_str.trim_matches('"'),
+            case_insensitive,
+          )
+          .await
+        {
+          Ok(matching_document_ids) => {
+            let mut results = QueryDSLDocIds::new();
+            let execution_time = check_query_time(timeout, query_start_time)?;
+            results.set_execution_time(execution_time);
+            results.set_ids(matching_document_ids);
+
+            debug!(
+              "QueryDSL: Returning results from prefix query {:?}",
+              results
+            );
+
+            Ok(results)
+          }
+          Err(err) => Err(err),
+        }
+      }
+      (None, _) => Err(QueryError::UnsupportedQuery(
+        "Field name is missing".to_string(),
+      )),
+      (_, None) => Err(QueryError::UnsupportedQuery(
+        "Prefix query string is missing".to_string(),
+      )),
+    }
+  }
 }
 
 #[cfg(test)]
@@ -545,10 +617,10 @@ mod tests {
   use super::*;
   use pest::Parser;
 
-  fn create_mock_segment() -> Segment {
+  async fn create_mock_segment() -> Segment {
     config_test_logger();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     let log_messages = [
       ("log 1", "this is a test log message"),
@@ -571,7 +643,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_must_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -611,7 +683,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_should_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -652,7 +724,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_must_not_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -685,7 +757,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_boolean_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
         "query": {
@@ -730,7 +802,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -768,7 +840,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_phrase_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -810,7 +882,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_all_query_with_multiple_terms_anded() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
         "query": {
@@ -852,7 +924,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_all_query_with_multiple_terms() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -893,7 +965,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_match_all_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -926,7 +998,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_term_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
       "query": {
@@ -959,17 +1031,18 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_terms_array_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
-      "query": {
-        "terms": {
-          "field1": [
-            "field1value",
-            "field2value"
-          ]
+        "query": {
+            "terms": {
+                "field1": [
+                    "field1value",
+                    "field2value"
+                ],
+                "boost": 1.0
+            }
         }
-      }
     }
     "#;
 
@@ -994,7 +1067,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_search_with_nested_boolean_query() {
-    let segment = create_mock_segment();
+    let segment = create_mock_segment().await;
 
     let query_dsl_query = r#"{
         "query": {
@@ -1029,6 +1102,48 @@ mod tests {
               log.get_message().get_text().contains("another")
                 || log.get_message().get_text().contains("different"),
               "Each log should contain 'another' or 'different'."
+            );
+          }
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_prefix_query() {
+    let segment = create_mock_segment().await;
+
+    let query_dsl_query = r#"{
+        "query": {
+            "prefix": {
+                "key": {
+                    "value": "lo"
+                }
+            }
+        }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert_eq!(
+            results.get_messages().len(),
+            5,
+            "There should be exactly 5 logs matching the prefix query."
+          );
+
+          for log in results.get_messages().iter() {
+            let key_field_value = log.get_message().get_fields().get("key");
+
+            assert!(
+              key_field_value.map_or(false, |value| value.starts_with("lo")),
+              "Each log should have 'key' field starting with 'lo'."
             );
           }
         }

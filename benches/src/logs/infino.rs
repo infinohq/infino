@@ -46,6 +46,7 @@ impl InfinoEngine {
         }
         if let Ok(message) = line {
           self.coredb.append_log_message(
+            "default",
             Utc::now().timestamp_millis() as u64,
             &HashMap::new(),
             message.as_str(),
@@ -53,7 +54,7 @@ impl InfinoEngine {
         }
       }
 
-      self.coredb.commit().await.expect("Could not commit coredb");
+      self.coredb.commit(false).await.expect("Could not commit coredb");
     }
     let elapsed = now.elapsed().as_micros();
     println!(
@@ -69,7 +70,7 @@ impl InfinoEngine {
 
     match self
       .coredb
-      .search_logs(query, "", range_start_time, range_end_time)
+      .search_logs("default", query, "", range_start_time, range_end_time)
       .await
     {
       Ok(result) => {
@@ -78,7 +79,7 @@ impl InfinoEngine {
           "Infino time required for searching logs {} is : {} microseconds. Num of results {}",
           query,
           elapsed,
-          result.len()
+          result.get_messages().len()
         );
         elapsed
       }

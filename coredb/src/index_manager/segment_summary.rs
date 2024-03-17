@@ -130,7 +130,7 @@ mod tests {
     // Check if the SegmentSummary implements Sync + Send.
     is_sync_send::<SegmentSummary>();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     let segment_summary = SegmentSummary::new(1, &segment);
 
     assert_eq!(segment_summary.get_segment_id(), segment.get_id());
@@ -143,15 +143,15 @@ mod tests {
     );
   }
 
-  #[test]
-  pub fn test_sort_segment_summary() {
+  #[tokio::test]
+  pub async fn test_sort_segment_summary() {
     let num_segments = 3;
     let mut segment_summaries = Vec::new();
     let mut expected_segment_ids = Vec::new();
 
     // Create a few segments along with their summaries.
     for i in 1..=num_segments {
-      let segment = Segment::new();
+      let segment = Segment::new_with_temp_wal();
       segment
         .append_log_message(i, &HashMap::new(), "some log message")
         .expect("Could not append to segment");

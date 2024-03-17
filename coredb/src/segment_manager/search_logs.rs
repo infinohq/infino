@@ -135,7 +135,8 @@ impl Serialize for QueryLogMessage {
     let log_message = &self.message;
     let mut map = serializer.serialize_map(None)?;
 
-    map.serialize_entry("_index", &"your_index_name_here")?;
+    //TODO: Inject the index name
+    map.serialize_entry("_index", "DUMMY")?;
     map.serialize_entry("_id", &self.id)?;
     map.serialize_entry("_score", &1.0)?;
 
@@ -529,12 +530,81 @@ impl Segment {
     matching_document_ids
   }
 
+  /// Retrieve document IDs with prefix phrase match.
+  ///
+  /// # Arguments
+  ///
+  /// * `prefix_phrase_terms` - A vector of terms forming the prefix phrase, of which only the last term's prefix need to be considered
+  /// * `field` - The field to search within.
+  /// * `prefix_text_str` - The exact prefix text string to match.
+  /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
+  ///
+  pub async fn get_doc_ids_with_prefix_phrase(
+    &self,
+    prefix_phrase_terms: Vec<String>,
+    field: &str,
+    prefix_text_str: &str,
+    case_insensitive: bool,
+  ) -> Result<Vec<u32>, QueryError> {
+    let mut matching_document_ids = Vec::new();
+
+    if prefix_phrase_terms.len() == 1 {
+      // If there's only a single term, directly get the terms with prefix, and search them in the segment
+      let prefix_matches = self.get_terms_with_prefix(&prefix_phrase_terms[0], case_insensitive);
+      let or_doc_ids = self.search_inverted_index(prefix_matches, "OR").await?;
+
+      // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
+      // and return the specific document IDs
+      matching_document_ids.extend(self.get_bool_prefix_matches(
+        &or_doc_ids,
+        field,
+        prefix_text_str,
+        case_insensitive,
+      ));
+    } else {
+      // Get all prefix matches for the last term
+
+      let prefix_matches =
+        self.get_terms_with_prefix(prefix_phrase_terms.last().unwrap(), case_insensitive);
+
+      // Prepare a list to store document IDs from OR operations
+
+      let mut or_doc_ids: Vec<u32> = Vec::new();
+
+      // Perform AND operations on n-1 terms from analyzed_query and the last term's prefix matches
+      for term in prefix_matches {
+        let mut and_query = prefix_phrase_terms.clone();
+        and_query.pop(); // Remove the last term from analyzed_query
+        and_query.push(term.clone()); // Add the current term from prefix_matches
+
+        let and_search_result = self.search_inverted_index(and_query, "AND").await?;
+        or_doc_ids.extend(and_search_result);
+      }
+      // Remove duplicates from the list of document IDs
+
+      or_doc_ids.dedup();
+
+      // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
+      // and return the specific document IDs
+
+      matching_document_ids.extend(self.get_bool_prefix_matches(
+        &or_doc_ids,
+        field,
+        prefix_text_str,
+        case_insensitive,
+      ));
+    }
+
+    Ok(matching_document_ids)
+  }
+
   /// Match documents with a boolean prefix in a specified field.
-  pub fn get_bool_prefix_matches(
+  fn get_bool_prefix_matches(
     &self,
     doc_ids: &[u32],
     field_name: &str,
     prefix_text: &str,
+    case_insensitive: bool,
   ) -> Vec<u32> {
     doc_ids
       .iter()
@@ -545,7 +615,15 @@ impl Segment {
             .get_fields()
             .get(field_name)
             .and_then(|field_value| {
-              if field_value.starts_with(prefix_text) {
+              let value_to_compare = if case_insensitive {
+                field_value.to_lowercase()
+              } else {
+                field_value.to_string()
+              };
+
+              if case_insensitive && value_to_compare.starts_with(&prefix_text.to_lowercase())
+                || !case_insensitive && value_to_compare.starts_with(prefix_text)
+              {
                 Some(log_id)
               } else {
                 None
@@ -1390,7 +1468,7 @@ mod tests {
   fn create_mock_segment() -> Segment {
     config_test_logger();
 
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
 
     segment.insert_in_terms("term1", 1);
     segment.insert_in_terms("term2", 2);
@@ -1456,7 +1534,7 @@ mod tests {
 
   #[test]
   fn test_get_postings_lists_empty_segment() {
-    let segment = Segment::new();
+    let segment = Segment::new_with_temp_wal();
     let terms = vec!["term1".to_string(), "term2".to_string()];
     let result = segment.get_postings_lists(&terms);
     assert!(matches!(result, Err(QueryError::PostingsListError(_))));
@@ -1745,9 +1823,9 @@ mod tests {
     );
   }
 
-  #[test]
-  fn test_match_exact_phrase() {
-    let segment = Segment::new();
+  #[tokio::test]
+  async fn test_match_exact_phrase() {
+    let segment = Segment::new_with_temp_wal();
 
     segment
       .append_log_message(1001, &HashMap::new(), "log 1")
