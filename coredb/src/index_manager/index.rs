@@ -386,7 +386,7 @@ impl Index {
     message: &str,
   ) -> Result<(), CoreDBError> {
     debug!(
-      "Appending log message, time: {}, fields: {:?}, message: {}",
+      "INDEX: Appending log message, time: {}, fields: {:?}, message: {}",
       time, fields, message
     );
 
