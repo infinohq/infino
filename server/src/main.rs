@@ -40,7 +40,7 @@ use coredb::request_manager::query_dsl_object::QueryDSLObject;
 use crossbeam::atomic::AtomicCell;
 use hyper::StatusCode;
 use lazy_static::lazy_static;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
@@ -50,6 +50,7 @@ use tracing_subscriber::EnvFilter;
 
 use coredb::utils::environment::load_env;
 use coredb::utils::error::{CoreDBError, QueryError};
+use coredb::utils::request::{check_query_time, parse_time_range};
 use coredb::utils::request::{check_query_time, parse_time_range};
 use coredb::CoreDB;
 
@@ -168,6 +169,7 @@ async fn app(
     tokio::spawn(check_and_start_background_threads(shared_state.clone()));
 
   // Build our application with a route
+  // TODO: Support use case when index is not specified in the bulk call
   let router: Router = Router::new()
     // GET methods
     .route("/:index_name/get_index_dir", get(get_index_dir))
@@ -180,6 +182,7 @@ async fn app(
     // POST methods
     .route("/:index_name/append_log", post(append_log))
     .route("/:index_name/append_metric", post(append_metric))
+    .route("/:index_name/bulk", post(bulk))
     .route("/flush", post(flush))
     // PUT and DELETE methods
     .route("/:index_name", put(create_index))
@@ -324,6 +327,55 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
   Ok(timestamp)
 }
 
+// Helper function to append log messages
+async fn append_single_log_message(
+  obj: Map<String, Value>,
+  is_queue: bool,
+  index_name: &str,
+  state: Arc<AppState>,
+  timestamp_key: &str,
+) -> Result<(), CoreDBError> {
+  let obj_string = serde_json::to_string(&obj).unwrap();
+  if is_queue {
+    state
+      .queue
+      .as_ref()
+      .unwrap()
+      .publish(&obj_string)
+      .await
+      .unwrap();
+  }
+
+  let timestamp = get_timestamp(&obj, timestamp_key).unwrap_or_else(|err| {
+    warn!(
+      "Timestamp error, adding current time stamp. Entry {:?}: {}",
+      obj, err
+    );
+    chrono::Utc::now().timestamp_millis() as u64
+  });
+
+  let mut fields: HashMap<String, String> = HashMap::new();
+  let mut text = String::new();
+  let count = obj.len();
+  for (i, (key, value)) in obj.iter().enumerate() {
+    if key != timestamp_key && value.is_string() {
+      let value_str = value.as_str().unwrap();
+      fields.insert(key.to_owned(), value_str.to_owned());
+      text.push_str(value_str);
+
+      if i != count - 1 {
+        // Seperate different field entries in text by space, so that they can be tokenized.
+        text.push(' ');
+      }
+    }
+  }
+
+  state
+    .coredb
+    .append_log_message(index_name, timestamp, &fields, &text)
+    .await
+}
+
 /// Append log data to CoreDB.
 #[allow(unused_assignments)]
 async fn append_log(
@@ -356,48 +408,13 @@ async fn append_log(
   let server_settings = state.settings.get_server_settings();
   let timestamp_key = server_settings.get_timestamp_key();
 
-  let mut items = Vec::new(); // Initialize vector to store items in bulk response
+  let mut items = Vec::new();
 
+  // Append each entry
+  // TODO: Skip logs with errors instead of throwing
   for obj in log_json_objects {
-    let obj_string = serde_json::to_string(&obj).unwrap();
-    if is_queue {
-      state
-        .queue
-        .as_ref()
-        .unwrap()
-        .publish(&obj_string)
-        .await
-        .unwrap();
-    }
-
-    let timestamp = get_timestamp(&obj, timestamp_key).unwrap_or_else(|err| {
-      error!(
-        "Timestamp error, adding current time stamp. Entry {:?}: {}",
-        obj, err
-      );
-      chrono::Utc::now().timestamp_millis() as u64
-    });
-
-    let mut fields: HashMap<String, String> = HashMap::new();
-    let mut text = String::new();
-    let count = obj.len();
-    for (i, (key, value)) in obj.iter().enumerate() {
-      if key != timestamp_key && value.is_string() {
-        let value_str = value.as_str().unwrap();
-        fields.insert(key.to_owned(), value_str.to_owned());
-        text.push_str(value_str);
-
-        if i != count - 1 {
-          // Seperate different field entries in text by space, so that they can be tokenized.
-          text.push(' ');
-        }
-      }
-    }
-
-    let result = state
-      .coredb
-      .append_log_message(&index_name, timestamp, &fields, &text)
-      .await;
+    let result =
+      append_single_log_message(obj, is_queue, &index_name, state.clone(), timestamp_key).await;
 
     match result {
       Ok(doc_id) => {
@@ -551,6 +568,162 @@ async fn append_metric(
   Ok(())
 }
 
+/// Bulk append data to CoreDB.
+#[allow(unused_assignments)]
+#[allow(dead_code)]
+async fn bulk(
+  State(state): State<Arc<AppState>>,
+  Path(index_name): Path<String>,
+  Json(request_json): Json<serde_json::Value>,
+) -> Result<String, (StatusCode, String)> {
+  debug!("Executing bulk append request {}", request_json);
+
+  let append_start_time = Utc::now().timestamp_millis() as u64;
+
+  let mut response = String::new();
+
+  state
+    .wal_file
+    .clone()
+    .write_all(&request_json.to_string().into_bytes()[..])
+    .unwrap();
+
+  let is_queue = state.queue.is_some();
+
+  if !request_json.is_array() {
+    let msg =
+      "Invalid bulk append request format: Expected an array of actions and documents.".to_string();
+    error!("{}", msg);
+    return Err((StatusCode::BAD_REQUEST, msg));
+  }
+
+  let server_settings = state.settings.get_server_settings();
+  let timestamp_key = server_settings.get_timestamp_key();
+
+  let mut items = Vec::new();
+  let actions = request_json.as_array().unwrap();
+  let mut i = 0;
+
+  while i < actions.len() {
+    let action_obj = &actions[i];
+    i += 1; // Move to the next item, potentially the document.
+
+    let operation = action_obj.as_object().and_then(|obj| {
+      obj.keys().next().map(String::from) // Gets the first key as the operation type.
+    });
+
+    match operation.as_deref() {
+      Some("index") | Some("create") => {
+        if i >= actions.len() {
+          let msg = "Missing document for index/create operation.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+        let document = &actions[i];
+        i += 1; // Move past the document for the next iteration.
+
+        // Ensure document is an object and convert to Map<String, Value>
+        if let Some(doc_map) = document.as_object() {
+          let result = append_single_log_message(
+            doc_map.clone(),
+            is_queue,
+            &index_name,
+            state.clone(),
+            timestamp_key,
+          )
+          .await;
+
+          match result {
+            Ok(doc_id) => {
+              let index_item = json!({
+                  "index": {
+                      "_index": "my_index",
+                      "_type": "_doc",
+                      "_id": doc_id,
+                      "_version": 1,
+                      "result": "created",
+                      "_shards": {
+                          "total": 1,
+                          "successful": 1,
+                          "failed": 0
+                      },
+                      "_seq_no": 0,
+                      "_primary_term": 1
+                  }
+              });
+              items.push(index_item);
+            }
+            Err(error) => {
+              match error {
+                CoreDBError::TooManyAppendsError() => {
+                  return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()))
+                }
+                CoreDBError::IndexNotFound(_) => {
+                  return Err((StatusCode::BAD_REQUEST, error.to_string()))
+                }
+                _ => {
+                  return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string()));
+                }
+              };
+            }
+          }
+        } else {
+          let msg = "Document for index/create operation is not a valid JSON object.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+      }
+      Some("delete") => {
+        let msg = "Missing document for update operation.".to_string();
+        warn!("{}", msg);
+        continue;
+      }
+      Some("update") => {
+        if i >= actions.len() {
+          let msg = "Missing document for update operation.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+        let update_doc = &actions[i];
+        i += 1; // Move past the document for the next iteration.
+
+        if let Some(doc) = update_doc.as_object() {
+          if doc.contains_key("doc") || doc.contains_key("doc_as_upsert") {
+            // Current unsupported
+          } else {
+            let msg = "Invalid update document format.".to_string();
+            error!("{}", msg);
+            return Err((StatusCode::BAD_REQUEST, msg));
+          }
+        } else {
+          let msg = "Update operation requires a valid JSON object.".to_string();
+          error!("{}", msg);
+          return Err((StatusCode::BAD_REQUEST, msg));
+        }
+      }
+      _ => {
+        let msg = "Unknown or unsupported action in bulk append request.".to_string();
+        error!("{}", msg);
+        return Err((StatusCode::BAD_REQUEST, msg));
+      }
+    }
+  }
+
+  // Constructing the bulk response JSON
+  let response_json = json!({
+      // Check_query_time will not throw an error when timeout is 0. Fine to unwrap().
+      "took": check_query_time(0, append_start_time).unwrap(),
+      "errors": false,
+      "items": items
+  });
+
+  // Serialize the JSON response
+  response =
+    serde_json::to_string(&response_json).expect("Could not convert append response to JSON");
+
+  Ok(response)
+}
+
 /// Search logs in CoreDB.
 async fn search_logs(
   State(state): State<Arc<AppState>>,
@@ -596,24 +769,21 @@ async fn search_logs(
         serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
       Ok(result_json)
     }
-    Err(codedb_error) => {
-      match codedb_error {
-        CoreDBError::QueryError(search_logs_error) => {
+    Err(coredb_error) => {
+      match coredb_error {
+        CoreDBError::QueryError(ref search_logs_error) => {
           // Handle the error and return an appropriate status code and error message.
           match search_logs_error {
             QueryError::JsonParseError(_) => {
-              Err((StatusCode::BAD_REQUEST, "Invalid JSON input".to_string()))
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
             }
             QueryError::IndexNotFoundError(_) => {
-              Err((StatusCode::BAD_REQUEST, "Could not find index".to_string()))
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
             }
-            QueryError::TimeOutError(_) => Err((
-              StatusCode::INTERNAL_SERVER_ERROR,
-              "Internal server error".to_string(),
-            )),
-            QueryError::NoQueryProvided => {
-              Err((StatusCode::BAD_REQUEST, "No query provided".to_string()))
+            QueryError::TimeOutError(_) => {
+              Err((StatusCode::INTERNAL_SERVER_ERROR, coredb_error.to_string()))
             }
+            QueryError::NoQueryProvided => Err((StatusCode::BAD_REQUEST, coredb_error.to_string())),
             _ => Err((
               StatusCode::INTERNAL_SERVER_ERROR,
               "Internal server error".to_string(),
@@ -1650,6 +1820,19 @@ mod tests {
     let body_len = body.len();
     assert!(body_len > 2 * 1024 * 1024 && body_len < 5 * 1024 * 1024);
 
+    // Create an index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
     let path = format!("/{}/append_log", index_name);
 
     // Send a large request.
@@ -1736,5 +1919,79 @@ mod tests {
 
     // Stop the RabbbitMQ container.
     let _ = RabbitMQ::stop_queue_container(container_name);
+  }
+
+  #[test_case(false ; "do not use rabbitmq")]
+  #[tokio::test]
+  async fn test_bulk_operation(use_rabbitmq: bool) {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "bulk_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+    let container_name = "infino-test-main-rs";
+
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      wal_dir_path,
+      container_name,
+      use_rabbitmq,
+    );
+
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    // Prepare the bulk request body
+    let bulk_request = json!([
+        { "index": { "_index": index_name, "_id": "1" } },
+        { "title": "Document 1", "content": "Example content 1" },
+        { "delete": { "_index": index_name, "_id": "2" } },
+        { "create": { "_index": index_name, "_id": "3" } },
+        { "title": "Document 3", "content": "Example content 3" },
+        { "update": { "_index": index_name, "_id": "1" } },
+        { "doc": { "content": "Updated content 1" } },
+    ]);
+
+    // Create a single index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = serde_json::to_string(&bulk_request).unwrap();
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(path)
+          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Example assertion on the response
+    assert_eq!(response_json["errors"], false);
   }
 }

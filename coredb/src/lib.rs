@@ -14,7 +14,7 @@ pub mod utils;
 
 use std::collections::HashMap;
 
-use ::log::{debug, info};
+use ::log::{debug, error, info};
 use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pest::error::Error as PestError;
@@ -161,10 +161,14 @@ impl CoreDB {
       time, fields, text
     );
 
-    let index = self
-      .index_map
-      .get(index_name)
-      .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
+    let index = match self.index_map.get(index_name) {
+      Some(index) => index,
+      None => {
+        let error = QueryError::IndexNotFoundError(index_name.to_string());
+        error!("Failed to get index '{}': {:?}", index_name, error);
+        return Err(utils::error::CoreDBError::QueryError(error));
+      }
+    };
 
     index.append_log_message(time, fields, text).await
   }
