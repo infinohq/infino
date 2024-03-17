@@ -168,7 +168,7 @@ async fn app(
     tokio::spawn(check_and_start_background_threads(shared_state.clone()));
 
   // Build our application with a route
-  // TODO: Support use case when index is not specified in the bulk_append call
+  // TODO: Support use case when index is not specified in the bulk call
   let router: Router = Router::new()
     // GET methods
     .route("/:index_name/get_index_dir", get(get_index_dir))
@@ -181,7 +181,7 @@ async fn app(
     // POST methods
     .route("/:index_name/append_log", post(append_log))
     .route("/:index_name/append_metric", post(append_metric))
-    .route("/:index_name/bulk_append", post(bulk_append))
+    .route("/:index_name/bulk", post(bulk))
     .route("/flush", post(flush))
     // PUT and DELETE methods
     .route("/:index_name", put(create_index))
@@ -454,7 +454,7 @@ async fn append_log(
     }
   }
 
-  // Constructing the bulk_append response JSON
+  // Constructing the bulk response JSON
   let response_json = json!({
       // Check_query_time will not throw an error when timeout is 0. Fine to unwrap().
       "took": check_query_time(0, append_start_time).unwrap(),
@@ -570,7 +570,7 @@ async fn append_metric(
 /// Bulk append data to CoreDB.
 #[allow(unused_assignments)]
 #[allow(dead_code)]
-async fn bulk_append(
+async fn bulk(
   State(state): State<Arc<AppState>>,
   Path(index_name): Path<String>,
   Json(request_json): Json<serde_json::Value>,
@@ -708,7 +708,7 @@ async fn bulk_append(
     }
   }
 
-  // Constructing the bulk_append response JSON
+  // Constructing the bulk response JSON
   let response_json = json!({
       // Check_query_time will not throw an error when timeout is 0. Fine to unwrap().
       "took": check_query_time(0, append_start_time).unwrap(),
@@ -1922,10 +1922,10 @@ mod tests {
 
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_bulk_append_operation(use_rabbitmq: bool) {
+  async fn test_bulk_operation(use_rabbitmq: bool) {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "bulk_append_test";
+    let index_name = "bulk_test";
     let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
@@ -1942,8 +1942,8 @@ mod tests {
 
     let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
-    // Prepare the bulk_append request body
-    let bulk_append_request = json!([
+    // Prepare the bulk request body
+    let bulk_request = json!([
         { "index": { "_index": index_name, "_id": "1" } },
         { "title": "Document 1", "content": "Example content 1" },
         { "delete": { "_index": index_name, "_id": "2" } },
@@ -1966,8 +1966,8 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = serde_json::to_string(&bulk_append_request).unwrap();
-    let path = format!("/{}/bulk_append", index_name);
+    let body = serde_json::to_string(&bulk_request).unwrap();
+    let path = format!("/{}/bulk", index_name);
 
     let response = app
       .call(
