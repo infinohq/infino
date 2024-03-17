@@ -375,9 +375,6 @@ async fn append_single_log_message(
     .await
 }
 
-// let result =
-//   append_single_log_message(obj, is_queue, &index_name, state.clone(), timestamp_key).await;
-
 /// Append log data to CoreDB.
 #[allow(unused_assignments)]
 async fn append_log(
@@ -570,7 +567,7 @@ async fn append_metric(
   Ok(())
 }
 
-/// Bulk pppend data to CoreDB.
+/// Bulk append data to CoreDB.
 #[allow(unused_assignments)]
 #[allow(dead_code)]
 async fn bulk_append(
