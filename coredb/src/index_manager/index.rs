@@ -894,7 +894,13 @@ impl Index {
     while segments.len() > 1 {
       let segment1 = segments.pop().unwrap();
       let segment2 = segments.pop().unwrap();
-      let merged_segment = Segment::merge(segment1, segment2);
+      let merged_segment = Segment::merge(segment1, segment2).map_err(|error| {
+        error!(
+          "Error while merging segments with segment numbers {:?}: {}",
+          segment_list_clone, error
+        );
+        CoreDBError::SegmentMergeFailed()
+      })?;
       segments.push(merged_segment);
     }
 

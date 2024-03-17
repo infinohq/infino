@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::vec::Vec;
 
 use dashmap::DashMap;
-use log::debug;
+use log::{debug, error};
 use serde_json::json;
 
 use super::metadata::Metadata;
@@ -453,10 +453,14 @@ impl Segment {
   }
 
   // Take two segments and merge them into one.
-  pub fn merge(segment1: Segment, segment2: Segment) -> Segment {
+  pub fn merge(segment1: Segment, segment2: Segment) -> Result<Segment, CoreDBError> {
     // Remove this once WAL can be made skippable
-    let temp_file = tempfile::NamedTempFile::new().unwrap();
-    let path = temp_file.path().to_str().unwrap();
+    let temp_file =
+      tempfile::NamedTempFile::new().map_err(|e| CoreDBError::IOError(e.kind().to_string()))?;
+    let path = temp_file
+      .path()
+      .to_str()
+      .ok_or(CoreDBError::IOError("Invalid path".to_string()))?;
     // TODO: disable WAL while merging segments
     let merged_segment = Segment::new(path);
     // Merge log messages
@@ -476,16 +480,26 @@ impl Segment {
           log_message.get_fields(),
           log_message.get_text(),
         )
-        .unwrap();
+        .map_err(CoreDBError::from)?;
     }
 
-    merged_segment.copy_time_series_from_segment(&segment1);
-    merged_segment.copy_time_series_from_segment(&segment2);
-
     merged_segment
+      .copy_time_series_from_segment(&segment1)
+      .map_err(|e| {
+        error!("Error copying time series from segment1: {:?}", e);
+        e
+      })?;
+    merged_segment
+      .copy_time_series_from_segment(&segment2)
+      .map_err(|e| {
+        error!("Error copying time series from segment1: {:?}", e);
+        e
+      })?;
+
+    Ok(merged_segment)
   }
 
-  fn copy_time_series_from_segment(&self, source: &Segment) {
+  fn copy_time_series_from_segment(&self, source: &Segment) -> Result<(), CoreDBError> {
     // Iterate over labels of the source
     for entry in source.get_labels().iter() {
       let label = entry.key();
@@ -514,9 +528,10 @@ impl Segment {
             metric_point.get_time(),
             metric_point.get_value(),
           )
-          .unwrap();
+          .map_err(CoreDBError::from)?;
       }
     }
+    Ok(())
   }
   /// Remove the write ahead log - typically called when after a segment is committed and will
   /// no longer be written to.
