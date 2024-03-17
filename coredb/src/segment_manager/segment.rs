@@ -1045,4 +1045,88 @@ mod tests {
       error!("Error parsing the query for 'hello'.");
     }
   }
+
+  #[tokio::test]
+  async fn test_copy_time_series_from_segment() {
+    let segment1 = Segment::new_with_temp_wal();
+    let segment2 = Segment::new_with_temp_wal();
+
+    let time = Utc::now().timestamp_millis() as u64;
+    let mut label_map = HashMap::new();
+    label_map.insert("label1".to_owned(), "value1".to_owned());
+    segment1
+      .append_metric_point("metric_name", &label_map, time, 100.0)
+      .unwrap();
+
+    // call copy_time_series_from_segment
+    segment2.copy_time_series_from_segment(&segment1).unwrap();
+
+    // check if the time series is copied
+    let mut labels = HashMap::new();
+    labels.insert("label1".to_owned(), "value1".to_owned());
+    let results = segment2
+      .search_metrics(
+        &labels,
+        &MetricsQueryCondition::Equals,
+        time - 100,
+        time + 100,
+      )
+      .await
+      .unwrap();
+    assert_eq!(results.len(), 1);
+
+    // Check other metrics of segment2 related to time series
+    // The count is 1 for metric points and 1 for labels
+    // TODO: check with @vinaykakade if this is fine
+    assert_eq!(segment2.metadata.get_metric_point_count(), 2);
+    assert_eq!(segment2.metadata.get_label_count(), 2);
+  }
+
+  #[tokio::test]
+  async fn test_merge_segments() {
+    let segment1 = Segment::new_with_temp_wal();
+    let segment2 = Segment::new_with_temp_wal();
+
+    // Insert logs and time series in both segment and merge them
+    let time = Utc::now().timestamp_millis() as u64;
+    let mut label_map = HashMap::new();
+    label_map.insert("label1".to_owned(), "value1".to_owned());
+    segment1
+      .append_metric_point("metric_name_1", &label_map, time, 100.0)
+      .unwrap();
+    segment2
+      .append_metric_point("metric_name_2", &label_map, time, 100.0)
+      .unwrap();
+
+    // insert logs in both the segments
+    segment1
+      .append_log_message(time, &HashMap::new(), "log message 1")
+      .unwrap();
+    segment2
+      .append_log_message(time, &HashMap::new(), "log message 2")
+      .unwrap();
+
+    let merged_segment = Segment::merge(segment1, segment2).unwrap();
+
+    // Check if the logs are merged
+    assert_eq!(merged_segment.get_log_message_count(), 2);
+
+    // Check if the time series are merged
+    let mut labels = HashMap::new();
+    labels.insert("label1".to_owned(), "value1".to_owned());
+    let results = merged_segment
+      .search_metrics(
+        &labels,
+        &MetricsQueryCondition::Equals,
+        time - 100,
+        time + 100,
+      )
+      .await
+      .unwrap();
+    assert_eq!(results.len(), 2);
+
+    //  Check metrics of merged segment
+    // TODO: check with @vinaykakade if this is fine
+    assert_eq!(merged_segment.metadata.get_metric_point_count(), 4);
+  }
 }
