@@ -251,7 +251,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                     InfinoOperation operation;
 
                     if ("indices:data/write/bulk[s][p]".equals(action)) {
-                        operation = InfinoOperation.INDEX_DOCUMENTS;
+                        operation = InfinoOperation.BULK_DOCUMENTS;
                     } else if ("indices:data/read/search[phase/query]".equals(action)) {
                         operation = InfinoOperation.SEARCH_DOCUMENTS;
                     } else {
@@ -273,7 +273,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                         @Override
                         public void onFailure(Exception e) {
                             try {
-                                logger.info("Transport action failed.");
+                                logger.error("Transport action failed.");
                                 channel.sendResponse(e);
                             } catch (IOException ex) {
                                 logger.error("Failed to send error response", ex);
@@ -323,7 +323,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         try {
             logger.debug("-----------------Sending request for serialization--------------- " + request.toString());
             switch (operation) {
-                case INDEX_DOCUMENTS: {
+                case BULK_DOCUMENTS: {
                     @SuppressWarnings({ "unchecked", "rawtypes" })
                     ConcreteShardRequest<BulkShardRequest> concreteRequest = (ConcreteShardRequest) request;
                     BulkShardRequest indexRequest = concreteRequest.getRequest();
@@ -359,6 +359,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             forwardRequest = HttpRequest.newBuilder()
                     .uri(URI.create(url))
+                    .header("Content-Type", "application/json")
                     .method(method.toString(),
                             HttpRequest.BodyPublishers.ofString(body.utf8ToString()))
                     .build();
@@ -544,7 +545,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                 logger.debug("Response to Search Request is " + queryFetchSearchResult);
 
                 listener.onResponse(queryFetchSearchResult);
-            } else if (operation == InfinoOperation.INDEX_DOCUMENTS) {
+            } else if (operation == InfinoOperation.BULK_DOCUMENTS) {
 
             }
         } catch (JsonParseException | IOException e) {

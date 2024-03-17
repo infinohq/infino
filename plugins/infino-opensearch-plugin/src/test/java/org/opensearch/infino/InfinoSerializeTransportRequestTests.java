@@ -71,9 +71,9 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 sourceMap.put("field2", "value2");
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockBulkShardRequest, InfinoSerializeTransportRequest.InfinoOperation.INDEX_DOCUMENTS);
+                                mockBulkShardRequest, InfinoSerializeTransportRequest.InfinoOperation.BULK_DOCUMENTS);
                 assertEquals("test-index", infinoSerializeTransportRequest.getIndexName());
-                assertEquals(InfinoSerializeTransportRequest.InfinoOperation.INDEX_DOCUMENTS,
+                assertEquals(InfinoSerializeTransportRequest.InfinoOperation.BULK_DOCUMENTS,
                                 infinoSerializeTransportRequest.getOperation());
                 assertEquals(RestRequest.Method.POST, infinoSerializeTransportRequest.getMethod());
                 assertEquals("http://test-host:3000/test-index/append_log",
@@ -120,7 +120,7 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 // mockBulkShardRequest.source(sourceMap);
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockBulkShardRequest, InfinoOperation.INDEX_DOCUMENTS);
+                                mockBulkShardRequest, InfinoOperation.BULK_DOCUMENTS);
                 assertEquals("test-index", infinoSerializeTransportRequest.getIndexName());
                 assertEquals(InfinoSerializeTransportRequest.InfinoIndexType.LOGS,
                                 infinoSerializeTransportRequest.getIndexType());
@@ -137,7 +137,7 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 // mockBulkShardRequest.source(sourceMap);
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockBulkShardRequest, InfinoOperation.INDEX_DOCUMENTS);
+                                mockBulkShardRequest, InfinoOperation.BULK_DOCUMENTS);
                 assertEquals("metrics-index", infinoSerializeTransportRequest.getIndexName());
                 assertEquals(InfinoSerializeTransportRequest.InfinoIndexType.METRICS,
                                 infinoSerializeTransportRequest.getIndexType());

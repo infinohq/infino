@@ -14,10 +14,13 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
+import org.opensearch.action.delete.DeleteRequest;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.action.DocWriteRequest;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.opensearch.action.bulk.BulkItemRequest;
 import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.search.SearchRequest;
@@ -30,6 +33,13 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.internal.ShardSearchRequest;
 
 import static org.opensearch.rest.RestRequest.Method.*;
+
+import com.google.gson.Gson;
+import org.opensearch.action.delete.DeleteRequest;
+import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.update.UpdateRequest;
+
+import java.util.HashMap;
 
 /**
  * Serialize OpenSearch Infino REST request to an Infino URL.
@@ -155,7 +165,7 @@ public class InfinoSerializeTransportRequest {
     private void parseRequest(BulkShardRequest indexRequest) throws IOException {
         setIndexName(indexRequest.indices()[0]);
         setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
-        setOperation(InfinoOperation.INDEX_DOCUMENTS);
+        setOperation(InfinoOperation.BULK_DOCUMENTS);
         setMethod(POST);
 
         try {
@@ -319,11 +329,83 @@ public class InfinoSerializeTransportRequest {
      * @throws IOException - could not build request body
      */
     protected void setIndexBody(BulkShardRequest indexRequest) throws IOException {
+        BulkItemRequest[] items = indexRequest.items();
+        logger.debug("Here are the bulk items:");
+
+        // Check if items is null before iterating
+        if (items == null) {
+            logger.debug("No items to process.");
+            return; // Exit the method as there's nothing to process
+        }
+
+        // Start building the JSON body for the index request
         try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
+            builder.startArray(); // Start of the array to hold bulk items
+            for (BulkItemRequest item : items) {
+                if (item.request() instanceof IndexRequest) {
+                    IndexRequest indexReq = (IndexRequest) item.request();
+                    builder.startObject(); // Start the "index" action metadata object
+                    builder.startObject("index")
+                            .field("_index", indexReq.index())
+                            .field("_id", indexReq.id())
+                            .endObject();
+                    builder.endObject(); // End the "index" action metadata object
+
+                    builder.startObject(); // Start of the document source
+                    Map<String, Object> sourceAsMap = indexReq.sourceAsMap();
+                    for (Map.Entry<String, Object> field : sourceAsMap.entrySet()) {
+                        builder.field(field.getKey(), field.getValue());
+                    }
+                    builder.endObject(); // End of the document source
+                }
+            }
+            builder.endArray(); // End of the array for bulk items
             this.body = BytesReference.bytes(builder);
         } catch (IOException e) {
             throw new IOException("Failed to serialize IndexRequest to JSON", e);
         }
+    }
+
+    public class DocWriteRequestSerializer {
+
+        /** Serialize a document write (index/delete/update) request to JSON */
+        static String serializeDocWriteRequestToJson(DocWriteRequest<?> request) {
+            Map<String, Object> representation = new HashMap<>();
+
+            if (request instanceof IndexRequest) {
+                IndexRequest indexRequest = (IndexRequest) request;
+                representation.put("type", "index");
+                representation.put("id", indexRequest.id());
+                representation.put("source", indexRequest.sourceAsMap());
+            } else if (request instanceof DeleteRequest) {
+                DeleteRequest deleteRequest = (DeleteRequest) request;
+                representation.put("type", "delete");
+                // Add other relevant fields from DeleteRequest to representation map
+                representation.put("id", deleteRequest.id());
+            } else if (request instanceof UpdateRequest) {
+                UpdateRequest updateRequest = (UpdateRequest) request;
+                representation.put("type", "update");
+                // Add other relevant fields from UpdateRequest to representation map
+                representation.put("id", updateRequest.id());
+                // Assuming you have a way to convert the update's content to a Map or similar
+                // structure
+                // representation.put("content", updateContent);
+            } else {
+                throw new IllegalStateException("Invalid request [" + request.getClass().getSimpleName() + "]");
+            }
+
+            Gson gson = new Gson();
+            return gson.toJson(representation);
+        }
+
+        public static void main(String[] args) {
+            // Example usage
+            IndexRequest indexRequest = new IndexRequest();
+            // Set properties on indexRequest as necessary
+            String json = serializeDocWriteRequestToJson(indexRequest);
+            System.out.println(json);
+        }
+
     }
 
     /**
@@ -499,7 +581,7 @@ public class InfinoSerializeTransportRequest {
         SEARCH_DOCUMENTS,
 
         /** Index one or more documents. */
-        INDEX_DOCUMENTS,
+        BULK_DOCUMENTS,
 
         /** Delete one or more documents. */
         DELETE_DOCUMENTS,
