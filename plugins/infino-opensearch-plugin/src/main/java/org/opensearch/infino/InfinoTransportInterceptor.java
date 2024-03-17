@@ -350,11 +350,11 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         BytesReference body = infinoRequest.getBody();
         String url = infinoRequest.getFinalUrl();
 
-        logger.info("Transport Interceptor: Serialized REST request for Infino to " + infinoRequest.getFinalUrl());
+        logger.info("Serialized TRANSPORT request for Infino to " + infinoRequest.getFinalUrl());
 
         // Serialize the request to a valid Infino URL
         try {
-            logger.info("Building HTTP Request for Infino: method = " + method + " indexName: " + indexName
+            logger.debug("Building HTTP Request for Infino: method = " + method + " indexName: " + indexName
                     + " operation: " + operation + " body: " + body.utf8ToString());
 
             forwardRequest = HttpRequest.newBuilder()
@@ -453,15 +453,15 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             logger.debug("Response from Infino is " + responseBody);
 
-            if (responseBody == null || responseBody.isEmpty()) {
-                throw new IOException("Response body is empty");
-            }
-
             // TODO: Parse the error response from Infino
             if (responseCode >= 400 && responseCode <= 499) {
-                throw new IllegalAccessException("Request denied by Infino index.");
+                throw new IllegalAccessException("Malformed request returned from Infino.");
             } else if (responseCode >= 500 && responseCode <= 599) {
-                throw new IOException("Server error returned from Infino index.");
+                throw new IOException("Server error returned from Infino.");
+            }
+
+            if (responseBody == null || responseBody.isEmpty()) {
+                throw new IOException("Infino response body is empty.");
             }
 
             Gson gson = new Gson();

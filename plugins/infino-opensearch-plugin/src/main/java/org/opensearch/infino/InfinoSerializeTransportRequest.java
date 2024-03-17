@@ -158,18 +158,18 @@ public class InfinoSerializeTransportRequest {
      * method, and optionally
      * adjusting the index type for metrics.
      *
-     * @param indexRequest The {@link IndexRequest} to be parsed.
+     * @param bulkRequest The {@link IndexRequest} to be parsed.
      * @throws IOException If there is an error serializing the index request body
      *                     to JSON.
      */
-    private void parseRequest(BulkShardRequest indexRequest) throws IOException {
-        setIndexName(indexRequest.indices()[0]);
+    private void parseRequest(BulkShardRequest bulkRequest) throws IOException {
+        setIndexName(bulkRequest.indices()[0]);
         setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setOperation(InfinoOperation.BULK_DOCUMENTS);
         setMethod(POST);
 
         try {
-            setIndexBody(indexRequest);
+            setBulkBody(bulkRequest);
 
             if (getIndexName().startsWith("metrics-")) {
                 setIndexType(InfinoIndexType.METRICS);
@@ -325,17 +325,17 @@ public class InfinoSerializeTransportRequest {
     /**
      * Sets the request body for Index requests.
      *
-     * @param indexRequest - the index request object
+     * @param bulkRequest - the index request object
      * @throws IOException - could not build request body
      */
-    protected void setIndexBody(BulkShardRequest indexRequest) throws IOException {
-        BulkItemRequest[] items = indexRequest.items();
+    protected void setBulkBody(BulkShardRequest bulkRequest) throws IOException {
+        BulkItemRequest[] items = bulkRequest.items();
         logger.debug("Here are the bulk items:");
 
-        // Check if items is null before iterating
+        // Check if items[] is null before iterating
         if (items == null) {
             logger.debug("No items to process.");
-            return; // Exit the method as there's nothing to process
+            return;
         }
 
         // Start building the JSON body for the index request
@@ -343,16 +343,16 @@ public class InfinoSerializeTransportRequest {
             builder.startArray(); // Start of the array to hold bulk items
             for (BulkItemRequest item : items) {
                 if (item.request() instanceof IndexRequest) {
-                    IndexRequest indexReq = (IndexRequest) item.request();
+                    IndexRequest bulkReq = (IndexRequest) item.request();
                     builder.startObject(); // Start the "index" action metadata object
                     builder.startObject("index")
-                            .field("_index", indexReq.index())
-                            .field("_id", indexReq.id())
+                            .field("_index", bulkReq.index())
+                            .field("_id", bulkReq.id())
                             .endObject();
                     builder.endObject(); // End the "index" action metadata object
 
                     builder.startObject(); // Start of the document source
-                    Map<String, Object> sourceAsMap = indexReq.sourceAsMap();
+                    Map<String, Object> sourceAsMap = bulkReq.sourceAsMap();
                     for (Map.Entry<String, Object> field : sourceAsMap.entrySet()) {
                         builder.field(field.getKey(), field.getValue());
                     }
@@ -373,10 +373,10 @@ public class InfinoSerializeTransportRequest {
             Map<String, Object> representation = new HashMap<>();
 
             if (request instanceof IndexRequest) {
-                IndexRequest indexRequest = (IndexRequest) request;
+                IndexRequest bulkRequest = (IndexRequest) request;
                 representation.put("type", "index");
-                representation.put("id", indexRequest.id());
-                representation.put("source", indexRequest.sourceAsMap());
+                representation.put("id", bulkRequest.id());
+                representation.put("source", bulkRequest.sourceAsMap());
             } else if (request instanceof DeleteRequest) {
                 DeleteRequest deleteRequest = (DeleteRequest) request;
                 representation.put("type", "delete");
@@ -400,9 +400,9 @@ public class InfinoSerializeTransportRequest {
 
         public static void main(String[] args) {
             // Example usage
-            IndexRequest indexRequest = new IndexRequest();
-            // Set properties on indexRequest as necessary
-            String json = serializeDocWriteRequestToJson(indexRequest);
+            IndexRequest bulkRequest = new IndexRequest();
+            // Set properties on bulkRequest as necessary
+            String json = serializeDocWriteRequestToJson(bulkRequest);
             System.out.println(json);
         }
 
@@ -526,7 +526,7 @@ public class InfinoSerializeTransportRequest {
 
     private String constructPostUrl() {
         return switch (indexType) {
-            case LOGS -> infinoEndpoint + "/" + indexName + "/append_log";
+            case LOGS -> infinoEndpoint + "/" + indexName + "/bulk";
             case METRICS -> infinoEndpoint + "/" + indexName + "/append_metric";
             default -> throw new IllegalArgumentException("Unsupported index type for POST: " + indexType);
         };

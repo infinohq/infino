@@ -76,7 +76,7 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 assertEquals(InfinoSerializeTransportRequest.InfinoOperation.BULK_DOCUMENTS,
                                 infinoSerializeTransportRequest.getOperation());
                 assertEquals(RestRequest.Method.POST, infinoSerializeTransportRequest.getMethod());
-                assertEquals("http://test-host:3000/test-index/append_log",
+                assertEquals("http://test-host:3000/test-index/bulk",
                                 infinoSerializeTransportRequest.getFinalUrl());
         }
 
@@ -124,7 +124,7 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 assertEquals("test-index", infinoSerializeTransportRequest.getIndexName());
                 assertEquals(InfinoSerializeTransportRequest.InfinoIndexType.LOGS,
                                 infinoSerializeTransportRequest.getIndexType());
-                assertEquals("http://test-host:3000/test-index/append_log",
+                assertEquals("http://test-host:3000/test-index/bulk",
                                 infinoSerializeTransportRequest.getFinalUrl());
         }
 
