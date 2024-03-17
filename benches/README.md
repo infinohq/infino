@@ -52,7 +52,6 @@ $ cargo run -r
 
 ## Run only specific benchmarks
 
-Sometimes, you may want to run only Infino to see its resource usage, or profile the code. In this scenario, to run only Infino, use:
 Sometimes, you may want to run only specific benchmarks, for example only Infino via REST API and Elastic, or only Infino via REST API. To do so you can use,
 ```
 $ cargo run -r -- --infino-rest --elastic
