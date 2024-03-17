@@ -14,10 +14,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
-import org.opensearch.action.delete.DeleteRequest;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.action.DocWriteRequest;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.opensearch.action.bulk.BulkItemRequest;
@@ -34,24 +32,18 @@ import org.opensearch.search.internal.ShardSearchRequest;
 
 import static org.opensearch.rest.RestRequest.Method.*;
 
-import com.google.gson.Gson;
-import org.opensearch.action.delete.DeleteRequest;
-import org.opensearch.action.index.IndexRequest;
-import org.opensearch.action.update.UpdateRequest;
-
-import java.util.HashMap;
-
 /**
  * Serialize OpenSearch Infino REST request to an Infino URL.
  * 1. Search window defaults to the past 7 days if not specified by the request.
- * 2. To access Infino indexes, the REST caller must prefix the index name with
- * '/infino/'.
+ * 2. To create Infino collection, the REST caller must prefix the index name
+ * with
+ * '/collection/'.
  * 3. If the specified index does not exist in OpenSearch, create it before
  * sending to Infino.
  */
 public class InfinoSerializeTransportRequest {
 
-    /** Path prefix. E.g. /infino/logs */
+    /** Path prefix. E.g. /collection */
     protected String prefix;
 
     /** Default time range for Infino searches is 7 days */
@@ -182,59 +174,6 @@ public class InfinoSerializeTransportRequest {
     }
 
     /**
-     * Parses a {@link CreateIndexRequest} to configure the necessary parameters for
-     * a create index operation.
-     * This includes setting the index name, endpoint URL, operation type, HTTP
-     * method, and optionally
-     * adjusting the index type for metrics.
-     *
-     * @param createIndexRequest The {@link CreateIndexRequest} to be parsed.
-     * @throws IOException If there is an error serializing the create index request
-     *                     body to JSON.
-     */
-    private void parseRequest(CreateIndexRequest createIndexRequest) throws IOException {
-        setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
-        setIndexName(createIndexRequest.indices()[0]);
-        setOperation(InfinoOperation.CREATE_INDEX);
-        setMethod(PUT);
-        try {
-            setCreateIndexBody(createIndexRequest);
-
-            if (getIndexName().startsWith("metrics-")) {
-                setIndexType(InfinoIndexType.METRICS);
-            } else if (getIndexName().startsWith("logs-")) {
-                setIndexType(InfinoIndexType.LOGS);
-            }
-
-        } catch (IOException e) {
-            throw new IOException("Failed to serialize SearchSourceBuilder to JSON", e);
-        }
-    }
-
-    /**
-     * Parses a {@link DeleteIndexRequest} to configure the necessary parameters for
-     * a delete index operation.
-     * This includes setting the index name, endpoint URL, operation type, and HTTP
-     * method.
-     *
-     * @param deleteIndexRequest The {@link DeleteIndexRequest} to be parsed.
-     * @throws IOException If there is an error serializing the delete index request
-     *                     body to JSON.
-     */
-    private void parseRequest(DeleteIndexRequest deleteIndexRequest) throws IOException {
-        setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
-        setOperation(InfinoOperation.DELETE_INDEX);
-        setMethod(PUT);
-        setIndexName(deleteIndexRequest.indices()[0]);
-
-        try {
-            setDeleteIndexBody(deleteIndexRequest);
-        } catch (IOException e) {
-            throw new IOException("Failed to serialize SearchSourceBuilder to JSON", e);
-        }
-    }
-
-    /**
      * Gets the final URL.
      *
      * @return the final URL
@@ -344,12 +283,12 @@ public class InfinoSerializeTransportRequest {
             for (BulkItemRequest item : items) {
                 if (item.request() instanceof IndexRequest) {
                     IndexRequest bulkReq = (IndexRequest) item.request();
-                    builder.startObject(); // Start the "index" action metadata object
+                    builder.startObject();
                     builder.startObject("index")
                             .field("_index", bulkReq.index())
                             .field("_id", bulkReq.id())
                             .endObject();
-                    builder.endObject(); // End the "index" action metadata object
+                    builder.endObject();
 
                     builder.startObject(); // Start of the document source
                     Map<String, Object> sourceAsMap = bulkReq.sourceAsMap();
@@ -364,48 +303,6 @@ public class InfinoSerializeTransportRequest {
         } catch (IOException e) {
             throw new IOException("Failed to serialize IndexRequest to JSON", e);
         }
-    }
-
-    public class DocWriteRequestSerializer {
-
-        /** Serialize a document write (index/delete/update) request to JSON */
-        static String serializeDocWriteRequestToJson(DocWriteRequest<?> request) {
-            Map<String, Object> representation = new HashMap<>();
-
-            if (request instanceof IndexRequest) {
-                IndexRequest bulkRequest = (IndexRequest) request;
-                representation.put("type", "index");
-                representation.put("id", bulkRequest.id());
-                representation.put("source", bulkRequest.sourceAsMap());
-            } else if (request instanceof DeleteRequest) {
-                DeleteRequest deleteRequest = (DeleteRequest) request;
-                representation.put("type", "delete");
-                // Add other relevant fields from DeleteRequest to representation map
-                representation.put("id", deleteRequest.id());
-            } else if (request instanceof UpdateRequest) {
-                UpdateRequest updateRequest = (UpdateRequest) request;
-                representation.put("type", "update");
-                // Add other relevant fields from UpdateRequest to representation map
-                representation.put("id", updateRequest.id());
-                // Assuming you have a way to convert the update's content to a Map or similar
-                // structure
-                // representation.put("content", updateContent);
-            } else {
-                throw new IllegalStateException("Invalid request [" + request.getClass().getSimpleName() + "]");
-            }
-
-            Gson gson = new Gson();
-            return gson.toJson(representation);
-        }
-
-        public static void main(String[] args) {
-            // Example usage
-            IndexRequest bulkRequest = new IndexRequest();
-            // Set properties on bulkRequest as necessary
-            String json = serializeDocWriteRequestToJson(bulkRequest);
-            System.out.println(json);
-        }
-
     }
 
     /**

@@ -50,7 +50,9 @@ import java.util.concurrent.TimeUnit;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.transport.TransportResponse;
+import org.opensearch.index.seqno.SequenceNumbers;
 import org.opensearch.infino.InfinoSerializeTransportRequest.InfinoOperation;
 
 import java.lang.reflect.Constructor;
@@ -64,13 +66,26 @@ import org.apache.logging.log4j.Logger;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
+import org.opensearch.OpenSearchException;
+import org.opensearch.action.DocWriteRequest;
+import org.opensearch.action.DocWriteResponse;
 import org.opensearch.action.OriginalIndices;
+import org.opensearch.action.DocWriteRequest.OpType;
+import org.opensearch.action.DocWriteResponse.Result;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.opensearch.action.bulk.BulkItemResponse;
+import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.bulk.BulkShardRequest;
+import org.opensearch.action.bulk.BulkShardResponse;
+import org.opensearch.action.bulk.BulkItemResponse.Failure;
+import org.opensearch.action.support.replication.ReplicationResponse;
+import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.replication.TransportReplicationAction.ConcreteShardRequest;
+import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.common.document.DocumentField;
 import org.opensearch.common.lucene.search.TopDocsAndMaxScore;
 import org.opensearch.core.action.ActionListener;
@@ -92,6 +107,7 @@ import org.opensearch.transport.TransportRequest;
 import org.opensearch.transport.TransportRequestHandler;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -230,6 +246,14 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         infinoThreadPool.shutdown();
     }
 
+    /**
+     * Intercept the transport requests
+     * 
+     * @param action         - the action to be executed
+     * @param executor       - the executor for this request
+     * @param forceExecution - ignored
+     * @param actualHandler  - the original transport handler
+     */
     @Override
     public <T extends TransportRequest> TransportRequestHandler<T> interceptHandler(String action,
             String executor,
@@ -241,7 +265,6 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         return new TransportRequestHandler<T>() {
             @Override
             public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
-
                 logger.debug("-----------------Received request and task--------------- " + request.toString() + " --- "
                         + task.toString());
                 String action = task.getAction();
@@ -453,7 +476,6 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             logger.debug("Response from Infino is " + responseBody);
 
-            // TODO: Parse the error response from Infino
             if (responseCode >= 400 && responseCode <= 499) {
                 throw new IllegalAccessException("Malformed request returned from Infino.");
             } else if (responseCode >= 500 && responseCode <= 599) {
@@ -464,10 +486,9 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                 throw new IOException("Infino response body is empty.");
             }
 
-            Gson gson = new Gson();
-
             if (operation == InfinoOperation.SEARCH_DOCUMENTS) {
-                JsonElement element = gson.fromJson(responseBody, JsonElement.class);
+                Gson searchGson = new Gson();
+                JsonElement element = searchGson.fromJson(responseBody, JsonElement.class);
                 if (!element.isJsonObject()) {
                     throw new JsonParseException("Expected JSON object but found different structure");
                 }
@@ -546,8 +567,72 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
                 listener.onResponse(queryFetchSearchResult);
             } else if (operation == InfinoOperation.BULK_DOCUMENTS) {
+                Gson bulkGson = new GsonBuilder().create();
+                JsonObject rootObj = bulkGson.fromJson(responseBody, JsonObject.class);
 
+                long took = rootObj.has("took") ? rootObj.get("took").getAsLong() : 0;
+                JsonArray itemsArray = rootObj.getAsJsonArray("items");
+
+                List<BulkItemResponse> bulkItemResponses = new ArrayList<>();
+
+                int i = 0;
+                for (JsonElement itemElement : itemsArray) {
+                    JsonObject actionObject = itemElement.getAsJsonObject().entrySet().iterator().next().getValue()
+                            .getAsJsonObject();
+                    String actionType = itemElement.getAsJsonObject().entrySet().iterator().next().getKey();
+                    OpType opType = OpType.valueOf(actionType.toUpperCase());
+
+                    String id = actionObject.get("_id").getAsString();
+                    String index = actionObject.get("_index").getAsString();
+                    int status = actionObject.get("status").getAsInt();
+                    RestStatus restStatus = RestStatus.fromCode(status);
+
+                    if (actionObject.has("error")) {
+                        JsonObject errorDetails = actionObject.getAsJsonObject("error");
+                        String errorReason = errorDetails.get("reason").getAsString();
+                        Exception cause = new Exception(errorReason);
+                        Failure failure = new Failure(index, id, cause, restStatus);
+                        bulkItemResponses.add(new BulkItemResponse(i, opType, failure));
+                    } else {
+                        long seqNo = actionObject.has("_seq_no") ? actionObject.get("_seq_no").getAsLong()
+                                : SequenceNumbers.UNASSIGNED_SEQ_NO;
+                        long primaryTerm = actionObject.has("_primary_term")
+                                ? actionObject.get("_primary_term").getAsLong()
+                                : SequenceNumbers.UNASSIGNED_PRIMARY_TERM;
+                        Result result = Result.valueOf(actionObject.get("result").getAsString().toUpperCase());
+
+                        DocWriteResponse docWriteResponse = null;
+                        switch (actionType) {
+                            case "index":
+                            case "create":
+                                docWriteResponse = new IndexResponse(new ShardId(index, "_na_", 1), id, seqNo,
+                                        primaryTerm, 1, result == Result.CREATED);
+                                break;
+                            case "delete":
+                                docWriteResponse = new DeleteResponse(new ShardId(index, "_na_", 1), id, seqNo,
+                                        primaryTerm, 1, result == Result.DELETED);
+                                break;
+                            case "update":
+                                docWriteResponse = new UpdateResponse(new ShardId(index, "_na_", 1), id, seqNo,
+                                        primaryTerm, 1, result);
+                                break;
+                            default:
+                                logger.warn("Unexpected actionType encountered: " + actionType);
+                        }
+                        if (docWriteResponse != null) {
+                            bulkItemResponses.add(new BulkItemResponse(i, opType, docWriteResponse));
+                        }
+                    }
+                    i++;
+                }
+
+                BulkItemResponse[] responsesArray = bulkItemResponses.toArray(new BulkItemResponse[0]);
+                BulkShardResponse bulkShardResponse = new BulkShardResponse(new ShardId(indexName, "_na_", 1),
+                        responsesArray);
+
+                listener.onResponse(bulkShardResponse);
             }
+
         } catch (JsonParseException | IOException e) {
             logger.error("Error parsing or retrieving Infino response", e);
             listener.onFailure(e);

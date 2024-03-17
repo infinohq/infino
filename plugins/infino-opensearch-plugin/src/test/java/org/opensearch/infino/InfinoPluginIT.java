@@ -11,6 +11,11 @@ package org.opensearch.infino;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
 import org.apache.http.util.EntityUtils;
 import org.apache.http.ParseException;
+import org.opensearch.action.ActionRequest;
+import org.opensearch.action.admin.indices.create.CreateIndexAction;
+import org.opensearch.action.admin.indices.delete.DeleteIndexAction;
+import org.opensearch.action.support.ActionFilter;
+import org.opensearch.action.support.ActionFilterChain;
 import org.opensearch.client.Client;
 import org.opensearch.client.Request;
 import org.opensearch.client.Response;
@@ -19,11 +24,13 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.script.ScriptService;
+import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 
@@ -32,6 +39,8 @@ import org.hamcrest.Matchers;
 import org.junit.Test;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.concurrent.ThreadContext;
+import org.opensearch.core.action.ActionListener;
+import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.env.Environment;
@@ -101,6 +110,28 @@ public class InfinoPluginIT extends OpenSearchIntegTestCase {
         // Provide a no-argument constructor as expected by OpenSearch
         public MockInfinoPlugin() {
             super();
+        }
+
+        @Override
+        public List<ActionFilter> getActionFilters() {
+            logger.info("-----------------------Registering Action Filter------------------------");
+
+            return Arrays.asList(new ActionFilter() {
+
+                @Override
+                public int order() {
+                    return 0; // Ensure this filter has a high precedence
+                }
+
+                @Override
+                public <Request extends ActionRequest, Response extends ActionResponse> void apply(Task task,
+                        String action,
+                        Request request, ActionListener<Response> listener,
+                        ActionFilterChain<Request, Response> chain) {
+                    // Allow all the calls to proceed
+                    chain.proceed(task, action, request, listener);
+                }
+            });
         }
 
         @Override
@@ -268,30 +299,4 @@ public class InfinoPluginIT extends OpenSearchIntegTestCase {
         logger.info("response body: {}", body);
         MatcherAssert.assertThat(body, Matchers.containsString("infino"));
     }
-
-    // @Test
-    // public void testInfinoSearchRequest() throws IOException,
-    // InterruptedException {
-    // mockStatusCode = 200;
-    // mockPath = "/default/path";
-    // mockBody = "{\"hits\": [{\"_source\": {\"field\": \"value\"}}]}";
-
-    // Response createResponse = createRestClient().performRequest(new
-    // Request("PUT", "/test-index"));
-    // String createResponseBody = EntityUtils.toString(createResponse.getEntity(),
-    // StandardCharsets.UTF_8);
-    // logger.info("response body: {}", createResponseBody);
-
-    // Response searchResponse = createRestClient().performRequest(new
-    // Request("GET", "/test-index/_search"));
-    // String searchResponseBody = EntityUtils.toString(searchResponse.getEntity(),
-    // StandardCharsets.UTF_8);
-
-    // logger.info("response body: {}", searchResponseBody);
-
-    // // Assert the response
-    // assertNotNull(searchResponse);
-    // assertEquals(200, searchResponse.getStatusLine().getStatusCode());
-    // // assertEquals(searchResponseBody, mockBody);
-    // }
 }

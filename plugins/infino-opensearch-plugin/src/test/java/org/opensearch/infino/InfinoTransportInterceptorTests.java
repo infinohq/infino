@@ -4,15 +4,17 @@ import org.junit.Before;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.After;
-import org.opensearch.action.admin.indices.create.CreateIndexRequest;
-import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.opensearch.action.DocWriteRequest;
+import org.opensearch.action.bulk.BulkItemRequest;
+import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.support.WriteRequest.RefreshPolicy;
+import org.opensearch.action.support.replication.TransportReplicationAction.ConcreteShardRequest;
 import org.opensearch.search.internal.ShardSearchRequest;
-import org.opensearch.tasks.Task;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
-import org.opensearch.core.common.bytes.BytesArray;
+import org.opensearch.core.common.bytes.BytesReference;
+import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.core.transport.TransportResponse;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.infino.InfinoSerializeTransportRequest.InfinoOperation;
@@ -21,7 +23,11 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.transport.TransportRequest;
+import org.opensearch.action.delete.DeleteRequest;
+import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.update.UpdateRequest;
+import org.opensearch.common.xcontent.XContentFactory;
+import org.opensearch.common.xcontent.XContentType;
 
 import java.io.IOException;
 import java.net.Authenticator;
@@ -37,6 +43,7 @@ import java.net.http.HttpHeaders;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -341,7 +348,6 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
                 "        }\n" +
                 "      }";
 
-        // Given
         when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
         when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
 
@@ -372,19 +378,16 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
             }
         };
 
-        // When
         interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
 
-        // Then
         assertTrue("onResponse was not called as expected", onResponseCalled[0]);
         assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
     }
 
     public void testNonExistentEndpoint() throws Exception {
-        // Given
         mockStatusCode = 404;
         mockBody = "Not Found";
 
@@ -417,19 +420,16 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
             }
         };
 
-        // When
         interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
 
-        // Then
         assertTrue("onFailure was not called as expected", onFailureCalled[0]);
         assertFalse("onResponse was unexpectedly called", onResponseCalled[0]);
     }
 
     public void testServerError() throws Exception {
-        // Given
         mockStatusCode = 500;
         mockBody = "{\n" +
                 "    \"error\": {\n" +
@@ -490,7 +490,6 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
     }
 
     public void testLargeResponsePayload() throws Exception {
-        // Given
         mockBody = generateLargeResponseString(1000);
 
         when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.GET);
@@ -522,14 +521,11 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
             }
         };
 
-        // When
         interceptor.processTransportActions(mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS, listener);
-        // asyncSender.sendRequest(null, null, mockShardSearchRequest, null, null);
 
         // Wait for the async operation to complete or timeout
         latch.await(5, TimeUnit.SECONDS);
 
-        // Then
         assertTrue("onResponse was not called as expected", onResponseCalled[0]);
         assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
     }
@@ -576,142 +572,99 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
         return gson.toJson(jsonResponse);
     }
-    // public void testIndexRequest() throws Exception {
-    // // Given
-    // when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.POST);
-    // when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
-    // when(mockInfinoSerializeTransportRequest.getBody()).thenReturn(new
-    // BytesArray("{\"field\":\"value\"}"));
 
-    // IndexRequest mockIndexRequest = mock(IndexRequest.class);
-    // when(mockIndexRequest.index()).thenReturn("test-index");
-    // when(mockIndexRequest.indices()).thenReturn(new String[] { "test-index" });
+    @SuppressWarnings("unchecked")
+    public void testBulkRequest() throws Exception {
+        BulkShardRequest mockBulkShardRequest = mock(BulkShardRequest.class);
+        when(mockBulkShardRequest.shardId()).thenReturn(new ShardId("index", "_na_", 1));
+        when(mockBulkShardRequest.indices()).thenReturn(new String[] { "test-index" });
 
-    // final CountDownLatch latch = new CountDownLatch(1);
+        String indexName = "test-index";
+        IndexRequest indexRequest = new IndexRequest(indexName)
+                .id("1")
+                .source(XContentType.JSON, "title", "Document 1", "content", "Example content 1");
+        DeleteRequest deleteRequest = new DeleteRequest(indexName, "2");
+        IndexRequest createRequest = new IndexRequest(indexName)
+                .id("3")
+                .source(XContentType.JSON, "title", "Document 3", "content", "Example content 3");
+        UpdateRequest updateRequest = new UpdateRequest(indexName, "1")
+                .doc(XContentType.JSON, "doc", Map.of("content", "Updated content 1"));
+        BulkItemRequest[] requests = new BulkItemRequest[] { new BulkItemRequest(1, indexRequest),
+                new BulkItemRequest(2, deleteRequest), new BulkItemRequest(3, createRequest),
+                new BulkItemRequest(1, updateRequest) };
+        when(mockBulkShardRequest.items()).thenReturn((BulkItemRequest[]) requests);
 
-    // final boolean[] onResponseCalled = { false };
-    // final boolean[] onFailureCalled = { false };
+        ConcreteShardRequest<BulkShardRequest> mockConcreteRequest = mock(ConcreteShardRequest.class);
 
-    // ActionListener<TransportResponse> listener = new ActionListener<>() {
-    // @Override
-    // public void onResponse(TransportResponse response) {
-    // onResponseCalled[0] = true;
-    // assertEquals(200,
-    // ((InfinoTransportInterceptor.HttpResponseTransportResponse)
-    // response).getStatusCode());
-    // latch.countDown();
-    // }
+        when(mockConcreteRequest.getRequest()).thenReturn(mockBulkShardRequest);
+        when(mockConcreteRequest.getTargetAllocationID()).thenReturn("allocationId");
+        when(mockConcreteRequest.getPrimaryTerm()).thenReturn(1L);
 
-    // @Override
-    // public void onFailure(Exception e) {
-    // onFailureCalled[0] = true;
-    // latch.countDown();
-    // }
-    // };
+        when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.POST);
+        when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path/test-index/bulk");
 
-    // // When
-    // interceptor.processTransportActions(mockIndexRequest, listener);
-    // // asyncSender.sendRequest(null, null, mockIndexRequest, null, null);
+        mockBody = "{\n" +
+                "  \"took\": 30,\n" +
+                "  \"errors\": true,\n" +
+                "  \"items\": [\n" +
+                "    {\n" +
+                "      \"index\": {\n" +
+                "        \"_index\": \"test-index\",\n" +
+                "        \"_id\": \"1\",\n" +
+                "        \"_version\": 1,\n" +
+                "        \"result\": \"created\",\n" +
+                "        \"_shards\": {\n" +
+                "          \"total\": 2,\n" +
+                "          \"successful\": 1,\n" +
+                "          \"failed\": 0\n" +
+                "        },\n" +
+                "        \"status\": 201\n" +
+                "      }\n" +
+                "    },\n" +
+                "    {\n" +
+                "      \"delete\": {\n" +
+                "        \"_index\": \"test-index\",\n" +
+                "        \"_id\": \"2\",\n" +
+                "        \"status\": 404,\n" +
+                "        \"error\": {\n" +
+                "          \"type\": \"document_missing_exception\",\n" +
+                "          \"reason\": \"[test-index][2]: document missing\",\n" +
+                "          \"index_uuid\": \"aAsFqTI0Tc2W0LCWgPNrOA\",\n" +
+                "          \"shard\": \"0\",\n" +
+                "          \"index\": \"test-index\"\n" +
+                "        }\n" +
+                "      }\n" +
+                "    }\n" +
+                "  ]\n" +
+                "}";
 
-    // // Wait for the async operation to complete or timeout
-    // latch.await(5, TimeUnit.SECONDS);
+        final CountDownLatch latch = new CountDownLatch(1);
+        final boolean[] onResponseCalled = { false };
+        final boolean[] onFailureCalled = { false };
 
-    // // Then
-    // assertTrue("onResponse was not called as expected", onResponseCalled[0]);
-    // assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
-    // }
+        ActionListener<TransportResponse> listener = new ActionListener<>() {
+            @Override
+            public void onResponse(TransportResponse response) {
+                onResponseCalled[0] = true;
+                latch.countDown();
+            }
 
-    // public void testCreateIndexRequest() throws Exception {
-    // // Given
-    // when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.PUT);
-    // when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
-    // when(mockInfinoSerializeTransportRequest.getOperation()).thenReturn(InfinoOperation.CREATE_INDEX);
+            @Override
+            public void onFailure(Exception e) {
+                onFailureCalled[0] = true;
+                latch.countDown();
+            }
+        };
 
-    // CreateIndexRequest mockCreateIndexRequest = mock(CreateIndexRequest.class);
-    // when(mockCreateIndexRequest.index()).thenReturn("test-index");
-    // when(mockCreateIndexRequest.indices()).thenReturn(new String[] { "test-index"
-    // });
-    // // Create settings using the Settings builder
-    // Settings testSettings = Settings.builder()
-    // .put("index.number_of_shards", 1)
-    // .put("index.number_of_replicas", 0)
-    // .build();
+        // Trigger processing the bulk request
+        interceptor.processTransportActions(mockConcreteRequest, InfinoOperation.BULK_DOCUMENTS, listener);
 
-    // when(mockCreateIndexRequest.settings()).thenReturn(testSettings);
-    // final CountDownLatch latch = new CountDownLatch(1);
+        // Wait for the async operation to complete or timeout
+        latch.await(5, TimeUnit.SECONDS);
 
-    // final boolean[] onResponseCalled = { false };
-    // final boolean[] onFailureCalled = { false };
+        // Assertions to verify the test outcome
+        assertTrue("onResponse was not called as expected", onResponseCalled[0]);
+        assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
+    }
 
-    // ActionListener<TransportResponse> listener = new ActionListener<>() {
-    // @Override
-    // public void onResponse(TransportResponse response) {
-    // onResponseCalled[0] = true;
-    // assertEquals(200,
-    // ((InfinoTransportInterceptor.HttpResponseTransportResponse)
-    // response).getStatusCode());
-    // latch.countDown();
-    // }
-
-    // @Override
-    // public void onFailure(Exception e) {
-    // onFailureCalled[0] = true;
-    // latch.countDown();
-    // }
-    // };
-
-    // // When
-    // interceptor.processTransportActions(mockCreateIndexRequest, listener);
-    // // asyncSender.sendRequest(null, null, mockCreateIndexRequest, null, null);
-
-    // // Wait for the async operation to complete or timeout
-    // latch.await(5, TimeUnit.SECONDS);
-
-    // // Then
-    // assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
-    // }
-
-    // public void testDeleteIndexRequest() throws Exception {
-    // // Given
-    // when(mockInfinoSerializeTransportRequest.getMethod()).thenReturn(RestRequest.Method.DELETE);
-    // when(mockInfinoSerializeTransportRequest.getFinalUrl()).thenReturn("http://test-path");
-    // when(mockInfinoSerializeTransportRequest.getOperation()).thenReturn(InfinoOperation.DELETE_INDEX);
-
-    // DeleteIndexRequest mockDeleteIndexRequest = mock(DeleteIndexRequest.class);
-    // when(mockDeleteIndexRequest.indices()).thenReturn(new String[] { "test-index"
-    // });
-
-    // final CountDownLatch latch = new CountDownLatch(1);
-
-    // final boolean[] onResponseCalled = { false };
-    // final boolean[] onFailureCalled = { false };
-
-    // ActionListener<TransportResponse> listener = new ActionListener<>() {
-    // @Override
-    // public void onResponse(TransportResponse response) {
-    // onResponseCalled[0] = true;
-    // assertEquals(200,
-    // ((InfinoTransportInterceptor.HttpResponseTransportResponse)
-    // response).getStatusCode());
-    // latch.countDown();
-    // }
-
-    // @Override
-    // public void onFailure(Exception e) {
-    // onFailureCalled[0] = true;
-    // latch.countDown();
-    // }
-    // };
-
-    // // When
-    // interceptor.processTransportActions(mockDeleteIndexRequest, listener);
-    // // asyncSender.sendRequest(null, null, mockDeleteIndexRequest, null, null);
-
-    // // Wait for the async operation to complete or timeout
-    // latch.await(5, TimeUnit.SECONDS);
-
-    // // Then
-    // assertTrue("onResponse was not called as expected", onResponseCalled[0]);
-    // assertFalse("onFailure was unexpectedly called", onFailureCalled[0]);
-    // }
 }

@@ -13,17 +13,13 @@ import org.opensearch.infino.InfinoSerializeTransportRequest.InfinoOperation;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchTestCase;
-import org.opensearch.transport.TransportRequest;
 
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-// import org.opensearch.action.admin.indices.create.CreateBulkShardRequest;
-// import org.opensearch.action.admin.indices.delete.DeleteBulkShardRequest;
 import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.search.internal.ShardSearchRequest;
-import org.opensearch.common.settings.Settings;
 
 /**
  * General testing approach is:
@@ -144,40 +140,4 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 assertEquals("http://test-host:3000/metrics-index/append_metric",
                                 infinoSerializeTransportRequest.getFinalUrl());
         }
-
-        // public void testCreateIndexEndpoint() throws IOException {
-        // // Mock CreateBulkShardRequest
-        // CreateBulkShardRequest mockCreateBulkShardRequest =
-        // mock(CreateBulkShardRequest.class);
-
-        // // Setup non-empty settings
-        // Settings nonEmptySettings = Settings.builder()
-        // .put("index.number_of_shards", 3)
-        // .put("index.number_of_replicas", 2)
-        // .build();
-
-        // // Mock behavior of CreateBulkShardRequest
-        // when(mockCreateBulkShardRequest.settings()).thenReturn(nonEmptySettings);
-        // when(mockCreateBulkShardRequest.indices()).thenReturn(new String[] {
-        // "test-index" });
-
-        // InfinoSerializeTransportRequest infinoSerializeTransportRequest = new
-        // InfinoSerializeTransportRequest(
-        // mockCreateBulkShardRequest);
-        // assertEquals("http://test-host:3000/:test-index",
-        // infinoSerializeTransportRequest.getFinalUrl());
-        // }
-
-        // public void testDeleteIndexEndpoint() throws IOException {
-        // DeleteBulkShardRequest mockDeleteBulkShardRequest =
-        // mock(DeleteBulkShardRequest.class);
-        // when(mockDeleteBulkShardRequest.indices()).thenReturn(new String[] {
-        // "test-index" });
-
-        // InfinoSerializeTransportRequest infinoSerializeTransportRequest = new
-        // InfinoSerializeTransportRequest(
-        // mockDeleteBulkShardRequest);
-        // assertEquals("http://test-host:3000/:test-index",
-        // infinoSerializeTransportRequest.getFinalUrl());
-        // }
 }

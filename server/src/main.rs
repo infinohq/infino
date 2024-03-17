@@ -51,7 +51,6 @@ use tracing_subscriber::EnvFilter;
 use coredb::utils::environment::load_env;
 use coredb::utils::error::{CoreDBError, QueryError};
 use coredb::utils::request::{check_query_time, parse_time_range};
-use coredb::utils::request::{check_query_time, parse_time_range};
 use coredb::CoreDB;
 
 use crate::background_threads::check_and_start_background_threads;
@@ -334,7 +333,7 @@ async fn append_single_log_message(
   index_name: &str,
   state: Arc<AppState>,
   timestamp_key: &str,
-) -> Result<(), CoreDBError> {
+) -> Result<u32, CoreDBError> {
   let obj_string = serde_json::to_string(&obj).unwrap();
   if is_queue {
     state
@@ -637,9 +636,10 @@ async fn bulk(
             Ok(doc_id) => {
               let index_item = json!({
                   "index": {
-                      "_index": "my_index",
+                      "_index": index_name,
                       "_type": "_doc",
                       "_id": doc_id,
+                      "status": 200,
                       "_version": 1,
                       "result": "created",
                       "_shards": {
@@ -654,17 +654,36 @@ async fn bulk(
               items.push(index_item);
             }
             Err(error) => {
+              let mut status_code = 200;
               match error {
                 CoreDBError::TooManyAppendsError() => {
-                  return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()))
+                  status_code = 429;
                 }
                 CoreDBError::IndexNotFound(_) => {
-                  return Err((StatusCode::BAD_REQUEST, error.to_string()))
+                  status_code = 400;
                 }
                 _ => {
-                  return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string()));
+                  status_code = 500;
                 }
               };
+
+              let index_item = json!({
+                "index": {
+                  "_index": index_name,
+                  "_type": "_doc",
+                  "_id": "1",
+                  "status": status_code,
+                  "error": {
+                    "type": "Invalid request",
+                    "reason": error.to_string(),
+                    "index_uuid": "aAsFqTI0Tc2W0LCWgPNrOA",
+                    "shard": "1",
+                    "index": index_name
+                  }
+                }
+              });
+
+              items.push(index_item);
             }
           }
         } else {
