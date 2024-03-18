@@ -96,6 +96,7 @@ impl Segment {
       "Searching metrics db with {:?} {:?} {} {}",
       labels, condition, range_start_time, range_end_time
     );
+
     // We don't yet support conditions other than label_name=label_value.
     if *condition != MetricsQueryCondition::Equals {
       return Ok(Vec::new());
