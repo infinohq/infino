@@ -379,12 +379,15 @@ impl Index {
   }
 
   /// Append a log message to the current segment of the index.
+  #[allow(unused_assignments)]
   pub async fn append_log_message(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     message: &str,
-  ) -> Result<(), CoreDBError> {
+  ) -> Result<u32, CoreDBError> {
+    let mut doc_id = 0;
+
     debug!(
       "INDEX: Appending log message, time: {}, fields: {:?}, message: {}",
       time, fields, message
@@ -407,7 +410,7 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the log message to the current segment.
-      current_segment.append_log_message(time, fields, message)?;
+      doc_id = current_segment.append_log_message(time, fields, message)?;
 
       drop(current_segment);
     }
@@ -425,7 +428,7 @@ impl Index {
     // Check if a new segment needs to be created, and if so - create it.
     self.check_and_create_new_segment().await;
 
-    Ok(())
+    Ok(doc_id)
   }
 
   /// Append a metric point to the current segment of the index.

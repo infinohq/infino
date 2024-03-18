@@ -9,20 +9,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.opensearch.index.query.QueryBuilders;
+import org.opensearch.infino.InfinoSerializeTransportRequest.InfinoOperation;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchTestCase;
-import org.opensearch.transport.TransportRequest;
 
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.opensearch.action.admin.indices.create.CreateIndexRequest;
-import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.search.internal.ShardSearchRequest;
-import org.opensearch.common.settings.Settings;
 
 /**
  * General testing approach is:
@@ -49,7 +46,8 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockShardSearchRequest);
+                                mockShardSearchRequest,
+                                InfinoSerializeTransportRequest.InfinoOperation.SEARCH_DOCUMENTS);
                 assertEquals("test-index", infinoSerializeTransportRequest.getIndexName());
                 assertEquals(InfinoSerializeTransportRequest.InfinoOperation.SEARCH_DOCUMENTS,
                                 infinoSerializeTransportRequest.getOperation());
@@ -60,28 +58,22 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                                 .startsWith("http://test-host:3000/test-index/search_logs?start_time="));
         }
 
-        public void testIndexRequestParsing() throws IOException {
-                IndexRequest mockIndexRequest = mock(IndexRequest.class);
-                when(mockIndexRequest.indices()).thenReturn(new String[] { "test-index" });
+        public void testBulkShardRequestParsing() throws IOException {
+                BulkShardRequest mockBulkShardRequest = mock(BulkShardRequest.class);
+                when(mockBulkShardRequest.indices()).thenReturn(new String[] { "test-index" });
 
                 Map<String, Object> sourceMap = new HashMap<>();
                 sourceMap.put("field1", "value1");
                 sourceMap.put("field2", "value2");
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockIndexRequest);
+                                mockBulkShardRequest, InfinoSerializeTransportRequest.InfinoOperation.BULK_DOCUMENTS);
                 assertEquals("test-index", infinoSerializeTransportRequest.getIndexName());
-                assertEquals(InfinoSerializeTransportRequest.InfinoOperation.INDEX_DOCUMENTS,
+                assertEquals(InfinoSerializeTransportRequest.InfinoOperation.BULK_DOCUMENTS,
                                 infinoSerializeTransportRequest.getOperation());
                 assertEquals(RestRequest.Method.POST, infinoSerializeTransportRequest.getMethod());
-                assertEquals("http://test-host:3000/test-index/append_log",
+                assertEquals("http://test-host:3000/test-index/bulk",
                                 infinoSerializeTransportRequest.getFinalUrl());
-        }
-
-        public void testUnsupportedTransportRequest() {
-                TransportRequest unsupportedRequest = mock(TransportRequest.class);
-                assertThrows(IllegalArgumentException.class,
-                                () -> new InfinoSerializeTransportRequest(unsupportedRequest));
         }
 
         public void testDefaultTimeRangeHandling() throws IOException {
@@ -93,7 +85,7 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockShardSearchRequest);
+                                mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS);
                 assertTrue(infinoSerializeTransportRequest.getFinalUrl().contains("start_time="));
                 assertTrue(infinoSerializeTransportRequest.getFinalUrl().contains("end_time="));
         }
@@ -108,7 +100,7 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
                 when(mockShardSearchRequest.source()).thenReturn(searchSourceBuilder);
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockShardSearchRequest);
+                                mockShardSearchRequest, InfinoOperation.SEARCH_DOCUMENTS);
                 assertEquals("metrics-index", infinoSerializeTransportRequest.getIndexName());
                 assertEquals(InfinoSerializeTransportRequest.InfinoIndexType.METRICS,
                                 infinoSerializeTransportRequest.getIndexType());
@@ -116,64 +108,36 @@ public class InfinoSerializeTransportRequestTests extends OpenSearchTestCase {
         }
 
         public void testAppendLogEndpoint() throws IOException {
-                IndexRequest mockIndexRequest = mock(IndexRequest.class);
-                when(mockIndexRequest.indices()).thenReturn(new String[] { "test-index" });
+                BulkShardRequest mockBulkShardRequest = mock(BulkShardRequest.class);
+                when(mockBulkShardRequest.indices()).thenReturn(new String[] { "test-index" });
 
                 Map<String, Object> sourceMap = new HashMap<>();
                 sourceMap.put("message", "Test log message");
-                mockIndexRequest.source(sourceMap);
+                // mockBulkShardRequest.source(sourceMap);
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockIndexRequest);
+                                mockBulkShardRequest, InfinoOperation.BULK_DOCUMENTS);
                 assertEquals("test-index", infinoSerializeTransportRequest.getIndexName());
                 assertEquals(InfinoSerializeTransportRequest.InfinoIndexType.LOGS,
                                 infinoSerializeTransportRequest.getIndexType());
-                assertEquals("http://test-host:3000/test-index/append_log",
+                assertEquals("http://test-host:3000/test-index/bulk",
                                 infinoSerializeTransportRequest.getFinalUrl());
         }
 
         public void testAppendMetricEndpoint() throws IOException {
-                IndexRequest mockIndexRequest = mock(IndexRequest.class);
-                when(mockIndexRequest.indices()).thenReturn(new String[] { "metrics-index" });
+                BulkShardRequest mockBulkShardRequest = mock(BulkShardRequest.class);
+                when(mockBulkShardRequest.indices()).thenReturn(new String[] { "metrics-index" });
 
                 Map<String, Object> sourceMap = new HashMap<>();
                 sourceMap.put("p", "avg(metric{label_name_1\\=\"label_value_1\"})");
-                mockIndexRequest.source(sourceMap);
+                // mockBulkShardRequest.source(sourceMap);
 
                 InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockIndexRequest);
+                                mockBulkShardRequest, InfinoOperation.BULK_DOCUMENTS);
                 assertEquals("metrics-index", infinoSerializeTransportRequest.getIndexName());
                 assertEquals(InfinoSerializeTransportRequest.InfinoIndexType.METRICS,
                                 infinoSerializeTransportRequest.getIndexType());
                 assertEquals("http://test-host:3000/metrics-index/append_metric",
                                 infinoSerializeTransportRequest.getFinalUrl());
-        }
-
-        public void testCreateIndexEndpoint() throws IOException {
-                // Mock CreateIndexRequest
-                CreateIndexRequest mockCreateIndexRequest = mock(CreateIndexRequest.class);
-
-                // Setup non-empty settings
-                Settings nonEmptySettings = Settings.builder()
-                                .put("index.number_of_shards", 3)
-                                .put("index.number_of_replicas", 2)
-                                .build();
-
-                // Mock behavior of CreateIndexRequest
-                when(mockCreateIndexRequest.settings()).thenReturn(nonEmptySettings);
-                when(mockCreateIndexRequest.indices()).thenReturn(new String[] { "test-index" });
-
-                InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockCreateIndexRequest);
-                assertEquals("http://test-host:3000/:test-index", infinoSerializeTransportRequest.getFinalUrl());
-        }
-
-        public void testDeleteIndexEndpoint() throws IOException {
-                DeleteIndexRequest mockDeleteIndexRequest = mock(DeleteIndexRequest.class);
-                when(mockDeleteIndexRequest.indices()).thenReturn(new String[] { "test-index" });
-
-                InfinoSerializeTransportRequest infinoSerializeTransportRequest = new InfinoSerializeTransportRequest(
-                                mockDeleteIndexRequest);
-                assertEquals("http://test-host:3000/:test-index", infinoSerializeTransportRequest.getFinalUrl());
         }
 }

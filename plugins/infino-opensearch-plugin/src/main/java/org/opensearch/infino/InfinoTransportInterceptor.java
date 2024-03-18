@@ -50,7 +50,9 @@ import java.util.concurrent.TimeUnit;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.transport.TransportResponse;
+import org.opensearch.index.seqno.SequenceNumbers;
 import org.opensearch.infino.InfinoSerializeTransportRequest.InfinoOperation;
 
 import java.lang.reflect.Constructor;
@@ -64,11 +66,26 @@ import org.apache.logging.log4j.Logger;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
+import org.opensearch.OpenSearchException;
+import org.opensearch.action.DocWriteRequest;
+import org.opensearch.action.DocWriteResponse;
 import org.opensearch.action.OriginalIndices;
+import org.opensearch.action.DocWriteRequest.OpType;
+import org.opensearch.action.DocWriteResponse.Result;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.opensearch.action.bulk.BulkItemResponse;
+import org.opensearch.action.bulk.BulkResponse;
+import org.opensearch.action.bulk.BulkShardRequest;
+import org.opensearch.action.bulk.BulkShardResponse;
+import org.opensearch.action.bulk.BulkItemResponse.Failure;
+import org.opensearch.action.support.replication.ReplicationResponse;
+import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchRequest;
+import org.opensearch.action.support.replication.TransportReplicationAction.ConcreteShardRequest;
+import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.common.document.DocumentField;
 import org.opensearch.common.lucene.search.TopDocsAndMaxScore;
 import org.opensearch.core.action.ActionListener;
@@ -90,6 +107,7 @@ import org.opensearch.transport.TransportRequest;
 import org.opensearch.transport.TransportRequestHandler;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -161,18 +179,39 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
     }
 
     /**
-     * Get get a new instance of the serializer class
-     * 
-     * @param request - the Transport request to serialize
-     * 
+     * Get get a new instance of the serializer class. Used for unit tests.
+     *
+     * @param request   - the Transport request to serialize
+     * @param operation - the operation associated with the request
      * @return a configured InfinoSerializeTransportRequest object
      */
-    protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(TransportRequest request) {
+    protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(BulkShardRequest request,
+            InfinoOperation operation) {
         logger.info("Initializing Transport Registration.");
 
         try {
             logger.debug("Loading Transport Interceptor.");
-            return new InfinoSerializeTransportRequest(request);
+            return new InfinoSerializeTransportRequest(request, operation);
+        } catch (IOException e) {
+            logger.error("Error serializing REST URI for Infino: ", e);
+        }
+        return null;
+    }
+
+    /**
+     * Get get a new instance of the serializer class. Used for unit tests.
+     *
+     * @param request   - the Transport request to serialize
+     * @param operation - the operation associated with the request
+     * @return a configured InfinoSerializeTransportRequest object
+     */
+    protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(ShardSearchRequest request,
+            InfinoOperation operation) {
+        logger.info("Initializing Transport Registration.");
+
+        try {
+            logger.debug("Loading Transport Interceptor.");
+            return new InfinoSerializeTransportRequest(request, operation);
         } catch (IOException e) {
             logger.error("Error serializing REST URI for Infino: ", e);
         }
@@ -207,6 +246,14 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         infinoThreadPool.shutdown();
     }
 
+    /**
+     * Intercept the transport requests
+     * 
+     * @param action         - the action to be executed
+     * @param executor       - the executor for this request
+     * @param forceExecution - ignored
+     * @param actualHandler  - the original transport handler
+     */
     @Override
     public <T extends TransportRequest> TransportRequestHandler<T> interceptHandler(String action,
             String executor,
@@ -218,9 +265,23 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         return new TransportRequestHandler<T>() {
             @Override
             public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
-                logger.debug("-----------------Received request--------------- " + request.toString());
-                if (shouldBeIntercepted(request)) {
-                    processTransportActions(request, new ActionListener<TransportResponse>() {
+                logger.debug("-----------------Received request and task--------------- " + request.toString() + " --- "
+                        + task.toString());
+                String action = task.getAction();
+                if (shouldBeIntercepted(action)) {
+                    logger.debug("-----------------Intercepted request and task--------------- " + request.toString()
+                            + " --- " + action);
+                    InfinoOperation operation;
+
+                    if ("indices:data/write/bulk[s][p]".equals(action)) {
+                        operation = InfinoOperation.BULK_DOCUMENTS;
+                    } else if ("indices:data/read/search[phase/query]".equals(action)) {
+                        operation = InfinoOperation.SEARCH_DOCUMENTS;
+                    } else {
+                        throw new IllegalArgumentException("Unsupported action: " + task.getAction());
+                    }
+
+                    processTransportActions(request, operation, new ActionListener<TransportResponse>() {
                         @Override
                         public void onResponse(TransportResponse response) {
                             logger.info("TransportResponse: " + response);
@@ -235,7 +296,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                         @Override
                         public void onFailure(Exception e) {
                             try {
-                                logger.info("Transport action failed.");
+                                logger.error("Transport action failed.");
                                 channel.sendResponse(e);
                             } catch (IOException ex) {
                                 logger.error("Failed to send error response", ex);
@@ -247,26 +308,16 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                 }
             }
         };
+
     }
 
-    /*
-     * TODO: Use the task to make this decision, not the request object
-     */
-    private <T extends TransportRequest> boolean shouldBeIntercepted(T request) {
-        if ((request instanceof IndexRequest && ((IndexRequest) request).indices()[0].startsWith("infino-")) ||
-                (request instanceof ShardSearchRequest
-                        && ((ShardSearchRequest) request).indices()[0].startsWith("infino-"))
-                ||
-                (request instanceof SearchRequest && ((SearchRequest) request).indices()[0].startsWith("infino-")) ||
-                (request instanceof CreateIndexRequest
-                        && ((CreateIndexRequest) request).indices()[0].startsWith("infino-"))
-                ||
-                request instanceof DeleteIndexRequest
-                        && ((DeleteIndexRequest) request).indices()[0].startsWith("infino-")) {
+    private boolean shouldBeIntercepted(String action) {
+        if (("indices:data/read/search[phase/query]".equals(action))
+                || ("indices:data/write/bulk[s][p]".equals(action))) {
             return true;
-        } else {
-            return false;
         }
+
+        return false;
     }
 
     /**
@@ -277,11 +328,13 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      * our own privileged thread factory.
      *
      * We exponentially backoff for 429, 503, and 504 responses
-     *
-     * @param transportRequest the request to execute
-     * @param listener         the listener for executing actions
+     * 
+     * @param request   to execute
+     * @param operation the operation associated with the request
+     * @param listener  the listener for executing actions
      */
-    public void processTransportActions(TransportRequest transportRequest, ActionListener<TransportResponse> listener) {
+    public void processTransportActions(TransportRequest request, InfinoOperation operation,
+            ActionListener<TransportResponse> listener) {
 
         InfinoSerializeTransportRequest infinoRequest = null;
         HttpClient httpClient = getHttpClient();
@@ -291,7 +344,23 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
         // Serialize the request to a valid Infino URL
         try {
-            infinoRequest = new InfinoSerializeTransportRequest(transportRequest);
+            logger.debug("-----------------Sending request for serialization--------------- " + request.toString());
+            switch (operation) {
+                case BULK_DOCUMENTS: {
+                    @SuppressWarnings({ "unchecked", "rawtypes" })
+                    ConcreteShardRequest<BulkShardRequest> concreteRequest = (ConcreteShardRequest) request;
+                    BulkShardRequest indexRequest = concreteRequest.getRequest();
+                    infinoRequest = new InfinoSerializeTransportRequest(indexRequest, operation);
+                    break;
+                }
+                case SEARCH_DOCUMENTS: {
+                    ShardSearchRequest searchRequest = (ShardSearchRequest) request;
+                    infinoRequest = new InfinoSerializeTransportRequest(searchRequest, operation);
+                    break;
+                }
+                default:
+                    throw new IllegalArgumentException("Unsupported operation: " + operation);
+            }
         } catch (Exception e) {
             logger.info("Error serializing REST URI for Infino: ", e);
             listener.onFailure(e);
@@ -302,18 +371,18 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         RestRequest.Method method = infinoRequest.getMethod();
         String indexName = infinoRequest.getIndexName();
         BytesReference body = infinoRequest.getBody();
-        InfinoOperation operation = infinoRequest.getOperation();
         String url = infinoRequest.getFinalUrl();
 
-        logger.info("Transport Interceptor: Serialized REST request for Infino to " + infinoRequest.getFinalUrl());
+        logger.info("Serialized TRANSPORT request for Infino to " + infinoRequest.getFinalUrl());
 
         // Serialize the request to a valid Infino URL
         try {
-            logger.info("Building HTTP Request for Infino: method = " + method + " indexName: " + indexName
-                    + " operation: " + operation);
+            logger.debug("Building HTTP Request for Infino: method = " + method + " indexName: " + indexName
+                    + " operation: " + operation + " body: " + body.utf8ToString());
 
             forwardRequest = HttpRequest.newBuilder()
                     .uri(URI.create(url))
+                    .header("Content-Type", "application/json")
                     .method(method.toString(),
                             HttpRequest.BodyPublishers.ofString(body.utf8ToString()))
                     .build();
@@ -330,7 +399,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
         infinoThreadPool.execute(() -> {
             sendRequestWithBackoff(httpClient, forwardRequest, listener, indexName, method, operation, 0,
-                    transportRequest);
+                    request);
         });
     }
 
@@ -407,92 +476,163 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
 
             logger.debug("Response from Infino is " + responseBody);
 
-            if (responseBody == null || responseBody.isEmpty()) {
-                throw new IOException("Response body is empty");
-            }
-
-            // TODO: Parse the error response from Infino
             if (responseCode >= 400 && responseCode <= 499) {
-                throw new IllegalAccessException("Request denied by Infino index.");
+                throw new IllegalAccessException("Malformed request returned from Infino.");
             } else if (responseCode >= 500 && responseCode <= 599) {
-                throw new IOException("Server error returned from Infino index.");
+                throw new IOException("Server error returned from Infino.");
             }
 
-            Gson gson = new Gson();
-            JsonElement element = gson.fromJson(responseBody, JsonElement.class);
-            if (!element.isJsonObject()) {
-                throw new JsonParseException("Expected JSON object but found different structure");
+            if (responseBody == null || responseBody.isEmpty()) {
+                throw new IOException("Infino response body is empty.");
             }
 
-            JsonObject rootObj = element.getAsJsonObject();
-
-            JsonObject hitsObject = rootObj.getAsJsonObject("hits");
-            if (hitsObject == null) {
-                throw new JsonParseException("Response JSON does not contain 'hits' object");
-            }
-
-            JsonArray hitsArray = hitsObject.getAsJsonArray("hits");
-            long totalHitsValue = hitsObject.getAsJsonObject("total").get("value").getAsLong();
-            float maxScore = hitsObject.get("max_score").getAsFloat();
-            TotalHits totalHits = new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO);
-
-            QuerySearchResult queryResult = new QuerySearchResult();
-
-            List<SearchHit> searchHitsList = new ArrayList<>();
-            ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
-            SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
-            SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
-            TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
-
-            int i = 0;
-            for (JsonElement hitElement : hitsArray) {
-                JsonObject hitObj = hitElement.getAsJsonObject();
-                JsonObject sourceObj = hitObj.getAsJsonObject("_source");
-
-                String id = hitObj.get("_id").getAsString();
-                int docId = Integer.parseInt(id); // Ensure this ID parsing is what you intend, or handle exceptions
-
-                Map<String, DocumentField> documentFields = new HashMap<>();
-                Map<String, DocumentField> metaFields = new HashMap<>();
-
-                for (Map.Entry<String, JsonElement> entry : sourceObj.entrySet()) {
-                    documentFields.put(entry.getKey(),
-                            new DocumentField(entry.getKey(),
-                                    Collections.singletonList(entry.getValue().getAsString())));
+            if (operation == InfinoOperation.SEARCH_DOCUMENTS) {
+                Gson searchGson = new Gson();
+                JsonElement element = searchGson.fromJson(responseBody, JsonElement.class);
+                if (!element.isJsonObject()) {
+                    throw new JsonParseException("Expected JSON object but found different structure");
                 }
 
-                for (Map.Entry<String, JsonElement> entry : hitObj.entrySet()) {
-                    if (!entry.getKey().equals("_source")) {
-                        metaFields.put(entry.getKey(),
+                JsonObject rootObj = element.getAsJsonObject();
+
+                JsonObject hitsObject = rootObj.getAsJsonObject("hits");
+                if (hitsObject == null) {
+                    throw new JsonParseException("Response JSON does not contain 'hits' object");
+                }
+
+                JsonArray hitsArray = hitsObject.getAsJsonArray("hits");
+                long totalHitsValue = hitsObject.getAsJsonObject("total").get("value").getAsLong();
+                float maxScore = hitsObject.get("max_score").getAsFloat();
+                TotalHits totalHits = new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO);
+
+                QuerySearchResult queryResult = new QuerySearchResult();
+
+                List<SearchHit> searchHitsList = new ArrayList<>();
+
+                ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
+                SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
+                SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
+                TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
+
+                int i = 0;
+                for (JsonElement hitElement : hitsArray) {
+                    JsonObject hitObj = hitElement.getAsJsonObject();
+                    JsonObject sourceObj = hitObj.getAsJsonObject("_source");
+
+                    String id = hitObj.get("_id").getAsString();
+                    int docId = Integer.parseInt(id); // Ensure this ID parsing is what you intend, or handle exceptions
+
+                    Map<String, DocumentField> documentFields = new HashMap<>();
+                    Map<String, DocumentField> metaFields = new HashMap<>();
+
+                    for (Map.Entry<String, JsonElement> entry : sourceObj.entrySet()) {
+                        documentFields.put(entry.getKey(),
                                 new DocumentField(entry.getKey(),
-                                        Collections.singletonList(entry.getValue().toString())));
+                                        Collections.singletonList(entry.getValue().getAsString())));
                     }
+
+                    for (Map.Entry<String, JsonElement> entry : hitObj.entrySet()) {
+                        if (!entry.getKey().equals("_source")) {
+                            metaFields.put(entry.getKey(),
+                                    new DocumentField(entry.getKey(),
+                                            Collections.singletonList(entry.getValue().toString())));
+                        }
+                    }
+
+                    if (searchHitsList.size() != 0) {
+                        SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
+                        searchHitsList.add(searchHit);
+                        scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
+                    }
+                    i++;
                 }
 
-                SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
-                searchHitsList.add(searchHit);
-                scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
-                i++;
+                TopDocsAndMaxScore topDocsAndMaxScore = new TopDocsAndMaxScore(topDocs, maxScore);
+                queryResult.topDocs(topDocsAndMaxScore, null); // Assuming no sortValueFormats
+                queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
+
+                ShardSearchContextId contextId = new ShardSearchContextId("contextIdString", 1L);
+                SearchShardTarget shardTarget = new SearchShardTarget("nodeId", new ShardId(indexName, "indexUuid", 1),
+                        "clusterAlias", OriginalIndices.NONE);
+
+                FetchSearchResult fetchSearchResult = new FetchSearchResult(contextId, shardTarget);
+                fetchSearchResult.hits(searchHits);
+
+                // Create QueryFetchSearchResult with both query and fetch results
+                QueryFetchSearchResult queryFetchSearchResult = new QueryFetchSearchResult(queryResult,
+                        fetchSearchResult);
+                queryFetchSearchResult.setSearchShardTarget(shardTarget);
+
+                logger.debug("Response to Search Request is " + queryFetchSearchResult);
+
+                listener.onResponse(queryFetchSearchResult);
+            } else if (operation == InfinoOperation.BULK_DOCUMENTS) {
+                Gson bulkGson = new GsonBuilder().create();
+                JsonObject rootObj = bulkGson.fromJson(responseBody, JsonObject.class);
+
+                long took = rootObj.has("took") ? rootObj.get("took").getAsLong() : 0;
+                JsonArray itemsArray = rootObj.getAsJsonArray("items");
+
+                List<BulkItemResponse> bulkItemResponses = new ArrayList<>();
+
+                int i = 0;
+                for (JsonElement itemElement : itemsArray) {
+                    JsonObject actionObject = itemElement.getAsJsonObject().entrySet().iterator().next().getValue()
+                            .getAsJsonObject();
+                    String actionType = itemElement.getAsJsonObject().entrySet().iterator().next().getKey();
+                    OpType opType = OpType.valueOf(actionType.toUpperCase());
+
+                    String id = actionObject.get("_id").getAsString();
+                    String index = actionObject.get("_index").getAsString();
+                    int status = actionObject.get("status").getAsInt();
+                    RestStatus restStatus = RestStatus.fromCode(status);
+
+                    if (actionObject.has("error")) {
+                        JsonObject errorDetails = actionObject.getAsJsonObject("error");
+                        String errorReason = errorDetails.get("reason").getAsString();
+                        Exception cause = new Exception(errorReason);
+                        Failure failure = new Failure(index, id, cause, restStatus);
+                        bulkItemResponses.add(new BulkItemResponse(i, opType, failure));
+                    } else {
+                        long seqNo = actionObject.has("_seq_no") ? actionObject.get("_seq_no").getAsLong()
+                                : SequenceNumbers.UNASSIGNED_SEQ_NO;
+                        long primaryTerm = actionObject.has("_primary_term")
+                                ? actionObject.get("_primary_term").getAsLong()
+                                : SequenceNumbers.UNASSIGNED_PRIMARY_TERM;
+                        Result result = Result.valueOf(actionObject.get("result").getAsString().toUpperCase());
+
+                        DocWriteResponse docWriteResponse = null;
+                        switch (actionType) {
+                            case "index":
+                            case "create":
+                                docWriteResponse = new IndexResponse(new ShardId(index, "_na_", 1), id, seqNo,
+                                        primaryTerm, 1, result == Result.CREATED);
+                                break;
+                            case "delete":
+                                docWriteResponse = new DeleteResponse(new ShardId(index, "_na_", 1), id, seqNo,
+                                        primaryTerm, 1, result == Result.DELETED);
+                                break;
+                            case "update":
+                                docWriteResponse = new UpdateResponse(new ShardId(index, "_na_", 1), id, seqNo,
+                                        primaryTerm, 1, result);
+                                break;
+                            default:
+                                logger.warn("Unexpected actionType encountered: " + actionType);
+                        }
+                        if (docWriteResponse != null) {
+                            bulkItemResponses.add(new BulkItemResponse(i, opType, docWriteResponse));
+                        }
+                    }
+                    i++;
+                }
+
+                BulkItemResponse[] responsesArray = bulkItemResponses.toArray(new BulkItemResponse[0]);
+                BulkShardResponse bulkShardResponse = new BulkShardResponse(new ShardId(indexName, "_na_", 1),
+                        responsesArray);
+
+                listener.onResponse(bulkShardResponse);
             }
 
-            TopDocsAndMaxScore topDocsAndMaxScore = new TopDocsAndMaxScore(topDocs, maxScore);
-            queryResult.topDocs(topDocsAndMaxScore, null); // Assuming no sortValueFormats
-            queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
-
-            ShardSearchContextId contextId = new ShardSearchContextId("contextIdString", 1L);
-            SearchShardTarget shardTarget = new SearchShardTarget("nodeId", new ShardId(indexName, "indexUuid", 1),
-                    "clusterAlias", OriginalIndices.NONE);
-
-            FetchSearchResult fetchSearchResult = new FetchSearchResult(contextId, shardTarget);
-            fetchSearchResult.hits(searchHits);
-
-            // Create QueryFetchSearchResult with both query and fetch results
-            QueryFetchSearchResult queryFetchSearchResult = new QueryFetchSearchResult(queryResult, fetchSearchResult);
-            queryFetchSearchResult.setSearchShardTarget(shardTarget);
-
-            logger.debug("Response to Search Request is " + queryFetchSearchResult);
-
-            listener.onResponse(queryFetchSearchResult);
         } catch (JsonParseException | IOException e) {
             logger.error("Error parsing or retrieving Infino response", e);
             listener.onFailure(e);

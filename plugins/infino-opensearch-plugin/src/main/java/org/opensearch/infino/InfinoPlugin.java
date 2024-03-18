@@ -41,14 +41,14 @@ import static java.util.Collections.singletonList;
 import java.net.http.HttpClient;
 
 /**
- * Implement the REST API handler and transport interceptor for client calls
+ * The Infino OpenSearch plugin.
  */
 public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin {
 
     private static final Logger logger = LogManager.getLogger(InfinoPlugin.class);
 
-    // This methods overrides the method from the parent class to hand a list
-    // of additional REST handlers to OpenSearch at pre-defined paths.
+    // Listen for (allowed) index creation and deletion calls on the REST API
+    // and process them instead of OpenSearch.
     @Override
     public List<RestHandler> getRestHandlers(
             final Settings settings,
@@ -95,8 +95,41 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
         });
     }
 
-    // This methods overrides the method from the parent class to hand a list
-    // of additional transport handlers to OpenSearch.
+    // (2) Intercept creation and deletion requests directly from the Action layer..
+    @Override
+    public List<ActionFilter> getActionFilters() {
+        logger.info("-----------------------Registering Action Filter------------------------");
+
+        return Arrays.asList(new ActionFilter() {
+
+            @Override
+            public int order() {
+                return 0; // Ensure this filter has a high precedence
+            }
+
+            @Override
+            public <Request extends ActionRequest, Response extends ActionResponse> void apply(Task task,
+                    String action, Request request, ActionListener<Response> listener,
+                    ActionFilterChain<Request, Response> chain) {
+                if (CreateIndexAction.NAME.equals(action) || DeleteIndexAction.NAME.equals(action)) {
+                    logger.debug("=======Blocked action {} due to plugin configuration.", action);
+                    logger.debug("=======The request is " + request.toString());
+                    listener.onFailure(new UnsupportedOperationException(
+                            "You must prefix creation and deletion of your collections with \"collection/\"."));
+                } else {
+                    logger.info("---------Action is: " + action);
+                    logger.debug("=======The request is " + request.toString());
+
+                    chain.proceed(task, action, request, listener);
+                }
+            }
+        });
+    }
+
+    // Listen for data node requests on the transport layer (Search and Document
+    // operations). This allows all the ingest pipeline logic for indexing and
+    // all the ranking logic for searches to be applied by OpenSearch before it is
+    // sent to Infino.
     @Override
     public List<TransportInterceptor> getTransportInterceptors(NamedWriteableRegistry namedWriteableRegistry,
             ThreadContext threadContext) {
