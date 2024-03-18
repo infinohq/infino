@@ -24,17 +24,12 @@ pub struct Metadata {
 
   /// Number of metric labels.
   // Applicable for metrics. Note that the metric name itself is a label, given by TimeSeries::get_label_for_metric_name(metric_name).
+  // See the comment for Segment::append_metric_point() for details about how this count is changed.
   #[serde(with = "atomic_cell_serde")]
   label_count: AtomicCell<u32>,
 
   /// Number of metric points.
-  // Applicable for metrics. Note that the metric name itself is a label, given by TimeSeries::get_label_for_metric_name(metric_name).
-  //
-  // As an example, say segment.append_metric_point() is called as follows:
-  // - segment.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="1", value="1")
-  // - segment.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="2", value="2")
-  // - segment.append_metric_point(metric_name="http_get", name_value_labels={"status_code":500, "path":"/user", time="3", value="2")
-  // This will results into labels "__metric_name__~http_get", "status_code~200", "status_code~500", "path~/user" -- so the label count is 4.
+  // See the comment for Segment::append_metric_point() for details about how this count is changed.
   #[serde(with = "atomic_cell_serde")]
   metric_point_count: AtomicCell<u32>,
 
