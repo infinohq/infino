@@ -1103,7 +1103,7 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn test_merge_segments() {
+  async fn test_merge_segments_basic() {
     let segment1 = Segment::new_with_temp_wal();
     let segment2 = Segment::new_with_temp_wal();
 
@@ -1148,5 +1148,75 @@ mod tests {
     //  Check metrics of merged segment
     // TODO: check with @vinaykakade if this is fine
     assert_eq!(merged_segment.metadata.get_metric_point_count(), 4);
+  }
+
+  // Similar to test_commit_refresh write exhaustive test for merge_segments
+  #[tokio::test]
+  async fn test_merge_segments() {
+    let segment1 = Segment::new_with_temp_wal();
+    let segment2 = Segment::new_with_temp_wal();
+    let time = Utc::now().timestamp_millis() as u64;
+
+    // Insert 1000 unique logs in segment 1 and 2
+    for i in 0..1000 {
+      segment1
+        .append_log_message(
+          time,
+          &HashMap::new(),
+          format!("log_message_1_{}", i).as_str(),
+        )
+        .unwrap();
+      segment2
+        .append_log_message(
+          time,
+          &HashMap::new(),
+          format!("log_message_2_{}", i).as_str(),
+        )
+        .unwrap();
+    }
+
+    let mut label_map_1 = HashMap::new();
+    for i in 0..1000 {
+      label_map_1.insert(
+        format!("label_1_{}", i).as_str().to_owned(),
+        format!("value_1_{}", i).as_str().to_owned(),
+      );
+      segment1
+        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+        .unwrap();
+    }
+
+    let mut label_map_2 = HashMap::new();
+    for i in 0..1000 {
+      label_map_2.insert(
+        format!("label_2_{}", i).as_str().to_owned(),
+        format!("value_2_{}", i).as_str().to_owned(),
+      );
+      segment2
+        .append_metric_point("metric_name_2", &label_map_2, time, 100.0)
+        .unwrap();
+    }
+
+    // TODO: fix search metrics it's flaky right now
+    // let results = segment1
+    //   .search_metrics(
+    //     &label_map_1,
+    //     &MetricsQueryCondition::Equals,
+    //     0,
+    //     time + 10000,
+    //   )
+    //   .await
+    //   .unwrap();
+    // assert_eq!(results.len(), 1000);
+
+    // Merge the segments
+    let merged_segment = Segment::merge(segment1, segment2).unwrap();
+    // Assert if the logs are merged
+    assert_eq!(merged_segment.get_log_message_count(), 2000);
+    // Assert if metadata is merged correctly
+    assert_eq!(merged_segment.metadata.get_log_message_count(), 2000);
+    assert_eq!(merged_segment.metadata.get_label_count(), 2000);
+    assert_eq!(merged_segment.metadata.get_metric_point_count(), 2000);
+    assert_eq!(merged_segment.metadata.get_term_count(), 2000);
   }
 }
