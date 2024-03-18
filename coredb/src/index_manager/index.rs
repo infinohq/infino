@@ -388,12 +388,15 @@ impl Index {
   }
 
   /// Append a log message to the current segment of the index.
+  #[allow(unused_assignments)]
   pub async fn append_log_message(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     message: &str,
-  ) -> Result<(), CoreDBError> {
+  ) -> Result<u32, CoreDBError> {
+    let mut doc_id = 0;
+
     debug!(
       "INDEX: Appending log message, time: {}, fields: {:?}, message: {}",
       time, fields, message
@@ -416,7 +419,7 @@ impl Index {
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
       // Append the log message to the current segment.
-      current_segment.append_log_message(time, fields, message)?;
+      doc_id = current_segment.append_log_message(time, fields, message)?;
 
       drop(current_segment);
     }
@@ -434,7 +437,7 @@ impl Index {
     // Check if a new segment needs to be created, and if so - create it.
     self.check_and_create_new_segment().await;
 
-    Ok(())
+    Ok(doc_id)
   }
 
   /// Append a metric point to the current segment of the index.
@@ -772,13 +775,14 @@ impl Index {
     let metadata_path = get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let metadata: Metadata = storage.read(metadata_path.as_str()).await?;
 
+    // Create the mutexes for locking commit/refresh and create new segment operations.
     let commit_refresh_lock = Arc::new(TokioMutex::new(thread::current().id()));
     let create_new_segment_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
     // No segment is uncommitted when the index is refreshed.
     let uncommitted_segment_numbers = DashMap::new();
 
-    // Create an index with empty segment summaries and empry memory_segments_map.
+    // Create an index with empty segment summaries and empty memory_segments_map.
     let mut index = Index {
       metadata,
       all_segments_summaries: DashMap::new(),

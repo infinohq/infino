@@ -173,7 +173,7 @@ impl CoreDB {
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
-  ) -> Result<(), CoreDBError> {
+  ) -> Result<u32, CoreDBError> {
     debug!(
       "Appending log message in CoreDB: time {}, fields {:?}, text {}",
       time, fields, text
