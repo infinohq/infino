@@ -766,13 +766,14 @@ impl Index {
     let metadata_path = get_joined_path(index_dir_path, METADATA_FILE_NAME);
     let metadata: Metadata = storage.read(metadata_path.as_str()).await?;
 
+    // Create the mutexes for locking commit/refresh and create new segment operations.
     let commit_refresh_lock = Arc::new(TokioMutex::new(thread::current().id()));
     let create_new_segment_lock = Arc::new(TokioMutex::new(thread::current().id()));
 
     // No segment is uncommitted when the index is refreshed.
     let uncommitted_segment_numbers = DashMap::new();
 
-    // Create an index with empty segment summaries and empry memory_segments_map.
+    // Create an index with empty segment summaries and empty memory_segments_map.
     let mut index = Index {
       metadata,
       all_segments_summaries: DashMap::new(),
