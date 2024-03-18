@@ -66,24 +66,18 @@ import org.apache.logging.log4j.Logger;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
-import org.opensearch.OpenSearchException;
-import org.opensearch.action.DocWriteRequest;
+
 import org.opensearch.action.DocWriteResponse;
 import org.opensearch.action.OriginalIndices;
 import org.opensearch.action.DocWriteRequest.OpType;
 import org.opensearch.action.DocWriteResponse.Result;
-import org.opensearch.action.admin.indices.create.CreateIndexRequest;
-import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+
 import org.opensearch.action.bulk.BulkItemResponse;
-import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.action.bulk.BulkShardResponse;
 import org.opensearch.action.bulk.BulkItemResponse.Failure;
-import org.opensearch.action.support.replication.ReplicationResponse;
 import org.opensearch.action.delete.DeleteResponse;
-import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.replication.TransportReplicationAction.ConcreteShardRequest;
 import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.common.document.DocumentField;

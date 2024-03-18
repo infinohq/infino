@@ -482,18 +482,6 @@ public class InfinoSerializeTransportRequest {
 
         /** Delete one or more documents. */
         DELETE_DOCUMENTS,
-
-        /** Create an index. */
-        CREATE_INDEX,
-
-        /** Delete an index. */
-        DELETE_INDEX,
-
-        /** Ping Infino. */
-        PING,
-
-        /** Summarize results */
-        SUMMARIZE,
     }
 
     /**
