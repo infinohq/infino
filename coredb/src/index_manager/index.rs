@@ -19,7 +19,7 @@ use crate::segment_manager::segment::Segment;
 use crate::storage_manager::storage::Storage;
 use crate::storage_manager::storage::StorageType;
 use crate::utils::error::CoreDBError;
-use crate::utils::io::{self, get_joined_path};
+use crate::utils::io::get_joined_path;
 use crate::utils::sync::thread;
 use crate::utils::sync::{Arc, TokioMutex};
 
@@ -229,7 +229,7 @@ impl Index {
   }
 
   // Get all the keys of segments in memory
-  pub fn get_memory_segments_keys(&self) -> Vec<u32> {
+  pub fn get_memory_segments_numbers(&self) -> Vec<u32> {
     self
       .memory_segments_map
       .iter()
@@ -881,12 +881,11 @@ impl Index {
     Ok(())
   }
 
-  pub async fn merge_segments(&self, segment_list: Vec<u32>) -> Result<(), CoreDBError> {
+  pub async fn merge_segments(&self, segment_list: &Vec<u32>) -> Result<(), CoreDBError> {
     // Fetch list of segments to merge from segment_list
-    let segment_list_clone = segment_list.clone();
     let mut segments: Vec<Segment> = Vec::new();
     for segment_number in segment_list {
-      let segment = self.refresh_segment(segment_number).await?;
+      let segment = self.refresh_segment(*segment_number).await?;
       segments.push(segment);
     }
 
@@ -897,7 +896,7 @@ impl Index {
       let merged_segment = Segment::merge(segment1, segment2).map_err(|error| {
         error!(
           "Error while merging segments with segment numbers {:?}: {}",
-          segment_list_clone, error
+          segment_list, error
         );
         CoreDBError::SegmentMergeFailed()
       })?;
@@ -912,7 +911,7 @@ impl Index {
     // Commit the merged segment
     let merged_segment = segments.pop().unwrap();
     let merged_segment_number = self.metadata.fetch_increment_segment_count();
-    let segment_dir_path = io::get_joined_path(
+    let segment_dir_path = get_joined_path(
       &self.index_dir_path,
       merged_segment_number.to_string().as_str(),
     );
@@ -929,7 +928,7 @@ impl Index {
       merged_segment.get_end_time(),
       uncompressed,
       compressed,
-      segment_list_clone
+      segment_list
     );
     Ok(())
   }

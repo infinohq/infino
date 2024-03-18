@@ -431,16 +431,18 @@ impl CoreDB {
   pub async fn trigger_merge(&self) -> Result<(), CoreDBError> {
     for index_entry in self.get_index_map() {
       // Assuming a method to safely retrieve and ensure we're getting a merge policy
-      let merge_policy = self.get_merge_policy().unwrap();
+      let merge_policy = self
+        .get_merge_policy()
+        .ok_or(CoreDBError::InvalidPolicy())?;
       let all_segments_summaries = index_entry.get_all_segments_summaries().await?;
       // Get all the keys of the segments in memory
-      let segments_in_memory = index_entry.get_memory_segments_keys();
+      let segments_in_memory = index_entry.get_memory_segments_numbers();
       // Apply the merge policy directly here based on the enum variant
       let segment_ids_to_merge = match merge_policy {
-        PolicyType::Merge(policy) => policy.apply(&all_segments_summaries, segments_in_memory),
+        PolicyType::Merge(policy) => policy.apply(&all_segments_summaries, &segments_in_memory),
         _ => return Err(CoreDBError::InvalidPolicy()),
       };
-      index_entry.merge_segments(segment_ids_to_merge).await?;
+      index_entry.merge_segments(&segment_ids_to_merge).await?;
     }
     Ok(())
   }
@@ -452,7 +454,9 @@ impl CoreDB {
       // in memory in Index::all_segments_summaries()
       let all_segments_summaries = index_entry.value().get_all_segments_summaries().await?;
 
-      let retention_policy = self.get_retention_policy().unwrap();
+      let retention_policy = self
+        .get_retention_policy()
+        .ok_or(CoreDBError::InvalidPolicy())?;
       let segment_ids_to_delete = match retention_policy {
         PolicyType::Retention(policy) => {
           policy.apply(&all_segments_summaries) // Directly use the apply method of the retention policy

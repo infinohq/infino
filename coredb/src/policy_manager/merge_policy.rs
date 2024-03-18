@@ -5,7 +5,7 @@ pub trait MergePolicy: Send + Sync {
   fn apply(
     &self,
     segment_summaries: &DashMap<u32, SegmentSummary>,
-    segments_in_memory: Vec<u32>,
+    segments_in_memory: &[u32],
   ) -> Vec<u32>;
 }
 
@@ -25,7 +25,7 @@ impl MergePolicy for SizeBasedMerge {
   fn apply(
     &self,
     segment_summaries: &DashMap<u32, SegmentSummary>,
-    segments_in_memory: Vec<u32>,
+    segments_in_memory: &[u32],
   ) -> Vec<u32> {
     // Create a writable empty Vec segment ids
     let mut segment_ids: Vec<u32> = Vec::new();
@@ -110,7 +110,7 @@ mod tests {
     segment_summaries.insert(2, segment3);
 
     let merge_policy = SizeBasedMerge::new(1024);
-    let segments_to_merge = merge_policy.apply(&segment_summaries, vec![]);
+    let segments_to_merge = merge_policy.apply(&segment_summaries, &[]);
     assert_eq!(segments_to_merge, vec![0, 1]);
   }
 
@@ -149,7 +149,7 @@ mod tests {
     segment_summaries.insert(2, segment3);
 
     let merge_policy = SizeBasedMerge::new(1024);
-    let segments_to_merge = merge_policy.apply(&segment_summaries, vec![1, 2]);
+    let segments_to_merge = merge_policy.apply(&segment_summaries, &[1, 2]);
     assert_eq!(segments_to_merge, vec![0]);
   }
 }
