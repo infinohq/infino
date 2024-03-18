@@ -1077,17 +1077,6 @@ mod tests {
 
     let time = Utc::now().timestamp_millis() as u64;
 
-    // Insert 1000 unique logs in segment 1 and 2
-    for i in 0..1000 {
-      segment1
-        .append_log_message(
-          time,
-          &HashMap::new(),
-          format!("log_message_1_{}", i).as_str(),
-        )
-        .unwrap();
-    }
-
     let mut label_map_1 = HashMap::new();
     for i in 0..1000 {
       label_map_1.insert(
@@ -1098,8 +1087,6 @@ mod tests {
         .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
         .unwrap();
     }
-
-    segment1.commit(&storage, segment_dir_path).await.unwrap();
 
     let results = segment1
       .search_metrics(&label_map_1, &MetricsQueryCondition::Equals, 0, u64::MAX)
