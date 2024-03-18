@@ -983,9 +983,8 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn test_search_metric_2() {
-    // Part 1 - WORKS
-    // Segment with 1000 metric points - each with the same label.
+  async fn test_search_metric_points_with_labels() {
+    // Segment with 1000 metric points - each with the same label, different time.
     let segment1 = Segment::new_with_temp_wal();
     let mut label_map_1 = HashMap::new();
     label_map_1.insert("label_1".to_owned(), "value_1".to_owned());
@@ -1001,8 +1000,7 @@ mod tests {
       .unwrap();
     assert_eq!(results.len(), 1000);
 
-    // Part 2 - WORKS
-    // Segment with 1000 metric points - each with a different label.
+    // Segment with 1000 metric points - each with a different label, different time.
     let segment1 = Segment::new_with_temp_wal();
     for i in 0..1000 {
       let time = Utc::now().timestamp_millis() as u64;
@@ -1024,8 +1022,7 @@ mod tests {
       assert_eq!(results.len(), 1);
     }
 
-    // Part 3 - WORKS
-    // Segment with 1000 metric points - each with the same time - and same label.
+    // Segment with 1000 metric points - each with the same time, and the same label.
     let segment1 = Segment::new_with_temp_wal();
     let mut label_map_1 = HashMap::new();
     label_map_1.insert("label_1".to_owned(), "value_1".to_owned());
@@ -1041,8 +1038,7 @@ mod tests {
       .unwrap();
     assert_eq!(results.len(), 1000);
 
-    // Part 4 - WORKS
-    // Segment with 1000 metric points - each with a different label but same time
+    // Segment with 1000 metric points - each with a same time, but different label.
     let segment1 = Segment::new_with_temp_wal();
     let time = Utc::now().timestamp_millis() as u64;
     for i in 0..1000 {
@@ -1066,32 +1062,29 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn test_search_metric() {
-    let segment1 = Segment::new_with_temp_wal();
+  async fn test_duplicate_metric_points() {
+    let segment = Segment::new_with_temp_wal();
 
-    let segment_dir = TempDir::new("segment_test").unwrap();
-    let segment_dir_path = segment_dir.path().to_str().unwrap();
-    let storage = Storage::new(&StorageType::Local)
-      .await
-      .expect("Could not create storage");
-
+    // Add 500 duplicate metric points with the same metric name, timestamp and value.
+    // The 1st metric point has 1 label, the 2nd has 2 labels, etc.
     let time = Utc::now().timestamp_millis() as u64;
-
-    let mut label_map_1 = HashMap::new();
-    for i in 0..1000 {
-      label_map_1.insert(
-        format!("label_1_{}", i).as_str().to_owned(),
-        format!("value_1_{}", i).as_str().to_owned(),
-      );
-      segment1
-        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+    let mut label_map = HashMap::new();
+    for i in 0..500 {
+      label_map.insert(format!("label_{}", i), format!("value_{}", i));
+      segment
+        .append_metric_point("metric_name_1", &label_map, time, 100.0)
         .unwrap();
     }
 
-    let results = segment1
-      .search_metrics(&label_map_1, &MetricsQueryCondition::Equals, 0, u64::MAX)
-      .await
-      .unwrap();
-    assert_eq!(results.len(), 1000);
+    // Query the metric points and see that the results are as expected.
+    let mut label_map = HashMap::new();
+    for i in 0..500 {
+      label_map.insert(format!("label_{}", i), format!("value_{}", i));
+      let results = segment
+        .search_metrics(&label_map, &MetricsQueryCondition::Equals, 0, u64::MAX)
+        .await
+        .unwrap();
+      assert_eq!(results.len(), 500 - i);
+    }
   }
 }

@@ -96,7 +96,6 @@ impl Segment {
       "Searching metrics db with {:?} {:?} {} {}",
       labels, condition, range_start_time, range_end_time
     );
-
     // We don't yet support conditions other than label_name=label_value.
     if *condition != MetricsQueryCondition::Equals {
       return Ok(Vec::new());
@@ -117,7 +116,7 @@ impl Segment {
       range_end_time,
     );
 
-    // Iterate through the remaining conditions and interest to find the matching metric points.
+    // Iterate through the remaining conditions of interest to find the matching metric points.
     for (current_label_name, current_label_value) in labels.iter().skip(1) {
       let current_metric_points = self.get_metric_points_for_label(
         current_label_name,
@@ -126,8 +125,24 @@ impl Segment {
         range_end_time,
       );
 
-      // Change retval so that it contains only the metric points that match the current condition.
-      retval.retain(|metric_point| current_metric_points.contains(metric_point));
+      // Count occurrences of each element in `current_metric_points`. We need the count as we need
+      // to preserve the duplicates.
+      let mut occurrence_map = std::collections::HashMap::new();
+      for metric_point in current_metric_points {
+        *occurrence_map.entry(metric_point).or_insert(0) += 1;
+      }
+
+      // Change retval so that it contains only the metric points that match the current_metrict_points.
+      // Regarding duplicates, we only retain the elements in retval, upto their count in occurrence_map.
+      retval.retain(|metric_point| {
+        if let Some(count) = occurrence_map.get_mut(metric_point) {
+          if *count > 0 {
+            *count -= 1;
+            return true;
+          }
+        }
+        false
+      });
     }
 
     // Sort the retrieved time series in chronological order.
