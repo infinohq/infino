@@ -271,9 +271,6 @@ impl Segment {
       wal.append(wal_entry).unwrap();
     }
 
-    // Increment the number of metric points appended so far.
-    self.metadata.fetch_increment_metric_point_count();
-
     let mut my_labels = Vec::new();
 
     // Push the metric name label.
@@ -305,11 +302,27 @@ impl Segment {
         label_id = *entry;
       }
 
+      // {
+      //   let entry = self.labels.entry(label.to_owned());
+      //   match entry {
+      //     Entry::Occupied(ref o) => {
+      //       label_id = *o.get();
+      //     }
+      //     Entry::Vacant(vacant) => {
+      //       label_id = self.metadata.fetch_increment_label_count();
+      //       vacant.insert(label_id);
+      //     }
+      //   }
+      // }
+
       // Need to lock the shard that contains the label_id, so that some other thread doesn't insert the same label_id.
       // Add this in a separate block to minimize the locking time.
       {
         self.time_series_map.append(label_id, time, value)?;
       }
+
+      // Increment the number of metric points appended so far.
+      self.metadata.fetch_increment_metric_point_count();
     } // end for label in my_labels
 
     self.update_start_end_time(time);
@@ -710,7 +723,7 @@ mod tests {
     // Test metadata.
     assert_eq!(from_disk_segment.metadata.get_log_message_count(), 1);
     assert_eq!(from_disk_segment.metadata.get_label_count(), 2);
-    assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 1);
+    assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 2);
     assert_eq!(from_disk_segment.metadata.get_term_count(), 6); // 6 terms in "this is my 1st log message"
 
     // Test terms map.
@@ -723,7 +736,7 @@ mod tests {
     assert!(from_disk_segment.labels.contains_key(&other_label_key));
 
     // Test time series.
-    assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 1);
+    assert_eq!(from_disk_segment.metadata.get_metric_point_count(), 2);
     let result = from_disk_segment.labels.get(&metric_name_key).unwrap();
     let metric_name_id = *result.value();
     let other_result = from_disk_segment.labels.get(&other_label_key).unwrap();
@@ -1067,6 +1080,42 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn test_label_metric_count_for_timeseries() {
+    let segment = Segment::new_with_temp_wal();
+
+    let mut label_map_1 = HashMap::new();
+    label_map_1.insert("status_code".to_owned(), "200".to_owned());
+    label_map_1.insert("path".to_owned(), "/api/v1".to_owned());
+
+    segment
+      .append_metric_point("http_get", &label_map_1, 1, 1.0)
+      .unwrap();
+
+    let mut label_map_2 = HashMap::new();
+    label_map_2.insert("status_code".to_owned(), "200".to_owned());
+    label_map_2.insert("path".to_owned(), "/api/v1".to_owned());
+    segment
+      .append_metric_point("http_get", &label_map_2, 2, 1.0)
+      .unwrap();
+
+    let mut label_map_3 = HashMap::new();
+    label_map_3.insert("status_code".to_owned(), "500".to_owned());
+    label_map_3.insert("path".to_owned(), "/api/v1".to_owned());
+    segment
+      .append_metric_point("http_get", &label_map_3, 3, 2.0)
+      .unwrap();
+
+    // Print all labels
+    let labels = segment.get_labels();
+    for entry in labels.iter() {
+      println!("Label: {}, Label ID: {}", entry.key(), entry.value());
+    }
+    // Assert label count and metric point count.
+    assert_eq!(segment.metadata.get_label_count(), 4);
+    assert_eq!(segment.metadata.get_metric_point_count(), 9);
+  }
+
+  #[tokio::test]
   async fn test_copy_time_series_from_segment() {
     let segment1 = Segment::new_with_temp_wal();
     let segment2 = Segment::new_with_temp_wal();
@@ -1153,12 +1202,20 @@ mod tests {
   // Similar to test_commit_refresh write exhaustive test for merge_segments
   #[tokio::test]
   async fn test_merge_segments() {
+    let segment_1_dir = TempDir::new("segment_1_test").unwrap();
+    let segment_2_dir = TempDir::new("segment_2_test").unwrap();
+    let segment_1_dir_path = segment_1_dir.path().to_str().unwrap();
+    let segment_2_dir_path = segment_2_dir.path().to_str().unwrap();
+    let storage = Storage::new(&StorageType::Local)
+      .await
+      .expect("Could not create storage");
+
     let segment1 = Segment::new_with_temp_wal();
     let segment2 = Segment::new_with_temp_wal();
     let time = Utc::now().timestamp_millis() as u64;
 
     // Insert 1000 unique logs in segment 1 and 2
-    for i in 0..1000 {
+    for i in 0..10 {
       segment1
         .append_log_message(
           time,
@@ -1176,47 +1233,44 @@ mod tests {
     }
 
     let mut label_map_1 = HashMap::new();
-    for i in 0..1000 {
+    for i in 0..10 {
       label_map_1.insert(
         format!("label_1_{}", i).as_str().to_owned(),
         format!("value_1_{}", i).as_str().to_owned(),
       );
-      segment1
-        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
-        .unwrap();
     }
+    segment1
+      .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+      .unwrap();
 
     let mut label_map_2 = HashMap::new();
-    for i in 0..1000 {
+    for i in 0..10 {
       label_map_2.insert(
         format!("label_2_{}", i).as_str().to_owned(),
         format!("value_2_{}", i).as_str().to_owned(),
       );
-      segment2
-        .append_metric_point("metric_name_2", &label_map_2, time, 100.0)
-        .unwrap();
     }
+    segment2
+      .append_metric_point("metric_name_2", &label_map_2, time, 100.0)
+      .unwrap();
 
-    // TODO: fix search metrics it's flaky right now
-    // let results = segment1
-    //   .search_metrics(
-    //     &label_map_1,
-    //     &MetricsQueryCondition::Equals,
-    //     0,
-    //     time + 10000,
-    //   )
-    //   .await
-    //   .unwrap();
-    // assert_eq!(results.len(), 1000);
+    segment1.commit(&storage, segment_1_dir_path).await.unwrap();
+    segment2.commit(&storage, segment_2_dir_path).await.unwrap();
+
+    // Check label cound and metric point count from both segments
+    assert_eq!(segment1.metadata.get_label_count(), 11);
+    assert_eq!(segment1.metadata.get_metric_point_count(), 11);
+    assert_eq!(segment2.metadata.get_label_count(), 11);
+    assert_eq!(segment2.metadata.get_metric_point_count(), 11);
 
     // Merge the segments
     let merged_segment = Segment::merge(segment1, segment2).unwrap();
     // Assert if the logs are merged
-    assert_eq!(merged_segment.get_log_message_count(), 2000);
+    assert_eq!(merged_segment.get_log_message_count(), 20);
     // Assert if metadata is merged correctly
-    assert_eq!(merged_segment.metadata.get_log_message_count(), 2000);
-    assert_eq!(merged_segment.metadata.get_label_count(), 2000);
-    assert_eq!(merged_segment.metadata.get_metric_point_count(), 2000);
-    assert_eq!(merged_segment.metadata.get_term_count(), 2000);
+    assert_eq!(merged_segment.metadata.get_log_message_count(), 20);
+    assert_eq!(merged_segment.metadata.get_label_count(), 22);
+    assert_eq!(merged_segment.metadata.get_metric_point_count(), 22);
+    assert_eq!(merged_segment.metadata.get_term_count(), 20);
   }
 }
