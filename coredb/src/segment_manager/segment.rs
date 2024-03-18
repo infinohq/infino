@@ -192,7 +192,12 @@ impl Segment {
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
-  ) -> Result<(), CoreDBError> {
+  ) -> Result<u32, CoreDBError> {
+    debug!(
+      "SEGMENT: Appending log message, time: {}, fields: {:?}, message: {}",
+      time, fields, text
+    );
+
     // Write to write-ahead-log.
     let wal_entry = json!({"type": "log", "time": time, "fields": fields, "text": text});
     {
@@ -230,7 +235,9 @@ impl Segment {
     // Update the start and end time for this segment.
     self.update_start_end_time(time);
 
-    Ok(())
+    debug!("Sending back doc Id {}", log_message_id);
+
+    Ok(log_message_id)
   }
 
   /// Append a metric point with specified time and value to the segment.
