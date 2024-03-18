@@ -13,7 +13,7 @@ use elasticsearch::{
   http::headers::HeaderMap,
   http::transport::{SingleNodeConnectionPool, TransportBuilder},
   http::Method,
-  indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts},
+  indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts, IndicesFlushParts},
   params::Refresh,
   BulkParts, Elasticsearch, Error, IndexParts,
 };
@@ -21,6 +21,8 @@ use serde_json::{json, Value};
 use url::Url;
 
 use crate::utils::io;
+
+const FLUSH_LIMIT_BYTES: u64 = 524288000; // 500MB
 
 static INDEX_NAME: &str = "perftest";
 
@@ -88,6 +90,7 @@ impl ElasticsearchEngine {
     let num_docs_per_batch = 100;
     let mut num_docs_in_this_batch = 0;
     let mut logs_batch = Vec::new();
+    let mut bytes_sent_since_flush: u64 = 0;
     let now = Instant::now();
 
     if let Ok(lines) = io::read_lines(input_data_path) {
@@ -114,17 +117,15 @@ impl ElasticsearchEngine {
           if num_docs_in_this_batch == num_docs_per_batch {
             let mut body: Vec<JsonBody<_>> = Vec::with_capacity(num_docs_per_batch);
             for log in &logs_batch {
-              body.push(json!({"index": {"_id": log.get("id").unwrap()}}).into());
-              body.push(
-                json!({
+              let log_json = json!({
                     "date": log.get("date").unwrap(),
                     "message": log.get("message").unwrap(),
-                })
-                .into(),
-              );
+                });
+              bytes_sent_since_flush += log_json.to_string().len() as u64;
+              body.push(json!({"index": {"_id": log.get("id").unwrap()}}).into());
+              body.push(JsonBody::from(log_json));
             }
             #[allow(unused)]
-            //let flush = self.client.indices.flush(IndicesFlushParts::Index(&[INDEX_NAME])).send().await.unwrap();
             let insert = self
               .client
               .bulk(BulkParts::Index(INDEX_NAME))
@@ -135,6 +136,20 @@ impl ElasticsearchEngine {
             //println!("#{} {:?}", num_docs, insert);
             num_docs_in_this_batch = 0;
             logs_batch.clear();
+
+            // Check if we need to flush
+            if bytes_sent_since_flush > FLUSH_LIMIT_BYTES {
+              #[allow(unused)]
+              let flush = self
+                .client
+                .indices()
+                .flush(IndicesFlushParts::Index(&[INDEX_NAME]))
+                .send()
+                .await
+                .unwrap();
+              bytes_sent_since_flush = 0;
+            }
+
           } //end if num_docs_in_this_batch == num_docs_per_batch
         }
       }
