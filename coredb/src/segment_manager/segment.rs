@@ -981,4 +981,130 @@ mod tests {
       error!("Error parsing the query for 'hello'.");
     }
   }
+
+  #[tokio::test]
+  async fn test_search_metric_2() {
+    // Part 1 - WORKS
+    // Segment with 1000 metric points - each with the same label.
+    let segment1 = Segment::new_with_temp_wal();
+    let mut label_map_1 = HashMap::new();
+    label_map_1.insert("label_1".to_owned(), "value_1".to_owned());
+    for _ in 0..1000 {
+      let time = Utc::now().timestamp_millis() as u64;
+      segment1
+        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+        .unwrap();
+    }
+    let results = segment1
+      .search_metrics(&label_map_1, &MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
+    assert_eq!(results.len(), 1000);
+
+    // Part 2 - WORKS
+    // Segment with 1000 metric points - each with a different label.
+    let segment1 = Segment::new_with_temp_wal();
+    for i in 0..1000 {
+      let time = Utc::now().timestamp_millis() as u64;
+      let mut label_map_1 = HashMap::new();
+      label_map_1.insert(format!("label_1_{}", i), format!("value_1_{}", i));
+      segment1
+        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+        .unwrap();
+    }
+
+    for i in 0..1000 {
+      let mut label_map_1 = HashMap::new();
+      label_map_1.insert(format!("label_1_{}", i), format!("value_1_{}", i));
+
+      let results = segment1
+        .search_metrics(&label_map_1, &MetricsQueryCondition::Equals, 0, u64::MAX)
+        .await
+        .unwrap();
+      assert_eq!(results.len(), 1);
+    }
+
+    // Part 3 - WORKS
+    // Segment with 1000 metric points - each with the same time - and same label.
+    let segment1 = Segment::new_with_temp_wal();
+    let mut label_map_1 = HashMap::new();
+    label_map_1.insert("label_1".to_owned(), "value_1".to_owned());
+    let time = Utc::now().timestamp_millis() as u64;
+    for _ in 0..1000 {
+      segment1
+        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+        .unwrap();
+    }
+    let results = segment1
+      .search_metrics(&label_map_1, &MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
+    assert_eq!(results.len(), 1000);
+
+    // Part 4 - WORKS
+    // Segment with 1000 metric points - each with a different label but same time
+    let segment1 = Segment::new_with_temp_wal();
+    let time = Utc::now().timestamp_millis() as u64;
+    for i in 0..1000 {
+      let mut label_map_1 = HashMap::new();
+      label_map_1.insert(format!("label_1_{}", i), format!("value_1_{}", i));
+      segment1
+        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+        .unwrap();
+    }
+
+    for i in 0..1000 {
+      let mut label_map_1 = HashMap::new();
+      label_map_1.insert(format!("label_1_{}", i), format!("value_1_{}", i));
+
+      let results = segment1
+        .search_metrics(&label_map_1, &MetricsQueryCondition::Equals, 0, u64::MAX)
+        .await
+        .unwrap();
+      assert_eq!(results.len(), 1);
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_metric() {
+    let segment1 = Segment::new_with_temp_wal();
+
+    let segment_dir = TempDir::new("segment_test").unwrap();
+    let segment_dir_path = segment_dir.path().to_str().unwrap();
+    let storage = Storage::new(&StorageType::Local)
+      .await
+      .expect("Could not create storage");
+
+    let time = Utc::now().timestamp_millis() as u64;
+
+    // Insert 1000 unique logs in segment 1 and 2
+    for i in 0..1000 {
+      segment1
+        .append_log_message(
+          time,
+          &HashMap::new(),
+          format!("log_message_1_{}", i).as_str(),
+        )
+        .unwrap();
+    }
+
+    let mut label_map_1 = HashMap::new();
+    for i in 0..1000 {
+      label_map_1.insert(
+        format!("label_1_{}", i).as_str().to_owned(),
+        format!("value_1_{}", i).as_str().to_owned(),
+      );
+      segment1
+        .append_metric_point("metric_name_1", &label_map_1, time, 100.0)
+        .unwrap();
+    }
+
+    segment1.commit(&storage, segment_dir_path).await.unwrap();
+
+    let results = segment1
+      .search_metrics(&label_map_1, &MetricsQueryCondition::Equals, 0, u64::MAX)
+      .await
+      .unwrap();
+    assert_eq!(results.len(), 1000);
+  }
 }
