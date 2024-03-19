@@ -885,7 +885,7 @@ impl Index {
     Ok(())
   }
 
-  pub async fn merge_segments(&self, segment_list: &Vec<u32>) -> Result<(), CoreDBError> {
+  pub async fn merge_segments(&self, segment_list: &Vec<u32>) -> Result<u32, CoreDBError> {
     // Fetch list of segments to merge from segment_list
     let mut segments: Vec<Segment> = Vec::new();
     for segment_number in segment_list {
@@ -924,6 +924,16 @@ impl Index {
       .commit(&self.storage, segment_dir_path.as_str())
       .await?;
 
+    // In a single transaction Atomic operation update all_segment_summaries to add the new segment and remove the old segments
+    for segment_number in segment_list {
+      self.all_segments_summaries.remove(segment_number);
+      self.memory_segments_map.remove(segment_number); // This is not required but precautionary
+    }
+    self.all_segments_summaries.insert(
+      merged_segment_number,
+      SegmentSummary::new(merged_segment_number, &merged_segment),
+    );
+
     info!(
       "Merged segment with segment_number {}, id {}, start_time {}, end_time {}, uncompressed_size {}, compressed_size {} from segments with segment numbers {:?}",
       merged_segment_number,
@@ -934,7 +944,7 @@ impl Index {
       compressed,
       segment_list
     );
-    Ok(())
+    Ok(merged_segment_number)
   }
 
   /// Flush write ahead log for all uncommitted segments.
@@ -2343,5 +2353,155 @@ mod tests {
     // Commit the index - this should make the number of uncommitted segments to 0.
     index.commit(false).await.unwrap();
     assert_eq!(index.uncommitted_segment_numbers.len() as u32, 0);
+  }
+
+  #[tokio::test]
+  async fn test_merge_segments_basic() {
+    let index_dir = TempDir::new("test_overlap_multiple_segments").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_overlap_multiple_segments"
+    );
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = format!(
+      "{}/{}",
+      wal_dir.path().to_str().unwrap(),
+      "test_overlap_multiple_segments"
+    );
+    let storage_type = StorageType::Local;
+
+    // The log_messages_threshold is set to 2, so that a new segment gets created after every 2 messages.
+    let index = Index::new_with_threshold_params(
+      &storage_type,
+      &index_dir_path,
+      &wal_dir_path,
+      1024 * 1024,
+      2,
+      100,
+      10,
+    )
+    .await
+    .unwrap();
+
+    // Setting it high to test out that there is no single-threaded deadlock while commiting.
+    // Note that if you change this value, some of the assertions towards the end of this test
+    // may need to be changed.
+    let num_segments = 20;
+
+    for i in 0..num_segments {
+      let start = i * 2 * 1000;
+      index
+        .append_log_message(start, &HashMap::new(), "message_1")
+        .await
+        .expect("Could not append log message");
+      index
+        .append_log_message(start + 500, &HashMap::new(), "message_2")
+        .await
+        .expect("Could not append log message");
+      index.commit(true).await.expect("Could not commit index");
+    }
+
+    // We'll have num_segments segments, plus one empty segment at the end.
+    assert_eq!(index.all_segments_summaries.len() as u64, 21);
+
+    // Merge 3 segments
+    let segment_numbers = vec![1, 2, 3];
+    let merged_segment_id = index.merge_segments(&segment_numbers).await.unwrap();
+    // Assert
+    assert_eq!(index.all_segments_summaries.len() as u64, 19);
+    assert_eq!(
+      index
+        .all_segments_summaries
+        .contains_key(&merged_segment_id),
+      true
+    );
+  }
+
+  #[tokio::test]
+  async fn test_merge_segments_validate_data() {
+    // Create  3 segments with 1 log and 1 metric and merge it
+    let index_dir = TempDir::new("test_overlap_multiple_segments").unwrap();
+    let index_dir_path = format!(
+      "{}/{}",
+      index_dir.path().to_str().unwrap(),
+      "test_overlap_multiple_segments"
+    );
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = format!(
+      "{}/{}",
+      wal_dir.path().to_str().unwrap(),
+      "test_overlap_multiple_segments"
+    );
+    let storage_type = StorageType::Local;
+
+    // The log_messages_threshold is set to 2, so that a new segment gets created after every 2 messages.
+    let index = Index::new_with_threshold_params(
+      &storage_type,
+      &index_dir_path,
+      &wal_dir_path,
+      1024 * 1024,
+      1,
+      5,
+      3,
+    )
+    .await
+    .unwrap();
+
+    // Setting it high to test out that there is no single-threaded deadlock while commiting.
+    // Note that if you change this value, some of the assertions towards the end of this test
+    // may need to be changed.
+    let num_segments = 3;
+
+    let mut label_map = HashMap::new();
+    label_map.insert("label1".to_owned(), "value1".to_owned());
+    let time = 1000;
+    for _i in 0..num_segments {
+      index
+        .append_log_message(time, &HashMap::new(), "message_1")
+        .await
+        .expect("Could not append log message");
+      // Do append_metrics
+      index
+        .append_metric_point("metric_name", &label_map, time, 100.0)
+        .await
+        .expect("Could not append metric point");
+      index.commit(true).await.expect("Could not commit index");
+    }
+
+    // Merge 3 segments
+    let segment_numbers = vec![1, 2, 3];
+    let merged_segment_id = index.merge_segments(&segment_numbers).await.unwrap();
+
+    // Assert all segment summaries contains only merged_segment_id. 2 because 1 merged segment and 1 empty segment
+    assert_eq!(index.all_segments_summaries.len(), 2);
+    assert_eq!(
+      index
+        .all_segments_summaries
+        .contains_key(&merged_segment_id),
+      true
+    );
+
+    // Check the queries return results as expected.
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "message_1", "operator" : "AND" } } }
+          ]
+        }
+      }
+    }
+    "#;
+
+    // Call search_logs and handle errors
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
+    let search_result = index
+      .search_logs(&ast, 0, 10000)
+      .await
+      .expect("Error in search_logs");
+
+    assert_eq!(search_result.get_messages().len(), 3);
   }
 }

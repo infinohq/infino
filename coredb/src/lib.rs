@@ -428,7 +428,8 @@ impl CoreDB {
     self.policy.get(constants::MERGE_POLICY_TRIGGER)
   }
 
-  pub async fn trigger_merge(&self) -> Result<(), CoreDBError> {
+  pub async fn trigger_merge(&self) -> Result<Vec<u32>, CoreDBError> {
+    let mut merged_segment_ids = Vec::new();
     for index_entry in self.get_index_map() {
       // Assuming a method to safely retrieve and ensure we're getting a merge policy
       let merge_policy = self
@@ -442,9 +443,17 @@ impl CoreDB {
         PolicyType::Merge(policy) => policy.apply(&all_segments_summaries, &segments_in_memory),
         _ => return Err(CoreDBError::InvalidPolicy()),
       };
-      index_entry.merge_segments(&segment_ids_to_merge).await?;
+      let merged_result = index_entry.merge_segments(&segment_ids_to_merge).await;
+      match merged_result {
+        Ok(merged_segment_id) => {
+          merged_segment_ids.push(merged_segment_id);
+        }
+        Err(e) => {
+          error!("Error merging segments: {:?}", e);
+        }
+      }
     }
-    Ok(())
+    Ok(merged_segment_ids)
   }
 
   /// Function to help with triggering the retention policy

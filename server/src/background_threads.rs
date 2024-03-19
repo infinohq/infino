@@ -85,8 +85,13 @@ fn check_and_start_segment_policy_thread(
       }
 
       let merge_result = state.coredb.trigger_merge().await;
-      if let Err(e) = merge_result {
-        error!("Error triggering merge policy on index in coredb: {}", e);
+      match merge_result {
+        Ok(merged_segment_ids) => {
+          info!("Newly created merged segment ids: {:?}", merged_segment_ids);
+        }
+        Err(e) => {
+          error!("Error triggering merge policy on index in coredb: {}", e);
+        }
       }
     }));
 
