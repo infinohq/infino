@@ -302,19 +302,6 @@ impl Segment {
         label_id = *entry;
       }
 
-      // {
-      //   let entry = self.labels.entry(label.to_owned());
-      //   match entry {
-      //     Entry::Occupied(ref o) => {
-      //       label_id = *o.get();
-      //     }
-      //     Entry::Vacant(vacant) => {
-      //       label_id = self.metadata.fetch_increment_label_count();
-      //       vacant.insert(label_id);
-      //     }
-      //   }
-      // }
-
       // Need to lock the shard that contains the label_id, so that some other thread doesn't insert the same label_id.
       // Add this in a separate block to minimize the locking time.
       {
@@ -1079,6 +1066,11 @@ mod tests {
     }
   }
 
+  /*
+   s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/api/v1", time="1", value="1")
+   s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/api/v1", time="2", value="2")
+   s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":500, "path":"/api/v1", time="3", value="2")
+  */
   #[tokio::test]
   async fn test_label_metric_count_for_timeseries() {
     let segment = Segment::new_with_temp_wal();
@@ -1105,11 +1097,6 @@ mod tests {
       .append_metric_point("http_get", &label_map_3, 3, 2.0)
       .unwrap();
 
-    // Print all labels
-    let labels = segment.get_labels();
-    for entry in labels.iter() {
-      println!("Label: {}, Label ID: {}", entry.key(), entry.value());
-    }
     // Assert label count and metric point count.
     assert_eq!(segment.metadata.get_label_count(), 4);
     assert_eq!(segment.metadata.get_metric_point_count(), 9);

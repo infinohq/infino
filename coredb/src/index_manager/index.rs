@@ -1725,7 +1725,7 @@ mod tests {
         &storage_type,
         1024 * 1024,
         10,
-        100,
+        1000,
         10,
       )
       .await;
