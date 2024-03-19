@@ -28,60 +28,69 @@ static INDEX_NAME: &str = "perftest";
 
 pub struct ElasticsearchEngine {
   client: Elasticsearch,
+  with_infino_plugin: bool,
 }
 
 impl ElasticsearchEngine {
-  pub async fn new() -> ElasticsearchEngine {
+  pub async fn new(with_infino_plugin: bool) -> ElasticsearchEngine {
     let client = ElasticsearchEngine::create_client().unwrap();
 
-    let exists = client
-      .indices()
-      .exists(IndicesExistsParts::Index(&[INDEX_NAME]))
-      .send()
-      .await
-      .unwrap();
-
-    if exists.status_code().is_success() {
-      println!("Index {} already exists. Now deleting it.", INDEX_NAME);
-      let delete = client
+    if with_infino_plugin{
+      // Running against Elastic/OpenSeach with Infino plugin.
+      // As a temporary work around we need to create the Index
+      // by calling the Infino API endpoint and not via the plugin.
+      let reqwest_client = reqwest::Client::new();
+      let url = format!("http://localhost:3000/{}", INDEX_NAME);
+      let response = reqwest_client.put(&url).send().await.unwrap();
+      if !response.status().is_success() {
+        panic!("Error while creating index in Infino{:?}", response);
+      }
+    } else {
+      let exists = client
         .indices()
-        .delete(IndicesDeleteParts::Index(&[INDEX_NAME]))
+        .exists(IndicesExistsParts::Index(&[INDEX_NAME]))
         .send()
         .await
         .unwrap();
-
-      if !delete.status_code().is_success() {
-        panic!("Problem deleting index: {}", INDEX_NAME);
+      if exists.status_code().is_success() {
+        println!("Index {} already exists. Now deleting it.", INDEX_NAME);
+        let delete = client
+          .indices()
+          .delete(IndicesDeleteParts::Index(&[INDEX_NAME]))
+          .send()
+          .await
+          .unwrap();
+        if !delete.status_code().is_success() {
+          panic!("Problem deleting index: {}", INDEX_NAME);
+        }
+      }
+      let response = client
+        .indices()
+        .create(IndicesCreateParts::Index(INDEX_NAME))
+        .body(json!(
+            {
+              "mappings": {
+                "properties": {
+                  "message": {
+                    "type": "text"
+                  }
+                }
+              },
+              "settings": {
+                "index.number_of_shards": 1,
+                "index.number_of_replicas": 0
+              }
+            }
+        ))
+        .send()
+        .await
+        .unwrap();
+      if !response.status_code().is_success() {
+        println!("Error while creating index {:?}", response);
       }
     }
 
-    let response = client
-      .indices()
-      .create(IndicesCreateParts::Index(INDEX_NAME))
-      .body(json!(
-          {
-            "mappings": {
-              "properties": {
-                "message": {
-                  "type": "text"
-                }
-              }
-            },
-            "settings": {
-              "index.number_of_shards": 1,
-              "index.number_of_replicas": 0
-            }
-          }
-      ))
-      .send()
-      .await
-      .unwrap();
-
-    if !response.status_code().is_success() {
-      println!("Error while creating index {:?}", response);
-    }
-
-    ElasticsearchEngine { client }
+    ElasticsearchEngine { client , with_infino_plugin }
   }
 
   /// Indexes input data and returns the time required for insertion as microseconds.
@@ -138,7 +147,7 @@ impl ElasticsearchEngine {
             logs_batch.clear();
 
             // Check if we need to flush
-            if bytes_sent_since_flush > FLUSH_LIMIT_BYTES {
+            if !self.with_infino_plugin && bytes_sent_since_flush > FLUSH_LIMIT_BYTES {
               #[allow(unused)]
               let flush = self
                 .client
@@ -147,6 +156,7 @@ impl ElasticsearchEngine {
                 .send()
                 .await
                 .unwrap();
+              println!("Flushed index {} after writing {} bytes", INDEX_NAME, bytes_sent_since_flush);
               bytes_sent_since_flush = 0;
             }
 

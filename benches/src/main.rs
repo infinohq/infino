@@ -4,6 +4,7 @@ use crate::logs::clickhouse::ClickhouseEngine;
 use crate::logs::es::ElasticsearchEngine;
 use crate::logs::infino::InfinoEngine;
 use crate::logs::infino_rest::InfinoApiClient;
+#[allow(unused_imports)]
 use crate::logs::infino_os_rest::InfinoOSApiClient;
 use crate::utils::io::get_directory_size;
 use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
@@ -227,26 +228,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n\n***Now running Infino OpenSearch via the REST API client***");
 
     // Index the data using infino and find the output size.
-    let infino_os_rest = InfinoOSApiClient::new();
-    let cell_infino_os_rest_index_time = infino_os_rest.index_lines(&opt.input_file, max_docs).await;
+    let infino_os =  ElasticsearchEngine::new(true).await;
+    let cell_infino_os_index_time = infino_os.index_lines(&opt.input_file, max_docs).await;
 
     // Perform search on infino index
-    let cell_infino_os_rest_search_time = infino_os_rest
-      .search_multiple_queries(INFINO_SEARCH_QUERIES)
+    let cell_infino_os_search_time = infino_os
+      .search_multiple_queries(ELASTICSEARCH_SEARCH_QUERIES)
       .await;
 
-    idx_size_title_str += " Infino-OS-REST |";
+    idx_size_title_str += " Infino-OS |";
     idx_size_dashes_str += " ----- |";
     idx_size_values_str += " Not available via API |";
 
-    idx_lat_title_str += " Infino-OS-REST |";
+    idx_lat_title_str += " Infino-OS |";
     idx_lat_dashes_str += " ----- |";
-    idx_lat_values_str += &format!(" {} |", cell_infino_os_rest_index_time);
+    idx_lat_values_str += &format!(" {} |", cell_infino_os_index_time);
 
-    log_search_lat_title_str += " Infino-OS-REST |";
+    log_search_lat_title_str += " Infino-OS |";
     log_search_lat_dashes_str += " ----- |";
     log_search_lat_values_str += &format!(" {} |",
-                  cell_infino_os_rest_search_time / INFINO_SEARCH_QUERIES.len() as u128);
+                  cell_infino_os_search_time / ELASTICSEARCH_SEARCH_QUERIES.len() as u128);
     // INFINO OS REST END
   }
 
@@ -255,7 +256,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n\n***Now running Elasticsearch***");
 
     // Index the data using elasticsearch and find the output size.
-    let es = ElasticsearchEngine::new().await;
+    let es = ElasticsearchEngine::new(false).await;
     let cell_es_index_time = es.index_lines(&opt.input_file, max_docs).await;
 
     // Force merge the index so that the index size is optimized.
