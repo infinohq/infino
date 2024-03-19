@@ -297,8 +297,8 @@ impl Segment {
       {
         let entry = self
           .labels
-          .entry(label.to_owned())
-          .or_insert(self.metadata.fetch_increment_label_count());
+          .entry(label)
+          .or_insert_with(|| self.metadata.fetch_increment_label_count());
         label_id = *entry;
       }
 
