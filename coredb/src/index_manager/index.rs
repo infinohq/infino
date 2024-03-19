@@ -925,14 +925,21 @@ impl Index {
       .await?;
 
     // In a single transaction Atomic operation update all_segment_summaries to add the new segment and remove the old segments
-    for segment_number in segment_list {
-      self.all_segments_summaries.remove(segment_number);
-      self.memory_segments_map.remove(segment_number); // This is not required but precautionary
+    // isolate the shards by wrapping it in a block
+    {
+      self.all_segments_summaries.insert(
+        merged_segment_number,
+        SegmentSummary::new(merged_segment_number, &merged_segment),
+      );
     }
-    self.all_segments_summaries.insert(
-      merged_segment_number,
-      SegmentSummary::new(merged_segment_number, &merged_segment),
-    );
+
+    // isolate the shards by wrapping it in a block
+    {
+      for segment_number in segment_list {
+        self.all_segments_summaries.remove(segment_number);
+        self.memory_segments_map.remove(segment_number); // This is not required but precautionary
+      }
+    }
 
     info!(
       "Merged segment with segment_number {}, id {}, start_time {}, end_time {}, uncompressed_size {}, compressed_size {} from segments with segment numbers {:?}",

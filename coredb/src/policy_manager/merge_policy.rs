@@ -64,7 +64,6 @@ impl MergePolicy for SizeBasedMerge {
   }
 }
 
-// write test case for above function
 #[cfg(test)]
 mod tests {
   use std::time::SystemTime;
