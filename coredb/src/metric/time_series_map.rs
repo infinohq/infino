@@ -34,6 +34,10 @@ impl TimeSeriesMap {
       .map(|time_series| time_series.clone())
   }
 
+  pub fn get_time_series_map(&self) -> &DashMap<u32, Arc<RwLock<TimeSeries>>> {
+    &self.time_series_map
+  }
+
   pub fn append(&self, label_id: u32, time: u64, value: f64) -> Result<(), CoreDBError> {
     // Access or insert the metric point for the given label id, ensuring thread-safe operation.
     let arc_rwlock_ts = self

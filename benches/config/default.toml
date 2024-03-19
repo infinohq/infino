@@ -13,16 +13,17 @@ default_index_name = "default"
 log_messages_threshold = 100000       # 100K
 metric_points_threshold = 1000000     # 1M
 
-# Memory budget for searching segments. Expect the actual memory used to be higher 
+# Memory budget for searching segments. Expect the actual memory used to be higher
 # (but proportional) to this number.
 search_memory_budget_megabytes = 1024
 
 # Maximum number of uncommitted segments. The appends will return 413 when the commits
-# fall behind 
+# fall behind
 uncommitted_segments_threshold = 10
 
 # Number of days to retain older older logs and metrics.
 retention_days = 30
+target_segment_size_megabytes = 1024
 
 [server]
 port = 3000

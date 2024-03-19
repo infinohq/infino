@@ -62,16 +62,19 @@ fn check_and_start_commit_thread(
   }
 }
 
-/// Function to execute retention policy by starting a new thread as necessory.
-/// Returns true if a new retention thread was started, returns false otherwise.
-fn check_and_start_retention_thread(
+/// Function to execute segment policy which consist of
+/// * retention policy *
+/// * merge policy *
+/// by starting a new thread as necessory.
+/// Returns true if a new segment policy thread was started, returns false otherwise.
+fn check_and_start_segment_policy_thread(
   state: Arc<AppState>,
-  retention_handle: &mut Option<JoinHandle<()>>,
+  segment_policy_handle: &mut Option<JoinHandle<()>>,
 ) -> bool {
-  if !is_join_handle_running(retention_handle) {
+  if !is_join_handle_running(segment_policy_handle) {
     // The thread to run retention policy isn't started or has finished.
     // Start a new thread for executing retention policy, and update the retention_handle.
-    *retention_handle = Some(tokio::spawn(async move {
+    *segment_policy_handle = Some(tokio::spawn(async move {
       info!("Triggering retention policy on index in coredb");
       let result = state.coredb.trigger_retention().await;
       if let Err(e) = result {
@@ -79,6 +82,16 @@ fn check_and_start_retention_thread(
           "Error triggering retention policy on index in coredb: {}",
           e
         );
+      }
+
+      let merge_result = state.coredb.trigger_merge().await;
+      match merge_result {
+        Ok(merged_segment_ids) => {
+          info!("Newly created merged segment ids: {:?}", merged_segment_ids);
+        }
+        Err(e) => {
+          error!("Error triggering merge policy on index in coredb: {}", e);
+        }
       }
     }));
 
@@ -98,7 +111,7 @@ pub async fn check_and_start_background_threads(state: Arc<AppState>) {
   let mut last_trigger_policy_time = Utc::now().timestamp_millis() as u64;
   let mut flush_wal_handle: Option<JoinHandle<()>> = None;
   let mut commit_handle: Option<JoinHandle<()>> = None;
-  let mut retention_handle: Option<JoinHandle<()>> = None;
+  let mut segment_policy_handle: Option<JoinHandle<()>> = None;
 
   // TODO: make trigger policy interval configurable
   let policy_interval_ms = 3600000; // 1hr in ms
@@ -125,7 +138,7 @@ pub async fn check_and_start_background_threads(state: Arc<AppState>) {
       if let Some(handle) = commit_handle {
         join_handles.push(handle);
       }
-      if let Some(handle) = retention_handle {
+      if let Some(handle) = segment_policy_handle {
         join_handles.push(handle);
       }
 
@@ -143,9 +156,9 @@ pub async fn check_and_start_background_threads(state: Arc<AppState>) {
     // Start retention thread - if one isn't running already.
     let current_time = Utc::now().timestamp_millis() as u64;
     if current_time - last_trigger_policy_time > policy_interval_ms {
-      let new_retention_thread_started =
-        check_and_start_retention_thread(state.clone(), &mut retention_handle);
-      if new_retention_thread_started {
+      let new_segment_policy_thread_started =
+        check_and_start_segment_policy_thread(state.clone(), &mut segment_policy_handle);
+      if new_segment_policy_thread_started {
         // Update last_trigger_policy_time only if a new retention thread was started.
         last_trigger_policy_time = current_time;
       }

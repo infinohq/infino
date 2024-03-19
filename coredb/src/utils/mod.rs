@@ -4,6 +4,7 @@
 //! Utilities for managing CoreDB.
 
 pub mod config;
+pub mod constants;
 pub(crate) mod custom_serde;
 pub mod environment;
 pub mod error;
