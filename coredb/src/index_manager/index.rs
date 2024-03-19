@@ -2410,12 +2410,9 @@ mod tests {
     let merged_segment_id = index.merge_segments(&segment_numbers).await.unwrap();
     // Assert
     assert_eq!(index.all_segments_summaries.len() as u64, 19);
-    assert_eq!(
-      index
-        .all_segments_summaries
-        .contains_key(&merged_segment_id),
-      true
-    );
+    assert!(index
+      .all_segments_summaries
+      .contains_key(&merged_segment_id),);
   }
 
   #[tokio::test]
@@ -2475,12 +2472,9 @@ mod tests {
 
     // Assert all segment summaries contains only merged_segment_id. 2 because 1 merged segment and 1 empty segment
     assert_eq!(index.all_segments_summaries.len(), 2);
-    assert_eq!(
-      index
-        .all_segments_summaries
-        .contains_key(&merged_segment_id),
-      true
-    );
+    assert!(index
+      .all_segments_summaries
+      .contains_key(&merged_segment_id));
 
     // Check the queries return results as expected.
     let query_message = r#"{
