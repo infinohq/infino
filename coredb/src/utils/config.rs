@@ -47,6 +47,7 @@ pub struct CoreDBSettings {
   storage_type: String,
   cloud_storage_bucket_name: Option<String>,
   cloud_storage_region: Option<String>,
+  target_segment_size_megabytes: f32,
 }
 
 impl CoreDBSettings {
@@ -173,6 +174,10 @@ impl CoreDBSettings {
       }
     }
   }
+
+  pub fn get_target_segment_size_bytes(&self) -> u64 {
+    (self.target_segment_size_megabytes * 1024.0 * 1024.0) as u64
+  }
 }
 
 #[derive(Debug, Deserialize)]
@@ -263,6 +268,9 @@ mod tests {
         .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
+      file
+        .write_all(b"target_segment_size_megabytes = 1024\n")
+        .unwrap();
     }
 
     let settings = Settings::new(config_dir_path).unwrap();
@@ -276,6 +284,10 @@ mod tests {
     );
 
     assert_eq!(coredb_settings.get_retention_days(), 30);
+    assert_eq!(
+      coredb_settings.get_target_segment_size_bytes(),
+      1024 * 1024 * 1024
+    );
 
     assert_eq!(
       coredb_settings.get_storage_type().unwrap(),
@@ -331,6 +343,9 @@ mod tests {
         .unwrap();
       file.write_all(b"retention_days = 30\n").unwrap();
       file.write_all(b"storage_type = \"local\"\n").unwrap();
+      file
+        .write_all(b"target_segment_size_megabytes = 1024\n")
+        .unwrap();
     }
 
     // Make sure this config returns an error.
