@@ -139,7 +139,6 @@ impl TimeSeries {
     &self.last_block
   }
 
-  #[cfg(test)]
   /// Get the vector of compressed blocks.
   pub fn get_compressed_blocks(&self) -> &Vec<TimeSeriesBlockCompressed> {
     &self.compressed_blocks
@@ -151,7 +150,6 @@ impl TimeSeries {
     &self.initial_times
   }
 
-  #[cfg(test)]
   pub fn flatten(&self) -> Vec<MetricPoint> {
     let mut retval = Vec::new();
 
@@ -167,6 +165,22 @@ impl TimeSeries {
     retval.append(&mut metric_points);
 
     retval
+  }
+
+  // Function to check if given string is metric and return extracted metric name
+  pub fn is_metric(s: &str) -> bool {
+    s.starts_with(METRIC_NAME_PREFIX)
+  }
+
+  // Function to extract metric name from given string
+  pub fn extract_metric_name(s: &str) -> String {
+    s.split(LABEL_SEPARATOR).collect::<Vec<&str>>()[1].to_string()
+  }
+
+  // Function to separate label name and label value from given string
+  pub fn extract_label(s: &str) -> (String, String) {
+    let parts: Vec<&str> = s.split(LABEL_SEPARATOR).collect();
+    (parts[0].to_string(), parts[1].to_string())
   }
 }
 
