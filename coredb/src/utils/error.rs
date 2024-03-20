@@ -125,6 +125,9 @@ pub enum QueryError {
 
   #[error("No query provided")]
   NoQueryProvided,
+
+  #[error("Regexp Error: {0}")]
+  RegexpError(String),
 }
 
 impl From<object_store::Error> for CoreDBError {
