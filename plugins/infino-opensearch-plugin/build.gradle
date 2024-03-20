@@ -195,8 +195,13 @@ test {
 
 task infinoDockerComposeUp(type: Exec) {
     commandLine 'docker-compose', '-f', 'src/main/resources/docker-compose.yml', 'up', '-d'
+    // Assuming you want to capture logs after bringing up the services
     doLast {
-        println 'Infino Docker Compose Up executed'
+        exec {
+            commandLine 'docker-compose', '-f', 'src/main/resources/docker-compose.yml', 'logs'
+            standardOutput = new FileOutputStream(new File(project.buildDir, 'compose.out'))
+            errorOutput = new FileOutputStream(new File(project.buildDir, 'compose.err'))
+        }
     }
 }
 
@@ -247,10 +252,21 @@ task updateVersion {
     }
 }
 
+task fetchDockerLogs {
+    doLast {
+        exec {
+            commandLine 'docker-compose', '-f', 'src/main/resources/docker-compose.yml', 'logs'
+            standardOutput = new FileOutputStream(new File(project.buildDir, 'docker-compose-logs.out'))
+        }
+    }
+}
+
 tasks.named('yamlRestTest') {
     dependsOn infinoDockerComposeUp
-    finalizedBy infinoDockerComposeDown
     mustRunAfter infinoDockerComposeUp
+    finalizedBy fetchDockerLogs
+    finalizedBy infinoDockerComposeDown
+
 }
 
 tasks.named("check").configure { dependsOn('yamlRestTest') }

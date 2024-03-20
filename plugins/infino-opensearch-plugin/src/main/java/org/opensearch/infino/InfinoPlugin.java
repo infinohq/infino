@@ -67,7 +67,7 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
             final IndexNameExpressionResolver indexNameExpressionResolver,
             final Supplier nodesInCluster) {
 
-        logger.info("--------------------Infino: Registering REST Handler------------------------");
+        logger.info("Infino: Registering REST handler.");
 
         return singletonList(new InfinoRestHandler());
     }
@@ -87,7 +87,7 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
     @Override
     public List<ActionFilter> getActionFilters() {
 
-        logger.info("--------------------Infino: Registering Action Filter------------------------");
+        logger.info("Infino: Registering Action Filter.");
 
         return Arrays.asList(new ActionFilter() {
             @Override
@@ -148,7 +148,7 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
     public List<TransportInterceptor> getTransportInterceptors(NamedWriteableRegistry namedWriteableRegistry,
             ThreadContext threadContext) {
 
-        logger.info("--------------------Infino: Registering Transport Interceptor------------------------");
+        logger.info("Infino: Registering Transport Interceptor.");
 
         return singletonList(new InfinoTransportInterceptor(httpClient));
     }

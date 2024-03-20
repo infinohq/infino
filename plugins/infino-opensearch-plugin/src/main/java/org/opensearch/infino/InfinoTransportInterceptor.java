@@ -231,7 +231,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             boolean forceExecution,
             TransportRequestHandler<T> actualHandler) {
 
-        logger.info("Executing Infino Transport Handler with action " + action + " and executor " + executor);
+        logger.debug("Executing Infino Transport Handler with action " + action + " and executor " + executor);
 
         return new TransportRequestHandler<T>() {
             @Override
@@ -253,12 +253,10 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                     processTransportActions(request, operation, new ActionListener<TransportResponse>() {
                         @Override
                         public void onResponse(TransportResponse response) {
-                            logger.info("TransportResponse: " + response);
-
                             try {
                                 channel.sendResponse(response);
                             } catch (IOException e) {
-                                logger.error("Failed to send response", e);
+                                logger.error("Failed to send transport response", e);
                             }
                         }
 
@@ -268,7 +266,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                                 logger.error("Transport action failed.");
                                 channel.sendResponse(e);
                             } catch (IOException ex) {
-                                logger.error("Failed to send error response", ex);
+                                logger.error("Failed to send transport error response", ex);
                             }
                         }
                     });
