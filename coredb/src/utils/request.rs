@@ -121,7 +121,7 @@ pub fn analyze_regex_query_text(
     regex_query_text.to_owned()
   };
 
-  let regex_field_term = format!("{}{}{}", fieldname, FIELD_DELIMITER, query); // Prepare the prefix once
+  let regex_field_term = format!("{}{}{}", fieldname, FIELD_DELIMITER, query);
 
   regex_field_term
 }
