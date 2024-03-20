@@ -105,7 +105,6 @@ pub async fn analyze_query_text(
   transformed_terms
 }
 
-
 pub fn analyze_regex_query_text(
   regex_query_text: &str,
   fieldname: &str,
@@ -121,7 +120,6 @@ pub fn analyze_regex_query_text(
   } else {
     regex_query_text.to_owned()
   };
-
 
   let regex_field_term = format!("{}{}{}", fieldname, FIELD_DELIMITER, query); // Prepare the prefix once
 

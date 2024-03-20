@@ -583,14 +583,14 @@ impl Segment {
             is_escaping = true;
           }
         }
-        '*' | '?' | '+'  | '[' | ']' => {
+        '*' | '?' | '+' | '[' | ']' => {
           if !is_escaping {
             break;
           }
           prefix.push(c);
         }
         _ => {
-          if !is_escaping  {
+          if !is_escaping {
             prefix.push(c);
           }
           is_escaping = false;

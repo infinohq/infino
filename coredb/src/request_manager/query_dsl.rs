@@ -12,7 +12,9 @@
 
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::QueryError;
-use crate::utils::request::{analyze_query_text, analyze_regex_query_text, check_query_time, parse_time_range};
+use crate::utils::request::{
+  analyze_query_text, analyze_regex_query_text, check_query_time, parse_time_range,
+};
 
 use chrono::Utc;
 use futures::StreamExt;
@@ -639,8 +641,9 @@ impl Segment {
 
     match (fieldname, regexp_text) {
       (Some(field), Some(regexp_text_str)) => {
-        let regex_field_term = analyze_regex_query_text(regexp_text_str.trim_matches('"'), field, case_insensitive);
-        
+        let regex_field_term =
+          analyze_regex_query_text(regexp_text_str.trim_matches('"'), field, case_insensitive);
+
         match self
           .get_doc_ids_with_regexp_term(&regex_field_term, case_insensitive)
           .await
