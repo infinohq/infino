@@ -84,6 +84,47 @@ impl Segment {
     }
   }
 
+  /// Create a new segment from the given wal file.
+  pub fn new_from_wal(wal_file_path: &str) -> Result<Self, CoreDBError> {
+    // First create a new segment with /dev/null as the wal file path.
+    let segment = Self::new("/dev/null");
+
+    // Now open the wal file and replay all the entries.
+    let wal = WriteAheadLog::new(wal_file_path)?;
+    let entries = wal.read_all()?;
+
+    for entry in entries {
+      let line_type = entry["type"].as_str();
+      match line_type {
+        Some("metric") => {
+          // This is a metric in write ahead log.
+          let time = entry["time"].as_str();
+          let metric_name: &str = entry["metric_name"].as_str().unwrap();
+          let name_value_labels: Vec<&str> = entry["name_value_labels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+          let value: f64 = entry["value"].as_f64().unwrap();
+        }
+        Some("log") => {
+          // This is a log in write ahead log.
+          let time: &str = entry["time"].as_str().unwrap();
+        }
+        Some(_) | None => {
+          // Ignore any line format not known to us and process the rest.
+          debug!("Invalid line type in write ahead log: {:?}", line_type);
+        }
+      }
+
+      //json!({"type": "metric", "time": time, "metric_name": metric_name,
+      //      "name_value_labels": name_value_labels, "value": value})
+    }
+
+    Ok(segment)
+  }
+
   /// Get the terms in this segment.
   pub fn get_terms(&self) -> &DashMap<String, u32> {
     &self.terms
@@ -185,27 +226,15 @@ impl Segment {
     self.inverted_map.clear_inverted_map();
   }
 
-  /// Append a log message with timestamp to the segment (inverted as well as forward map).
-  // Note that this function isn't async - this helps with testing and esuring correctness.
-  pub fn append_log_message(
+  /// Append a log message to this segment, without writing WAL.
+  /// This is typically called by Self::append_log_message() after writing WAL, or
+  /// during recovery when we are building a segment and do not want to write WAL.
+  fn append_log_message_internal(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
   ) -> Result<u32, CoreDBError> {
-    debug!(
-      "SEGMENT: Appending log message, time: {}, fields: {:?}, message: {}",
-      time, fields, text
-    );
-
-    // Write to write-ahead-log.
-    let wal_entry = json!({"type": "log", "time": time, "fields": fields, "text": text});
-    {
-      let wal_clone = self.wal.clone();
-      let wal = &mut wal_clone.lock();
-      wal.append(wal_entry).unwrap();
-    }
-
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
@@ -240,37 +269,40 @@ impl Segment {
     Ok(log_message_id)
   }
 
-  /// Append a metric point with specified time and value to the segment.
+  /// Append a log message with timestamp to the segment (inverted as well as forward map).
   // Note that this function isn't async - this helps with testing and esuring correctness.
-  //
-  // As an example, say empty segment, say s, is called as follows:
-  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="1", value="1")
-  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="2", value="2")
-  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":500, "path":"/user", time="3", value="2")
-  //
-  // This will results into labels "__metric_name__~http_get", "status_code~200", "status_code~500", "path~/user". At the end of the
-  // 3 calls, the label_count would be 4.
-  //
-  // The metric_count as of now just computes the number of metric points published, so would be 3, corresponding to the three
-  // invocations above. A prior implementation would track different metric points seperately per label (so a total of 12 metric points)
-  // in the above example). It isn't clear how exactly we should use the metric points, so keeping it simple for now - and this may
-  // change in future.
-  pub fn append_metric_point(
+  pub fn append_log_message(
     &self,
-    metric_name: &str,
-    name_value_labels: &HashMap<String, String>,
     time: u64,
-    value: f64,
-  ) -> Result<(), CoreDBError> {
+    fields: &HashMap<String, String>,
+    text: &str,
+  ) -> Result<u32, CoreDBError> {
+    debug!(
+      "SEGMENT: Appending log message, time: {}, fields: {:?}, message: {}",
+      time, fields, text
+    );
+
     // Write to write-ahead-log.
-    let wal_entry = json!({"type": "metric", "time": time, "metric_name": metric_name,
-      "name_value_labels": name_value_labels, "value": value});
+    let wal_entry = json!({"type": "log", "time": time, "fields": fields, "text": text});
     {
       let wal_clone = self.wal.clone();
       let wal = &mut wal_clone.lock();
       wal.append(wal_entry).unwrap();
     }
 
+    self.append_log_message_internal(time, fields, text)
+  }
+
+  /// Append a metric point to this segment, without writing WAL.
+  /// This is typically called by Self::append_metric_point() after writing WAL, or
+  /// during recovery when we are building a segment and do not want to write WAL.
+  fn append_metric_point_internal(
+    &self,
+    metric_name: &str,
+    name_value_labels: &HashMap<String, String>,
+    time: u64,
+    value: f64,
+  ) -> Result<(), CoreDBError> {
     let mut my_labels = Vec::new();
 
     // Push the metric name label.
@@ -314,6 +346,38 @@ impl Segment {
 
     self.update_start_end_time(time);
     Ok(())
+  }
+
+  /// Append a metric point with specified time and value to the segment.
+  // Note that this function isn't async - this helps with testing and esuring correctness.
+  //
+  // As an example, say empty segment, say s, is called as follows:
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="1", value="1")
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="2", value="2")
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":500, "path":"/user", time="3", value="2")
+  //
+  // This will results into labels "__metric_name__~http_get", "status_code~200", "status_code~500", "path~/user". At the end of the
+  // 3 calls, the label_count would be 4.
+  //
+  // The metric_point_count computes the number of metric points aggregated across all the labels. At the end of the 3 calls above,
+  // the metric_point_count would be 9.
+  pub fn append_metric_point(
+    &self,
+    metric_name: &str,
+    name_value_labels: &HashMap<String, String>,
+    time: u64,
+    value: f64,
+  ) -> Result<(), CoreDBError> {
+    // Write to write-ahead-log.
+    let wal_entry = json!({"type": "metric", "time": time, "metric_name": metric_name,
+      "name_value_labels": name_value_labels, "value": value});
+    {
+      let wal_clone = self.wal.clone();
+      let wal = &mut wal_clone.lock();
+      wal.append(wal_entry).unwrap();
+    }
+
+    self.append_metric_point_internal(metric_name, name_value_labels, time, value)
   }
 
   /// Get all terms with a certain prefix from the segment.
