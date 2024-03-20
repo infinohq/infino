@@ -206,7 +206,7 @@ public class InfinoActionHandler {
                 }
             }, retryAfter, TimeUnit.MILLISECONDS);
         } else {
-            logger.info("Response processed without retry for indexName: {} with status code: {}", indexName,
+            logger.debug("Response processed without retry for indexName: {} with status code: {}", indexName,
                     statusCode);
         }
     }

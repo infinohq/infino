@@ -52,7 +52,6 @@ public class InfinoPluginTestUtils {
         this.mockBody = mockBody;
     }
 
-    @SuppressWarnings("unused")
     private MyHttpClient mockMyHttpClient = new MyHttpClient() {
         @Override
         public HttpResponse<String> sendRequest(HttpRequest request,

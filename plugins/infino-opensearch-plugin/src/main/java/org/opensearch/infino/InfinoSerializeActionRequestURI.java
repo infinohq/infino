@@ -52,29 +52,11 @@ public class InfinoSerializeActionRequestURI {
             throw new IllegalArgumentException(
                     "Only PUT for index creation and DELETE for index deletion is supported");
         }
-        infinoEndpoint = getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint);
+        infinoEndpoint = InfinoPluginUtils.getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint);
         finalUrl = switch (method) {
             case PUT, DELETE -> infinoEndpoint + "/" + indexName;
             default -> throw new IllegalArgumentException("Unsupported method: " + method);
         };
-    }
-
-    /**
-     * Retrieves the value of the specified environment variable or returns the
-     * default value if the environment variable is not set.
-     *
-     * @param name         The name of the environment variable.
-     * @param defaultValue The default value to return if the environment variable
-     *                     is not set.
-     * @return The value of the environment variable or the default value.
-     */
-    public static String getEnvVariable(String name, String defaultValue) {
-        String value = System.getenv(name);
-        if (value == null || value.isEmpty()) {
-            logger.info("Environment variable " + name + " is not set. Using default value: " + defaultValue);
-            return defaultValue;
-        }
-        return value;
     }
 
     /**

@@ -39,7 +39,6 @@ test: rust-check docker-check
 
 build:
 	cargo build $(release) 
-	build-os-plugin
 
 build-os-plugin: docker-build
 	cd plugins/infino-opensearch-plugin && ./gradlew build
@@ -73,7 +72,7 @@ docs:
 
 docker-build: docker-check
 	echo "Running docker build..."
-	docker build -t $(docker-img-tag) -f docker/infino.dockerfile .
+	docker build --cache-from $(docker-img-tag) -t $(docker-img-tag) -f docker/infino.dockerfile .
 
 docker-build-multiarch: docker-check docker-buildx-check
 	@./scripts/build-docker-multiarch.sh --docker-img-tag $(docker-img-tag)

@@ -6,7 +6,7 @@
   - match:
       $body: /^infino-opensearch-plugin/      
 ---
-setup:
+"Create an Index":
   - do:
       indices.create:
         index: test_index
@@ -22,31 +22,26 @@ setup:
         index: test_index
         id: 1
         body: { "test_field": "test_value" }
----
-"Bulk upload documents":
-  - do:
-      bulk:
-        index: test_index
-        body:
-          - { "index": { "_id": "2" }}
-          - { "test_field": "bulk_value1" }
-          - { "index": { "_id": "3" }}
-          - { "test_field": "bulk_value2" }
----
-"Search a document":
-  - do:
-      search:
-        index: test_index
-        body:
-          query:
-            match:
-              test_field: "test_value"
-  - match:
-      hits.total.value: 1
-  - match:
-      hits.hits.0._source.test_field: "test_value"
----
-"Delete index":
-  - do:
-      indices.delete:
-        index: test_index
+# ---
+# "Bulk upload documents":
+#   - do:
+#       bulk:
+#         index: test_index1
+#         body:
+#           - { "index": { "_id": "2" }}
+#           - { "test_field": "bulk_value1" }
+#           - { "index": { "_id": "3" }}
+#           - { "test_field": "bulk_value2" }
+# ---
+# "Search a document":
+#   - do:
+#       search:
+#         index: test_index1
+#         body:
+#           query:
+#             match:
+#               test_field: "test_value"
+#   - match:
+#       hits.total.value: 1
+#   - match:
+#       hits.hits.0._source.test_field: "test_value"

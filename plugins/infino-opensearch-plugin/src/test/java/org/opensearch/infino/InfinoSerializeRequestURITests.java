@@ -24,8 +24,7 @@ import static org.opensearch.rest.RestRequest.Method.*;
  *
  * 1. default Infino test URL is defined in build.gradle:test.
  * 2. the security manager (turned off for unit tests) will catch unsupported
- * methods (e.g. TRACE)
- * so we don't test for that here
+ * methods (e.g. TRACE) so we don't test for that here
  */
 public class InfinoSerializeRequestURITests extends OpenSearchTestCase {
 
