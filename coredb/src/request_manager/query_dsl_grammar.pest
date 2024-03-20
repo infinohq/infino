@@ -99,9 +99,9 @@ prefix_terms  = { (case_insensitive | rewrite) }
 
 // Regexp Queries: https://opensearch.org/docs/latest/query-dsl/term/regexp/
 regexp_query  = { start_brace ~ quote ~ "regexp" ~ quote ~ colon ~ regexp_search ~ end_brace }
-regexp_search = { start_brace ~ (regexp_field | (fieldname ~ colon ~ regexp_array)) ~ end_brace }
-regexp_array  = { start_brace ~ (regexp ~ (comma ~ regexp)*)? ~ end_brace }
-regexp        = { (regexp_field | case_insensitive | rewrite | flags | max_determinized_states) }
+regexp_search = { start_brace ~ fieldname ~ colon ~ (regexp_string | regexp_array) ~ end_brace }
+regexp_array  = { start_brace ~ value ~ (comma ~ regexp_terms)* ~ end_brace }
+regexp_terms  = { (case_insensitive | rewrite | flags | max_determinized_states) }
 
 // Wildcard Queries: https://opensearch.org/docs/latest/query-dsl/term/wildcard/
 wildcard_query  = { start_brace ~ quote ~ "wildcard" ~ quote ~ colon ~ wildcard_search ~ end_brace }
@@ -491,6 +491,7 @@ quote_analyzer               = { quote ~ "quote_analyzer" ~ quote ~ colon ~ stri
 quote_field_suffix           = { quote ~ "quote_field_suffix" ~ quote ~ colon ~ string }
 range_filter                 = { quote ~ "range" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ range_search ~ end_brace }
 regexp_field                 = { fieldname ~ colon ~ string }
+regexp_string                = { string }
 relation                     = { quote ~ "relation" ~ quote ~ colon ~ (quote ~ "INTERSECTS" ~ quote | quote ~ "DISJOINT" ~ quote | quote ~ "WITHIN" ~ quote | quote ~ "CONTAINS" ~ quote) }
 rewrite                      = { quote ~ "rewrite" ~ quote ~ colon ~ quote ~ "" ~ ("constant_score" | "scoring_boolean" | "constant_score_boolean" | "top_terms_N" | "top_terms_boost_N" | "top_terms_blended_freqs_N") ~ quote ~ "" }
 routing                      = { quote ~ "routing" ~ quote ~ colon ~ string }

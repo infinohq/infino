@@ -104,3 +104,26 @@ pub async fn analyze_query_text(
 
   transformed_terms
 }
+
+
+pub fn analyze_regex_query_text(
+  regex_query_text: &str,
+  fieldname: &str,
+  case_insensitive: bool,
+) -> String {
+  debug!(
+    "Analyze text: Processing regexp query {:?} {:?} {:?}",
+    regex_query_text, fieldname, case_insensitive
+  );
+
+  let query = if case_insensitive {
+    regex_query_text.to_lowercase()
+  } else {
+    regex_query_text.to_owned()
+  };
+
+
+  let regex_field_term = format!("{}{}{}", fieldname, FIELD_DELIMITER, query); // Prepare the prefix once
+
+  regex_field_term
+}
