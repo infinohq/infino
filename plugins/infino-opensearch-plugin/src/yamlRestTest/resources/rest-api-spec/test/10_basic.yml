@@ -21,8 +21,7 @@ setup:
       index:
         index: test_index
         id: 1
-        body:  
-          - { "test_field": "test_value" }
+        body: { "test_field": "test_value" }
 ---
 "Bulk upload documents":
   - do:
