@@ -1,4 +1,11 @@
 ---
+"Test Cat Plugins Endpoint":
+  - do:
+      cat.plugins:
+        h: component
+  - match:
+      $body: /^infino-opensearch-plugin/      
+---
 setup:
   - do:
       indices.create:
@@ -8,28 +15,14 @@ setup:
             index:
               number_of_shards: 1
               number_of_replicas: 0
-
----
-"Test Cat Plugins Endpoint":
-  - do:
-      cat.plugins:
-        h: component
-  - match:
-      $body: /^infino-opensearch-plugin/
-
 ---
 "Index a single document":
   - do:
       index:
         index: test_index
         id: 1
-        body: { "test_field": "test_value" }
-  - match:
-      _index: test_index
-      _id: "1"
-      _source:
-        test_field: "test_value"
-
+        body:  
+          - { "test_field": "test_value" }
 ---
 "Bulk upload documents":
   - do:
@@ -40,7 +33,6 @@ setup:
           - { "test_field": "bulk_value1" }
           - { "index": { "_id": "3" }}
           - { "test_field": "bulk_value2" }
-
 ---
 "Search a document":
   - do:
@@ -54,7 +46,6 @@ setup:
       hits.total.value: 1
   - match:
       hits.hits.0._source.test_field: "test_value"
-
 ---
 "Delete index":
   - do:

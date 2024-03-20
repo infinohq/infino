@@ -53,16 +53,7 @@ import org.opensearch.rest.RestRequest;
 import static org.opensearch.rest.RestRequest.Method.*;
 
 /**
- * Handle REST calls for the /infino index.
- * This effectively serves as the public API for Infino.
- *
- * Notes:
- * 1. Search window defaults to the past 30 days if not specified by the
- * request.
- * 2. To access Infino indexes, the REST caller must prefix the index name with
- * '/infino/'.
- * 3. Index creation or deletion is mirrored on Infino and in OpenSarch.
- * 4. We use our own thread pool to manage Infino requests.
+ * Extend the OpenSearch API.
  *
  * Note that OpenSearch changed the import paths in v2.10
  * 
@@ -118,31 +109,14 @@ public class InfinoRestHandler extends BaseRestHandler {
     /**
      * Handle REST routes for the /infino index.
      *
-     * By explicitly listing all the possible paths, we let OpenSearch handle
-     * illegal path expections rather than wait to send to Infino and translate
-     * the error response for the user.
-     *
-     * Note that we need to explictly read wildcard parameters for the paths
-     * defined here. I.e. somewhere before the handler completes we need to do
-     * something like the following:
-     *
-     * String someVar = request.param("infinoIndex");
+     * Extend
      *
      * etc.
      */
     @Override
     public List<Route> routes() {
-        // TODO: change metrics path to PromQL: /api/v1/query and /api/v1/query_range
-        return unmodifiableList(asList(new Route(GET, "/infino/{infinoIndex}/{infinoPath}"), // Search a collection
-                new Route(GET, "/infino/{infinoIndex}/logs/{infinoPath}"), // Search logs on a collection
-                new Route(GET, "/infino/{infinoIndex}/metrics/{infinoPath}"), // Search metrics on a collection
-                new Route(GET, "/_cat/infino/{infinoIndex}"), // Get stats about a collection
-                new Route(HEAD, "/infino/{infinoIndex}/{infinoPath}"), // Get specific info about a collection
-                new Route(POST, "/infino/{infinoIndex}/{infinoPath}"), // Add data to a collection
-                new Route(PUT, "/infino/{infinoIndex}"), // Create a collection
-                new Route(DELETE, "/infino/{infinoIndex}"), // Delete a collection
-                new Route(HEAD, "/infino/{infinoIndex}") // Get info about a collection
-        ));
+        return unmodifiableList(asList(new Route(GET, "/_ping"),
+                new Route(GET, "/infino/{infinoIndex}/_summarize")));
     }
 
     /**
