@@ -141,12 +141,16 @@ mod tests {
 
     // Flush should be called automatically as we reach MAX_ENTRIES limit.
 
-    // Read back the log file. Should noe contain 'Test log entry' MAX_ENTRIES+2 times.
-    let contents = fs::read_to_string(Path::new(path)).unwrap();
-    assert!(contents.contains("Test log entry"));
-    assert_eq!(contents.matches('\n').count(), MAX_ENTRIES + 2); // Each entry should be on a new line
+    // Read back the log file. Should now contain 'Test log entry' MAX_ENTRIES+2 times.
+    let wal = WriteAheadLog::new(path).unwrap();
+    let contents = wal.read_all().unwrap();
+    assert_eq!(contents.len(), MAX_ENTRIES + 2);
+    for content in contents {
+      assert_eq!(content, entry);
+    }
 
     // Remove the file and check that it does not exist anymore.
+    let mut wal = wal;
     wal.remove().unwrap();
     assert!(std::fs::metadata(path).is_err())
   }
@@ -160,18 +164,18 @@ mod tests {
 
     const NUM_APPEND_THREADS: usize = 20;
     const NUM_FLUSH_THREADS: usize = 10;
-    const NUM_APPENDS: usize = 50000; // Number of append operations per thread.
-    const NUM_FLUSHES: usize = 10; // Number of flush operations per thread.
+    const NUM_APPENDS_PER_THREAD: usize = 50000; // Number of append operations per thread.
+    const NUM_FLUSHES_PER_THREAD: usize = 10; // Number of flush operations per thread.
 
     // Spawn tasks for concurrent appends.
     let mut append_handles = vec![];
     for _ in 0..NUM_APPEND_THREADS {
       let wal_clone = Arc::clone(&wal);
       let handle = task::spawn(async move {
-        for _ in 0..NUM_APPENDS {
+        for _ in 0..NUM_APPENDS_PER_THREAD {
           let entry = json!({"time": 1627590000, "message": "Concurrent append"});
           let wal_clone = &mut wal_clone.lock().await;
-          wal_clone.append(entry).unwrap();
+          wal_clone.append(entry.clone()).unwrap();
         }
       });
       append_handles.push(handle);
@@ -182,7 +186,7 @@ mod tests {
     for _ in 0..NUM_FLUSH_THREADS {
       let wal_clone = wal.clone();
       let handle = task::spawn(async move {
-        for _ in 0..NUM_FLUSHES {
+        for _ in 0..NUM_FLUSHES_PER_THREAD {
           let wal_clone = &mut wal_clone.lock().await;
           wal_clone.flush().unwrap();
         }
@@ -203,9 +207,15 @@ mod tests {
     let wal_clone = &mut wal_clone.lock().await;
     wal_clone.flush().unwrap();
 
-    // Verify that entries were written correctly.
-    let contents = fs::read_to_string(temp_file.path()).unwrap();
-    let num_lines = contents.matches('\n').count();
-    assert!(num_lines == NUM_APPENDS * NUM_APPEND_THREADS);
+    // Read back the log file. Should now contain 'Test log entry' MAX_ENTRIES+2 times.
+    let wal = WriteAheadLog::new(path).unwrap();
+    let contents = wal.read_all().unwrap();
+    assert_eq!(contents.len(), NUM_APPENDS_PER_THREAD * NUM_APPEND_THREADS);
+    for content in contents {
+      assert_eq!(
+        content,
+        json!({"time": 1627590000, "message": "Concurrent append"})
+      );
+    }
   }
 }
