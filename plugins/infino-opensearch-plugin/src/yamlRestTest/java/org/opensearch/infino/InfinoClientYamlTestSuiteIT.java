@@ -13,8 +13,8 @@ import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import org.opensearch.test.rest.yaml.ClientYamlTestCandidate;
 import org.opensearch.test.rest.yaml.OpenSearchClientYamlSuiteTestCase;
 
-
-public class InfinoClientYamlTestSuiteIT extends OpenSearchClientYamlSuiteTestCase {
+public class InfinoClientYamlTestSuiteIT extends
+        OpenSearchClientYamlSuiteTestCase {
 
     public InfinoClientYamlTestSuiteIT(@Name("yaml") ClientYamlTestCandidate testCandidate) {
         super(testCandidate);

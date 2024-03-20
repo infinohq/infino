@@ -35,12 +35,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.io.IOException;
 import java.net.URI;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.logging.log4j.LogManager;
@@ -79,39 +75,20 @@ import org.opensearch.rest.RestRequest;
 public class InfinoActionHandler {
 
     private static final int MAX_RETRIES = 5; // Maximum number of retries for exponential backoff
-    private static final int THREADPOOL_SIZE = 25; // Size of threadpool we will use for Infino
-    private static final HttpClient httpClient = HttpClient.newHttpClient();
+    private HttpClient httpClient = HttpClient.newHttpClient();
     private static final Logger logger = LogManager.getLogger(InfinoRestHandler.class);
 
-    /**
-     * Using a custom thread factory that can be used by the
-     * ScheduledExecutorService.
-     * We do this to add custom prefixes to the thread name. This will make
-     * debugging
-     * easier, if we ever have to debug.
-     */
-    protected static final class CustomThreadFactory implements ThreadFactory {
-        private final String poolName;
-
-        CustomThreadFactory(String poolName) {
-            this.poolName = poolName;
-        }
-
-        public Thread newThread(Runnable r) {
-            Thread t = new Thread(r);
-            t.setName(poolName + "-Thread-" + t.getId());
-            if (t.isDaemon())
-                t.setDaemon(false);
-            if (t.getPriority() != Thread.NORM_PRIORITY)
-                t.setPriority(Thread.NORM_PRIORITY);
-            return t;
-        }
+    public InfinoActionHandler(HttpClient httpClient) {
+        this.httpClient = httpClient;
     }
 
     /**
      * Get get a new instance of the class
      * 
-     * @param request - the REST request to serialize
+     * @param method     - the method for the request
+     * @param indexName  - the index for the request
+     * @param <Request>  - the request type
+     * @param <Response> - the response type
      * 
      * @return a configured InfinoSerializeRequestURI object
      */
@@ -129,25 +106,6 @@ public class InfinoActionHandler {
         return httpClient;
     }
 
-    private static final ScheduledExecutorService infinoThreadPool = Executors.newScheduledThreadPool(THREADPOOL_SIZE,
-            new CustomThreadFactory("InfinoPluginThreadPool"));
-
-    /**
-     * Get thread pool
-     * 
-     * @return the thread pool to use for the requests
-     */
-    protected ExecutorService getInfinoThreadPool() {
-        return infinoThreadPool;
-    }
-
-    /**
-     * Shutdown the thread pool when the plugin is stopped
-     */
-    public static void close() {
-        infinoThreadPool.shutdown();
-    }
-
     /**
      * Implement the request, creating or deleting Lucene index mirrors on the local
      * node.
@@ -158,12 +116,16 @@ public class InfinoActionHandler {
      *
      * We exponentially backoff for 429, 503, and 504 responses
      *
-     * @param action  the action to execute
-     * @param request the request on the action chain
-     * @throws IOException        if an I/O exception occurred executing the request
-     *                            on
-     *                            Infino
-     * @throws ExecutionException
+     * @param action     - the action to execute
+     * @param method     - the method for the request
+     * @param indexName  - the index for the request
+     * @param <Request>  - the request type
+     * @param <Response> - the response type
+     * @throws IOException              if an I/O exception occurred executing the
+     *                                  request on Infino
+     * @throws ExecutionException       if an exception occured during the async
+     *                                  wait
+     * @throws IllegalArgumentException if there is an error with the request
      * 
      */
 
@@ -181,14 +143,14 @@ public class InfinoActionHandler {
             throw new IOException("Error serializing REST URI for Infino", e);
         }
 
-        logger.info("Serialized action request for Infino to " + infinoSerializeActionRequestURI.getFinalUrl());
+        logger.debug("Serialized action request for Infino to " + infinoSerializeActionRequestURI.getFinalUrl());
 
         HttpRequest forwardRequest = HttpRequest.newBuilder()
                 .uri(URI.create(infinoSerializeActionRequestURI.getFinalUrl()))
                 .method(method.toString(), HttpRequest.BodyPublishers.noBody())
                 .build();
 
-        logger.info("Sending HTTP Request to Infino: " + infinoSerializeActionRequestURI.getFinalUrl());
+        logger.debug("Sending HTTP Request to Infino: " + infinoSerializeActionRequestURI.getFinalUrl());
 
         final String indexParam = indexName;
         final RestRequest.Method methodParam = method;
@@ -198,7 +160,7 @@ public class InfinoActionHandler {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-        }, infinoThreadPool);
+        }, InfinoPluginUtils.infinoThreadPool);
 
         try {
             future.get(); // This will block until the CompletableFuture completes
@@ -231,16 +193,12 @@ public class InfinoActionHandler {
         }
     }
 
-    private boolean shouldRetry(int statusCode) {
-        return statusCode == 429 || statusCode == 503 || statusCode == 504;
-    }
-
     private void processResponse(HttpClient processHttpClient, HttpResponse<String> response,
             String indexName, RestRequest.Method method, int attempt, HttpRequest request) throws IOException {
         int statusCode = response.statusCode();
-        if (shouldRetry(statusCode)) {
-            long retryAfter = getRetryAfter(response, attempt);
-            infinoThreadPool.schedule(() -> {
+        if (InfinoPluginUtils.shouldRetry(statusCode)) {
+            long retryAfter = InfinoPluginUtils.getRetryAfter(response, attempt);
+            InfinoPluginUtils.infinoThreadPool.schedule(() -> {
                 try {
                     sendRequestWithBackoff(processHttpClient, request, indexName, method, attempt + 1);
                 } catch (IOException e) {
@@ -251,9 +209,5 @@ public class InfinoActionHandler {
             logger.info("Response processed without retry for indexName: {} with status code: {}", indexName,
                     statusCode);
         }
-    }
-
-    private long getRetryAfter(HttpResponse<String> response, int attempt) {
-        return response.headers().firstValueAsLong("Retry-After").orElse((long) Math.pow(2, attempt) * 1000L);
     }
 };

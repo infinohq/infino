@@ -193,7 +193,23 @@ test {
     jvmArgs '-Dtests.security.manager=false'
 }
 
+task infinoDockerComposeUp(type: Exec) {
+    commandLine 'docker-compose', '-f', 'src/main/resources/docker-compose.yml', 'up', '-d'
+    doLast {
+        println 'Infino Docker Compose Up executed'
+    }
+}
+
+task infinoDockerComposeDown(type: Exec) {
+    commandLine 'docker-compose', '-f', 'src/main/resources/docker-compose.yml', 'down'
+    doLast {
+        println 'Infino Docker Compose Down executed'
+    }
+}
+
 task integTest(type: RestIntegTestTask) {
+    dependsOn infinoDockerComposeUp
+    finalizedBy infinoDockerComposeDown
     description = "Run tests against a cluster"
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath

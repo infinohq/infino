@@ -53,6 +53,7 @@ import java.net.http.HttpClient;
 public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin {
 
     private static final Logger logger = LogManager.getLogger(InfinoPlugin.class);
+    HttpClient httpClient = HttpClient.newHttpClient();
 
     // Listen for (allowed) index creation and deletion calls on the REST API
     // and process them instead of OpenSearch.
@@ -66,7 +67,7 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
             final IndexNameExpressionResolver indexNameExpressionResolver,
             final Supplier nodesInCluster) {
 
-        logger.info("-----------------------Infino: Registering REST Handler------------------------");
+        logger.info("--------------------Infino: Registering REST Handler------------------------");
 
         return singletonList(new InfinoRestHandler());
     }
@@ -85,7 +86,8 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
      **/
     @Override
     public List<ActionFilter> getActionFilters() {
-        logger.info("-----------------------Infino: Registering Action Filter------------------------");
+
+        logger.info("--------------------Infino: Registering Action Filter------------------------");
 
         return Arrays.asList(new ActionFilter() {
             @Override
@@ -98,12 +100,11 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
                     String action, Request request, ActionListener<Response> listener,
                     ActionFilterChain<Request, Response> chain) {
                 logger.debug("Intercepting Action request: " + request.toString());
-                InfinoActionHandler handler = new InfinoActionHandler();
+                InfinoActionHandler handler = new InfinoActionHandler(httpClient);
 
                 RestRequest.Method method = PUT;
                 String indexName = "default"; // The action type check below ensures this never reaches Infino.
 
-                logger.info("Infino Action Handler: Serializing action request for Infino");
                 if (CreateIndexAction.NAME.equals(action)) {
                     method = PUT;
                     CreateIndexRequest req = (CreateIndexRequest) request;
@@ -131,9 +132,6 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
                     }
                 }
 
-                logger.debug("---------Action is: " + action);
-                logger.debug("=======The request is " + request.toString());
-
                 // Proceed with the original request if not blocked
                 chain.proceed(task, action, request, listener);
             }
@@ -150,9 +148,7 @@ public class InfinoPlugin extends Plugin implements ActionPlugin, NetworkPlugin 
     public List<TransportInterceptor> getTransportInterceptors(NamedWriteableRegistry namedWriteableRegistry,
             ThreadContext threadContext) {
 
-        logger.info("-----------------------Infino: Registering Transport Interceptor------------------------");
-
-        HttpClient httpClient = HttpClient.newHttpClient();
+        logger.info("--------------------Infino: Registering Transport Interceptor------------------------");
 
         return singletonList(new InfinoTransportInterceptor(httpClient));
     }

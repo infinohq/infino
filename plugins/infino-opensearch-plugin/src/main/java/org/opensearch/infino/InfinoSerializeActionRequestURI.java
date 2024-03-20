@@ -37,8 +37,11 @@ public class InfinoSerializeActionRequestURI {
      * Constructor
      *
      * Takes a request and serializes to the protected member, finalUrl.
-     *
-     * @param request - the request to be serialized.
+     * 
+     * @param method     - the method for the request
+     * @param indexName  - the index for the request
+     * @param <Request>  - the request type
+     * @param <Response> - the response type
      */
     public <Request extends ActionRequest, Response extends ActionResponse> InfinoSerializeActionRequestURI(
             RestRequest.Method method, String indexName) throws IllegalArgumentException {
@@ -51,7 +54,7 @@ public class InfinoSerializeActionRequestURI {
         }
         infinoEndpoint = getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint);
         finalUrl = switch (method) {
-            case PUT, DELETE -> infinoEndpoint + "/:" + indexName;
+            case PUT, DELETE -> infinoEndpoint + "/" + indexName;
             default -> throw new IllegalArgumentException("Unsupported method: " + method);
         };
     }

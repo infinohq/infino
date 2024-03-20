@@ -412,10 +412,6 @@ public class InfinoSerializeTransportRequest {
                             "start_time", startTime,
                             "end_time", endTime);
                 };
-            case SUMMARIZE:
-                return infinoEndpoint + "/" + indexName + "/summarize?" + buildQueryString(
-                        "start_time", startTime,
-                        "end_time", endTime);
             default:
                 throw new IllegalArgumentException("Unsupported GET path: " + path);
         }

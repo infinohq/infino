@@ -38,9 +38,10 @@ test: rust-check docker-check
 	RUST_BACKTRACE=1 cargo test --all
 
 build:
-	cargo build $(release)
+	cargo build $(release) 
+	build-os-plugin
 
-build-os-plugin:
+build-os-plugin: docker-build
 	cd plugins/infino-opensearch-plugin && ./gradlew build
 
 clean-os-plugin:
@@ -62,7 +63,8 @@ clean:
 	rm -fr server/data/
 	rm -fr server/wal/
 
-clean-all: clean clean-os-plugin
+	# clean plugin
+	clean-os-plugin
 
 docs:
 	echo "Generating documentation to docs/doc"
