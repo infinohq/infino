@@ -1,5 +1,5 @@
-use std::fs::{metadata, remove_file, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::fs::{metadata, remove_file, File, OpenOptions};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use serde_json::Value;
 
@@ -7,14 +7,21 @@ use crate::utils::error::CoreDBError;
 
 const MAX_ENTRIES: usize = 1000;
 
+/// File based write ahead log. Typically, a write ahead log is created for each segment.
 #[derive(Debug)]
 pub struct WriteAheadLog {
+  /// Path to the write ahead log file.
   file_path: String,
+
+  /// Temporary memory buffer to store write ahead log entries.
   buffer: Vec<Value>,
+
+  /// Write ahead log file writer.
   writer: BufWriter<std::fs::File>,
 }
 
 impl WriteAheadLog {
+  /// Create a new write ahead log.
   pub fn new(path: &str) -> Result<Self, CoreDBError> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let writer = BufWriter::new(file);
@@ -27,6 +34,34 @@ impl WriteAheadLog {
     })
   }
 
+  /// Read all entries from the write ahead log.
+  pub fn read_all(&self) -> Result<Vec<Value>, CoreDBError> {
+    // Create buffered reader to read the file line by line.
+    let mut json_values = Vec::new();
+    let file = File::open(&self.file_path)?;
+    let reader = BufReader::new(file);
+
+    // Read each line and parse it as JSON. Ignore lines that cannot be read or parsed as JSON.
+    // This could happen in case of a crash/partial data received. We ignore it to get to last known good state.
+    for line in reader.lines() {
+      let line = match line {
+        Ok(line) => line,
+        Err(_) => continue, // Ignore lines that cannot be read.
+      };
+
+      let json_value = match serde_json::from_str(&line) {
+        Ok(value) => value,
+        Err(_) => continue, // Ignore lines that cannot be parsed as JSON.
+      };
+
+      json_values.push(json_value);
+    }
+
+    Ok(json_values)
+  }
+
+  /// Append an entry to the write ahead log. After appending MAX_ENTRIES entries, all the entries
+  /// will be flushed to disk.
   pub fn append(&mut self, entry: Value) -> Result<(), CoreDBError> {
     self.buffer.push(entry);
 
@@ -36,6 +71,7 @@ impl WriteAheadLog {
     Ok(())
   }
 
+  /// Flush write ahead log to disk.
   pub fn flush(&mut self) -> Result<(), CoreDBError> {
     if !self.buffer.is_empty() {
       let combined_entries = self
@@ -52,6 +88,7 @@ impl WriteAheadLog {
     Ok(())
   }
 
+  /// Delete the write ahead log - typically called when after a segment is committed.
   pub fn remove(&mut self) -> Result<(), CoreDBError> {
     // Delete the file - if it exists.
     if metadata(&self.file_path).is_ok() {
