@@ -573,9 +573,9 @@ async fn append_metric(
 async fn bulk(
   State(state): State<Arc<AppState>>,
   Path(index_name): Path<String>,
-  Json(request_json): Json<serde_json::Value>,
+  json_body: String,
 ) -> Result<String, (StatusCode, String)> {
-  debug!("Executing bulk append request {}", request_json);
+  debug!("Executing bulk append request {}", json_body);
 
   let append_start_time = Utc::now().timestamp_millis() as u64;
 
@@ -584,23 +584,33 @@ async fn bulk(
   state
     .wal_file
     .clone()
-    .write_all(&request_json.to_string().into_bytes()[..])
+    .write_all(&json_body.to_string().into_bytes()[..])
     .unwrap();
 
   let is_queue = state.queue.is_some();
 
-  if !request_json.is_array() {
-    let msg =
-      "Invalid bulk append request format: Expected an array of actions and documents.".to_string();
-    error!("{}", msg);
-    return Err((StatusCode::BAD_REQUEST, msg));
+  let lines = json_body.lines();
+
+  let mut actions = Vec::new();
+
+  for line in lines {
+    debug!("Processing line: {}", line);
+    if let Ok(json_line) = serde_json::from_str::<Value>(line) {
+      debug!("Successfully parsed JSON line: {}", json_line);
+      actions.push(json_line);
+    } else {
+      error!("Failed to parse line into JSON: '{}'", line);
+      return Err((
+        StatusCode::BAD_REQUEST,
+        "Invalid JSON line in NDJSON body.".to_string(),
+      ));
+    }
   }
 
   let server_settings = state.settings.get_server_settings();
   let timestamp_key = server_settings.get_timestamp_key();
 
   let mut items = Vec::new();
-  let actions = request_json.as_array().unwrap();
   let mut i = 0;
 
   while i < actions.len() {
@@ -1966,16 +1976,10 @@ mod tests {
 
     let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
-    // Prepare the bulk request body
-    let bulk_request = json!([
-        { "index": { "_index": index_name, "_id": "1" } },
-        { "title": "Document 1", "content": "Example content 1" },
-        { "delete": { "_index": index_name, "_id": "2" } },
-        { "create": { "_index": index_name, "_id": "3" } },
-        { "title": "Document 3", "content": "Example content 3" },
-        { "update": { "_index": index_name, "_id": "1" } },
-        { "doc": { "content": "Updated content 1" } },
-    ]);
+    let bulk_request = format!(
+      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"title\": \"Document 1\", \"content\": \"Example content 1\"}}\r\n{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"2\"}}}}\r\n{{\"create\": {{\"_index\": \"{}\", \"_id\": \"3\"}}}}\r\n{{\"title\": \"Document 3\", \"content\": \"Example content 3\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 1\"}}}}",
+      index_name, index_name, index_name, index_name
+    );
 
     // Create a single index.
     let response = app
@@ -1990,15 +1994,15 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = serde_json::to_string(&bulk_request).unwrap();
+    let body = bulk_request;
     let path = format!("/{}/bulk", index_name);
 
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri(path)
-          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
           .body(Body::from(body))
           .unwrap(),
       )
