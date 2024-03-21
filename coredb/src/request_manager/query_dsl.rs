@@ -12,7 +12,9 @@
 
 use crate::segment_manager::segment::Segment;
 use crate::utils::error::QueryError;
-use crate::utils::request::{analyze_query_text, check_query_time, parse_time_range};
+use crate::utils::request::{
+  analyze_query_text, analyze_regex_query_text, check_query_time, parse_time_range,
+};
 
 use chrono::Utc;
 use futures::StreamExt;
@@ -120,6 +122,9 @@ impl Segment {
       }
       Rule::prefix_query => {
         results = self.process_prefix_query(node, timeout).await?;
+      }
+      Rule::regexp_query => {
+        results = self.process_regexp_query(node, timeout).await?;
       }
       _ => {
         return Err(QueryError::UnsupportedQuery(format!(
@@ -600,6 +605,70 @@ impl Segment {
       )),
       (_, None) => Err(QueryError::UnsupportedQuery(
         "Prefix query string is missing".to_string(),
+      )),
+    }
+  }
+
+  /// Regexp Query Processor: https://opensearch.org/docs/latest/query-dsl/term/regexp/
+  async fn process_regexp_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+    timeout: u64,
+  ) -> Result<QueryDSLDocIds, QueryError> {
+    debug!("QueryDSL: Processing regexp query {:?}", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
+
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut fieldname: Option<&str> = None;
+    let mut regexp_text: Option<&str> = None;
+    let mut case_insensitive = false;
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::regexp_string | Rule::value => self.set_query_text(&node, &mut regexp_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, false),
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    match (fieldname, regexp_text) {
+      (Some(field), Some(regexp_text_str)) => {
+        let regex_field_term =
+          analyze_regex_query_text(regexp_text_str.trim_matches('"'), field, case_insensitive);
+
+        match self
+          .get_doc_ids_with_regexp_term(&regex_field_term, case_insensitive)
+          .await
+        {
+          Ok(matching_document_ids) => {
+            let mut results = QueryDSLDocIds::new();
+            let execution_time = check_query_time(timeout, query_start_time)?;
+            results.set_execution_time(execution_time);
+            results.set_ids(matching_document_ids);
+
+            debug!(
+              "QueryDSL: Returning results from regexp query {:?}",
+              results
+            );
+
+            Ok(results)
+          }
+          Err(err) => Err(err),
+        }
+      }
+      (None, _) => Err(QueryError::UnsupportedQuery(
+        "Field name is missing".to_string(),
+      )),
+      (_, None) => Err(QueryError::UnsupportedQuery(
+        "Regexp query string is missing".to_string(),
       )),
     }
   }
@@ -1146,6 +1215,74 @@ mod tests {
               "Each log should have 'key' field starting with 'lo'."
             );
           }
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_regexp_query() {
+    let segment = create_mock_segment().await;
+
+    let query_dsl_query = r#"{
+        "query": {
+            "regexp": {
+                "key": {
+                    "value": "l[a-z]g"
+                }
+            }
+        }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert_eq!(
+            results.get_messages().len(),
+            5,
+            "There should be exactly 5 logs matching the regexp query."
+          );
+
+          for log in results.get_messages().iter() {
+            let key_field_value = log.get_message().get_fields().get("key");
+
+            assert!(
+              key_field_value.map_or(false, |value| regex::Regex::new(r"l[a-z]g")
+                .unwrap()
+                .is_match(value)),
+              "Each log should have 'key' field matching the regexp pattern."
+            );
+          }
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_more_parameters() {
+    let segment = create_mock_segment().await;
+
+    let query_dsl_query = r#"{"query":{"match":{"field1":{"query":"field1value","operator":"OR","prefix_length":0,"max_expansions":50,"fuzzy_transpositions":true,"lenient":false,"zero_terms_query":"NONE","auto_generate_synonyms_phrase_query":true,"boost":1.0}}}}"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert!(results
+            .get_messages()
+            .iter()
+            .all(|log| log.get_message().get_text().contains("field1~field1value")));
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);

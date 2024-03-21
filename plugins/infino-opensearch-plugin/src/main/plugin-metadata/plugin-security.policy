@@ -2,5 +2,7 @@ grant {
     // Add permissions to allow Infino OpenSearcg Plugin to access Infino using OpenSearch threadpool
     permission org.opensearch.secure_sm.ThreadPermission "modifyArbitraryThread";
     permission java.net.URLPermission "http://*:*/-", "*:*";
+    permission java.net.URLPermission "http://*:*/-", "POST:Content-Type";
+    permission java.net.URLPermission "http://*:*/-", "GET:Content-Type";
     permission java.lang.RuntimePermission "accessUserInformation";
 };
