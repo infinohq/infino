@@ -6,15 +6,17 @@ use std::vec::Vec;
 
 use dashmap::DashMap;
 use log::{debug, error};
-use serde_json::json;
 
 use super::metadata::Metadata;
 use super::search_logs::QueryLogMessage;
+use super::wal::MetricWalEntry;
 use crate::log::inverted_map::InvertedMap;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
+use crate::segment_manager::wal::LogWalEntry;
+use crate::segment_manager::wal::WalEntry;
 use crate::segment_manager::wal::WriteAheadLog;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
@@ -82,6 +84,45 @@ impl Segment {
       trie: Arc::new(RwLock::new(Trie::new())),
       wal,
     }
+  }
+
+  /// Create a new segment from the given wal file.
+  pub fn new_from_wal(wal_file_path: &str) -> Result<Self, CoreDBError> {
+    // First create a new segment with /dev/null as the wal file path.
+    let segment = Self::new("/dev/null");
+
+    // Now open the wal file and replay all the entries.
+    let wal = WriteAheadLog::new(wal_file_path)?;
+    let entries = wal.read_all()?;
+
+    // Reaplay each entry on the segment.
+    for entry in entries {
+      match entry {
+        WalEntry::Log(log_entry) => {
+          let result = segment.append_log_message_internal(
+            log_entry.get_time(),
+            log_entry.get_fields(),
+            log_entry.get_text(),
+          );
+
+          // If there is an error, log it and continue.
+          let _ = result.map_err(|e| debug!("Could not replay log entry: {}", e));
+        }
+        WalEntry::Metric(metric_wal_entry) => {
+          let result = segment.append_metric_point_internal(
+            metric_wal_entry.get_metric_name(),
+            metric_wal_entry.get_name_value_labels(),
+            metric_wal_entry.get_time(),
+            metric_wal_entry.get_value(),
+          );
+
+          // If there is an error, log it and continue.
+          let _ = result.map_err(|e| debug!("Could not replay metric entry: {}", e));
+        }
+      }
+    }
+
+    Ok(segment)
   }
 
   /// Get the terms in this segment.
@@ -168,6 +209,18 @@ impl Segment {
       && self.time_series_map.is_empty()
   }
 
+  /// Check if this segment is equal to another segment.
+  /// This is an approximate check and only considers lengths of different fields.
+  pub fn quick_equals(&self, other: &Segment) -> bool {
+    self.metadata.get_log_message_count() == other.metadata.get_log_message_count()
+      && self.metadata.get_term_count() == other.metadata.get_term_count()
+      && self.terms.len() == other.terms.len()
+      && self.forward_map.len() == other.forward_map.len()
+      && self.inverted_map.len() == other.inverted_map.len()
+      && self.labels.len() == other.labels.len()
+      && self.time_series_map.len() == other.time_series_map.len()
+  }
+
   // This functions with #[cfg(test)] annotation below should only be used in testing -
   // we should never insert directly in inverted map or in terms map.
   // (as otherwise it would compromise integrity of the segment - e.g, we may have an entry in inverted
@@ -185,27 +238,15 @@ impl Segment {
     self.inverted_map.clear_inverted_map();
   }
 
-  /// Append a log message with timestamp to the segment (inverted as well as forward map).
-  // Note that this function isn't async - this helps with testing and esuring correctness.
-  pub fn append_log_message(
+  /// Append a log message to this segment, without writing WAL.
+  /// This is typically called by Self::append_log_message() after writing WAL, or
+  /// during recovery when we are building a segment and do not want to write WAL.
+  fn append_log_message_internal(
     &self,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
   ) -> Result<u32, CoreDBError> {
-    debug!(
-      "SEGMENT: Appending log message, time: {}, fields: {:?}, message: {}",
-      time, fields, text
-    );
-
-    // Write to write-ahead-log.
-    let wal_entry = json!({"type": "log", "time": time, "fields": fields, "text": text});
-    {
-      let wal_clone = self.wal.clone();
-      let wal = &mut wal_clone.lock();
-      wal.append(wal_entry).unwrap();
-    }
-
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
@@ -240,37 +281,40 @@ impl Segment {
     Ok(log_message_id)
   }
 
-  /// Append a metric point with specified time and value to the segment.
+  /// Append a log message with timestamp to the segment (inverted as well as forward map).
   // Note that this function isn't async - this helps with testing and esuring correctness.
-  //
-  // As an example, say empty segment, say s, is called as follows:
-  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="1", value="1")
-  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="2", value="2")
-  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":500, "path":"/user", time="3", value="2")
-  //
-  // This will results into labels "__metric_name__~http_get", "status_code~200", "status_code~500", "path~/user". At the end of the
-  // 3 calls, the label_count would be 4.
-  //
-  // The metric_count as of now just computes the number of metric points published, so would be 3, corresponding to the three
-  // invocations above. A prior implementation would track different metric points seperately per label (so a total of 12 metric points)
-  // in the above example). It isn't clear how exactly we should use the metric points, so keeping it simple for now - and this may
-  // change in future.
-  pub fn append_metric_point(
+  pub fn append_log_message(
+    &self,
+    time: u64,
+    fields: &HashMap<String, String>,
+    text: &str,
+  ) -> Result<u32, CoreDBError> {
+    debug!(
+      "SEGMENT: Appending log message, time: {}, fields: {:?}, message: {}",
+      time, fields, text
+    );
+
+    // Write to write-ahead-log.
+    let wal_entry = WalEntry::Log(LogWalEntry::new(time, fields, text));
+    {
+      let wal_clone = self.wal.clone();
+      let wal = &mut wal_clone.lock();
+      wal.append(&wal_entry).unwrap();
+    }
+
+    self.append_log_message_internal(time, fields, text)
+  }
+
+  /// Append a metric point to this segment, without writing WAL.
+  /// This is typically called by Self::append_metric_point() after writing WAL, or
+  /// during recovery when we are building a segment and do not want to write WAL.
+  fn append_metric_point_internal(
     &self,
     metric_name: &str,
     name_value_labels: &HashMap<String, String>,
     time: u64,
     value: f64,
   ) -> Result<(), CoreDBError> {
-    // Write to write-ahead-log.
-    let wal_entry = json!({"type": "metric", "time": time, "metric_name": metric_name,
-      "name_value_labels": name_value_labels, "value": value});
-    {
-      let wal_clone = self.wal.clone();
-      let wal = &mut wal_clone.lock();
-      wal.append(wal_entry).unwrap();
-    }
-
     let mut my_labels = Vec::new();
 
     // Push the metric name label.
@@ -314,6 +358,42 @@ impl Segment {
 
     self.update_start_end_time(time);
     Ok(())
+  }
+
+  /// Append a metric point with specified time and value to the segment.
+  // Note that this function isn't async - this helps with testing and esuring correctness.
+  //
+  // As an example, say empty segment, say s, is called as follows:
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="1", value="1")
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":200, "path":"/user", time="2", value="2")
+  // - s.append_metric_point(metric_name="http_get", name_value_labels={"status_code":500, "path":"/user", time="3", value="2")
+  //
+  // This will results into labels "__metric_name__~http_get", "status_code~200", "status_code~500", "path~/user". At the end of the
+  // 3 calls, the label_count would be 4.
+  //
+  // The metric_point_count computes the number of metric points aggregated across all the labels. At the end of the 3 calls above,
+  // the metric_point_count would be 9.
+  pub fn append_metric_point(
+    &self,
+    metric_name: &str,
+    name_value_labels: &HashMap<String, String>,
+    time: u64,
+    value: f64,
+  ) -> Result<(), CoreDBError> {
+    // Write to write-ahead-log.
+    let wal_entry = WalEntry::Metric(MetricWalEntry::new(
+      metric_name,
+      name_value_labels,
+      time,
+      value,
+    ));
+    {
+      let wal_clone = self.wal.clone();
+      let wal = &mut wal_clone.lock();
+      wal.append(&wal_entry).unwrap();
+    }
+
+    self.append_metric_point_internal(metric_name, name_value_labels, time, value)
   }
 
   /// Get all terms with a certain prefix from the segment.
@@ -574,6 +654,13 @@ impl Segment {
     let wal_file_path = format!("/tmp/{}.tmp", uuid::Uuid::new_v4());
     Self::new(&wal_file_path)
   }
+
+  #[cfg(test)]
+  pub fn get_wal_file_path(&self) -> String {
+    let wal_clone = self.wal.clone();
+    let wal_clone_lock = wal_clone.lock();
+    wal_clone_lock.get_file_path()
+  }
 }
 
 #[cfg(test)]
@@ -629,6 +716,40 @@ mod tests {
     } else {
       error!("Error parsing the query.");
     }
+  }
+
+  #[tokio::test]
+  async fn test_new_segment_from_wal() {
+    let segment = Segment::new_with_temp_wal();
+
+    // Add a few log messages.
+    for i in 0..10 {
+      let time = Utc::now().timestamp_millis() as u64;
+      let log_message = format!("some log message {}", i);
+      segment
+        .append_log_message(time, &HashMap::new(), &log_message)
+        .unwrap();
+    }
+
+    // Add a few metric points.
+    let mut label_map = HashMap::new();
+    label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
+    for i in 0..100 {
+      let time = Utc::now().timestamp_millis() as u64;
+      segment
+        .append_metric_point("metric_name_1", &label_map, time, i as f64)
+        .unwrap();
+    }
+
+    // Flush the wal.
+    segment.flush_wal().unwrap();
+
+    // Create the segment with contents from the wal file.
+    let wal_file_path = segment.get_wal_file_path();
+    let segment_from_wal = Segment::new_from_wal(&wal_file_path).unwrap();
+
+    // Check that both the segments are equal.
+    assert!(segment.quick_equals(&segment_from_wal));
   }
 
   #[tokio::test]
