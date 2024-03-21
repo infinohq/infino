@@ -1,11 +1,90 @@
+use std::collections::HashMap;
 use std::fs::{metadata, remove_file, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::utils::error::CoreDBError;
 
 const MAX_ENTRIES: usize = 1000;
+
+// Log message entry in the write ahead log.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+pub struct LogWalEntry {
+  time: u64,
+  fields: HashMap<String, String>,
+  text: String,
+}
+
+impl LogWalEntry {
+  pub fn new(time: u64, fields: &HashMap<String, String>, text: &str) -> Self {
+    Self {
+      time,
+      fields: fields.clone(),
+      text: text.to_owned(),
+    }
+  }
+
+  pub fn get_time(&self) -> u64 {
+    self.time
+  }
+
+  pub fn get_fields(&self) -> &HashMap<String, String> {
+    &self.fields
+  }
+
+  pub fn get_text(&self) -> &str {
+    &self.text
+  }
+}
+
+// Metric point entry in the write ahead log.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+pub struct MetricWalEntry {
+  metric_name: String,
+  name_value_labels: HashMap<String, String>,
+  time: u64,
+  value: f64,
+}
+
+impl MetricWalEntry {
+  pub fn new(
+    metric_name: &str,
+    name_value_labels: &HashMap<String, String>,
+    time: u64,
+    value: f64,
+  ) -> Self {
+    Self {
+      metric_name: metric_name.to_owned(),
+      name_value_labels: name_value_labels.clone(),
+      time,
+      value,
+    }
+  }
+
+  pub fn get_metric_name(&self) -> &str {
+    &self.metric_name
+  }
+
+  pub fn get_name_value_labels(&self) -> &HashMap<String, String> {
+    &self.name_value_labels
+  }
+
+  pub fn get_time(&self) -> u64 {
+    self.time
+  }
+
+  pub fn get_value(&self) -> f64 {
+    self.value
+  }
+}
+
+/// Write ahead log entry type.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+pub enum WalEntry {
+  Log(LogWalEntry),
+  Metric(MetricWalEntry),
+}
 
 /// File based write ahead log. Typically, a write ahead log is created for each segment.
 #[derive(Debug)]
@@ -14,7 +93,7 @@ pub struct WriteAheadLog {
   file_path: String,
 
   /// Temporary memory buffer to store write ahead log entries.
-  buffer: Vec<Value>,
+  buffer: Vec<WalEntry>,
 
   /// Write ahead log file writer.
   writer: BufWriter<std::fs::File>,
@@ -35,9 +114,9 @@ impl WriteAheadLog {
   }
 
   /// Read all entries from the write ahead log.
-  pub fn read_all(&self) -> Result<Vec<Value>, CoreDBError> {
+  pub fn read_all(&self) -> Result<Vec<WalEntry>, CoreDBError> {
     // Create buffered reader to read the file line by line.
-    let mut json_values = Vec::new();
+    let mut wal_entries = Vec::new();
     let file = File::open(&self.file_path)?;
     let reader = BufReader::new(file);
 
@@ -49,21 +128,21 @@ impl WriteAheadLog {
         Err(_) => continue, // Ignore lines that cannot be read.
       };
 
-      let json_value = match serde_json::from_str(&line) {
+      let wal_entry: WalEntry = match serde_json::from_str(&line) {
         Ok(value) => value,
         Err(_) => continue, // Ignore lines that cannot be parsed as JSON.
       };
 
-      json_values.push(json_value);
+      wal_entries.push(wal_entry);
     }
 
-    Ok(json_values)
+    Ok(wal_entries)
   }
 
   /// Append an entry to the write ahead log. After appending MAX_ENTRIES entries, all the entries
   /// will be flushed to disk.
-  pub fn append(&mut self, entry: Value) -> Result<(), CoreDBError> {
-    self.buffer.push(entry);
+  pub fn append(&mut self, entry: &WalEntry) -> Result<(), CoreDBError> {
+    self.buffer.push(entry.clone());
 
     if self.buffer.len() >= MAX_ENTRIES {
       self.flush()?;
@@ -107,7 +186,6 @@ mod tests {
   use std::path::Path;
   use std::sync::Arc;
 
-  use serde_json::json;
   use tempfile::NamedTempFile;
   use tokio::task;
 
@@ -120,11 +198,12 @@ mod tests {
     let path = temp_file.path().to_str().unwrap();
     let mut wal = WriteAheadLog::new(path).unwrap();
 
-    let entry = json!({"time": 1627590000, "message": "Test log entry"});
+    let entry = LogWalEntry::new(1627590000, &HashMap::new(), "Test log entry");
+    let entry = WalEntry::Log(entry);
 
     // Add 2 entries. wal.flash() is not called yet, so the file should not contain 'Test log entry'.
-    wal.append(entry.clone()).unwrap();
-    wal.append(entry.clone()).unwrap();
+    wal.append(&entry).unwrap();
+    wal.append(&entry).unwrap();
     let contents = fs::read_to_string(Path::new(path)).unwrap();
     assert!(!contents.contains("Test log entry"));
 
@@ -136,7 +215,7 @@ mod tests {
 
     // Add more entries, upto a total of MAX_ENTRIES.
     for _ in 0..MAX_ENTRIES {
-      wal.append(entry.clone()).unwrap();
+      wal.append(&entry).unwrap();
     }
 
     // Flush should be called automatically as we reach MAX_ENTRIES limit.
@@ -146,7 +225,7 @@ mod tests {
     let contents = wal.read_all().unwrap();
     assert_eq!(contents.len(), MAX_ENTRIES + 2);
     for content in contents {
-      assert_eq!(content, entry);
+      assert_eq!(content, entry.clone());
     }
 
     // Remove the file and check that it does not exist anymore.
@@ -166,16 +245,18 @@ mod tests {
     const NUM_FLUSH_THREADS: usize = 10;
     const NUM_APPENDS_PER_THREAD: usize = 50000; // Number of append operations per thread.
     const NUM_FLUSHES_PER_THREAD: usize = 10; // Number of flush operations per thread.
+    let entry = MetricWalEntry::new("my_metric", &HashMap::new(), 1625000, 1.0);
+    let entry: WalEntry = WalEntry::Metric(entry);
 
     // Spawn tasks for concurrent appends.
     let mut append_handles = vec![];
     for _ in 0..NUM_APPEND_THREADS {
       let wal_clone = Arc::clone(&wal);
+      let entry_clone = entry.clone();
       let handle = task::spawn(async move {
         for _ in 0..NUM_APPENDS_PER_THREAD {
-          let entry = json!({"time": 1627590000, "message": "Concurrent append"});
           let wal_clone = &mut wal_clone.lock().await;
-          wal_clone.append(entry.clone()).unwrap();
+          wal_clone.append(&entry_clone).unwrap();
         }
       });
       append_handles.push(handle);
@@ -212,10 +293,7 @@ mod tests {
     let contents = wal.read_all().unwrap();
     assert_eq!(contents.len(), NUM_APPENDS_PER_THREAD * NUM_APPEND_THREADS);
     for content in contents {
-      assert_eq!(
-        content,
-        json!({"time": 1627590000, "message": "Concurrent append"})
-      );
+      assert_eq!(&content, &entry);
     }
   }
 }

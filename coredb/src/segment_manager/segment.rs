@@ -6,15 +6,17 @@ use std::vec::Vec;
 
 use dashmap::DashMap;
 use log::{debug, error};
-use serde_json::json;
 
 use super::metadata::Metadata;
 use super::search_logs::QueryLogMessage;
+use super::wal::MetricWalEntry;
 use crate::log::inverted_map::InvertedMap;
 use crate::log::log_message::LogMessage;
 use crate::log::postings_list::PostingsList;
 use crate::metric::time_series::TimeSeries;
 use crate::metric::time_series_map::TimeSeriesMap;
+use crate::segment_manager::wal::LogWalEntry;
+use crate::segment_manager::wal::WalEntry;
 use crate::segment_manager::wal::WriteAheadLog;
 use crate::storage_manager::storage::Storage;
 use crate::utils::error::CoreDBError;
@@ -93,33 +95,31 @@ impl Segment {
     let wal = WriteAheadLog::new(wal_file_path)?;
     let entries = wal.read_all()?;
 
+    // Reaplay each entry on the segment.
     for entry in entries {
-      let line_type = entry["type"].as_str();
-      match line_type {
-        Some("metric") => {
-          // This is a metric in write ahead log.
-          let time = entry["time"].as_str();
-          let metric_name: &str = entry["metric_name"].as_str().unwrap();
-          let name_value_labels: Vec<&str> = entry["name_value_labels"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-          let value: f64 = entry["value"].as_f64().unwrap();
+      match entry {
+        WalEntry::Log(log_entry) => {
+          let result = segment.append_log_message_internal(
+            log_entry.get_time(),
+            log_entry.get_fields(),
+            log_entry.get_text(),
+          );
+
+          // If there is an error, log it and continue.
+          let _ = result.map_err(|e| debug!("Could not replay log entry: {}", e));
         }
-        Some("log") => {
-          // This is a log in write ahead log.
-          let time: &str = entry["time"].as_str().unwrap();
-        }
-        Some(_) | None => {
-          // Ignore any line format not known to us and process the rest.
-          debug!("Invalid line type in write ahead log: {:?}", line_type);
+        WalEntry::Metric(metric_wal_entry) => {
+          let result = segment.append_metric_point_internal(
+            metric_wal_entry.get_metric_name(),
+            metric_wal_entry.get_name_value_labels(),
+            metric_wal_entry.get_time(),
+            metric_wal_entry.get_value(),
+          );
+
+          // If there is an error, log it and continue.
+          let _ = result.map_err(|e| debug!("Could not replay metric entry: {}", e));
         }
       }
-
-      //json!({"type": "metric", "time": time, "metric_name": metric_name,
-      //      "name_value_labels": name_value_labels, "value": value})
     }
 
     Ok(segment)
@@ -283,11 +283,11 @@ impl Segment {
     );
 
     // Write to write-ahead-log.
-    let wal_entry = json!({"type": "log", "time": time, "fields": fields, "text": text});
+    let wal_entry = WalEntry::Log(LogWalEntry::new(time, fields, text));
     {
       let wal_clone = self.wal.clone();
       let wal = &mut wal_clone.lock();
-      wal.append(wal_entry).unwrap();
+      wal.append(&wal_entry).unwrap();
     }
 
     self.append_log_message_internal(time, fields, text)
@@ -369,12 +369,16 @@ impl Segment {
     value: f64,
   ) -> Result<(), CoreDBError> {
     // Write to write-ahead-log.
-    let wal_entry = json!({"type": "metric", "time": time, "metric_name": metric_name,
-      "name_value_labels": name_value_labels, "value": value});
+    let wal_entry = WalEntry::Metric(MetricWalEntry::new(
+      metric_name,
+      name_value_labels,
+      time,
+      value,
+    ));
     {
       let wal_clone = self.wal.clone();
       let wal = &mut wal_clone.lock();
-      wal.append(wal_entry).unwrap();
+      wal.append(&wal_entry).unwrap();
     }
 
     self.append_metric_point_internal(metric_name, name_value_labels, time, value)
