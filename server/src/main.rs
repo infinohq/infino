@@ -1960,8 +1960,8 @@ mod tests {
   async fn test_create_delete_multiple_indexes(use_rabbitmq: bool) {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = format!("default");
-    let index_dir = TempDir::new(&index_name).unwrap();
+    let index_name = "index_test";
+    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
@@ -1992,7 +1992,7 @@ mod tests {
         .call(
           Request::builder()
             .method(http::Method::PUT)
-            .uri(&format!("/{}", index_name.to_string()))
+            .uri(&format!("/{}", index_name))
             .body(Body::from(""))
             .unwrap(),
         )
@@ -2015,7 +2015,7 @@ mod tests {
       .call(
         Request::builder()
           .method(http::Method::DELETE)
-          .uri(&format!("/*"))
+          .uri("/*")
           .body(Body::from(""))
           .unwrap(),
       )
@@ -2025,8 +2025,8 @@ mod tests {
 
     // Check whether the metadata file in the index directories exists.
     // None of them should.
-    for i in 0..9 {
-      let metadata_file_path = &format!("{}/{}", &index_dirs[i], Index::get_metadata_file_name());
+    for index_dir in index_dirs.iter() {
+      let metadata_file_path = &format!("{}/{}", index_dir, Index::get_metadata_file_name());
 
       // Check whether the index directory exists.
       assert!(!storage.check_path_exists(metadata_file_path).await);
