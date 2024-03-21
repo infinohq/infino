@@ -525,7 +525,7 @@ wildcard_value               = { quote ~ "value" ~ quote ~ colon ~ string }
 wildcard_within              = { quote ~ "within" ~ quote ~ colon ~ string }
 within                       = { quote ~ "within" ~ quote ~ colon ~ integer }
 wkt                          = { quote ~ "wkt" ~ quote ~ colon ~ string }
-zero_terms_query             = { quote ~ "lt" ~ quote ~ colon ~ (quote ~ "all" ~ quote | quote ~ "none" ~ quote) }
+zero_terms_query             = { quote ~ "zero_terms_query" ~ quote ~ colon ~ (quote ~ ("all" | "ALL") ~ quote | quote ~ ("none" | "NONE") ~ quote) }
 
 // **** Low-level semantic definitions ****
 // _ prefix means silent; lets Pest know that these rules shouldn't create an AST node

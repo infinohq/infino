@@ -1954,6 +1954,88 @@ mod tests {
     let _ = RabbitMQ::stop_queue_container(container_name);
   }
 
+  /// Write test to test Create and Delete index APIs.
+  #[test_case(false ; "do not use rabbitmq")]
+  #[tokio::test]
+  async fn test_create_delete_multiple_indexes(use_rabbitmq: bool) {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = format!("default");
+    let index_dir = TempDir::new(&index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+    let container_name = "infino-test-main-rs";
+    let storage = Storage::new(&StorageType::Local)
+      .await
+      .expect("Could not create storage");
+
+    create_test_config(
+      config_dir_path,
+      index_dir_path,
+      wal_dir_path,
+      container_name,
+      use_rabbitmq,
+    );
+
+    let mut index_dirs = Vec::<String>::new();
+
+    // Create the app.
+    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+
+    for i in 0..9 {
+      let index_name = format!("index_test+{}", i);
+      index_dirs.push(index_name.to_string());
+
+      // Create an index.
+      let response = app
+        .call(
+          Request::builder()
+            .method(http::Method::PUT)
+            .uri(&format!("/{}", index_name.to_string()))
+            .body(Body::from(""))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+      assert_eq!(response.status(), StatusCode::OK);
+
+      // Check whether the metadata file in the index directory exists.
+      let joined_index_dir_path = get_joined_path(index_dir_path, &index_name);
+      let metadata_file_path = &format!(
+        "{}/{}",
+        joined_index_dir_path,
+        Index::get_metadata_file_name()
+      );
+      assert!(storage.check_path_exists(metadata_file_path).await);
+    }
+
+    // Delete the index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::DELETE)
+          .uri(&format!("/*"))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Check whether the metadata file in the index directories exists.
+    // None of them should.
+    for i in 0..9 {
+      let metadata_file_path = &format!("{}/{}", &index_dirs[i], Index::get_metadata_file_name());
+
+      // Check whether the index directory exists.
+      assert!(!storage.check_path_exists(metadata_file_path).await);
+
+      // Stop the RabbbitMQ container.
+      let _ = RabbitMQ::stop_queue_container(container_name);
+    }
+  }
+
   #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
   async fn test_bulk_operation(use_rabbitmq: bool) {
@@ -2018,7 +2100,31 @@ mod tests {
       .unwrap();
     let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
 
-    // Example assertion on the response
+    // Make sure documents are inserted correctly.
     assert_eq!(response_json["errors"], false);
+
+    let query_dsl_request = "{\"query\":{\"match\":{\"test_field\":{\"query\":\"test_value\",\"operator\":\"OR\",\"prefix_length\":0,\"max_expansions\":50,\"fuzzy_transpositions\":true,\"lenient\":false,\"zero_terms_query\":\"NONE\",\"auto_generate_synonyms_phrase_query\":true,\"boost\":1.0}}}}";
+    let path = format!("/{}/search_logs", index_name);
+
+    let request = Request::builder()
+      .method(http::Method::GET)
+      .uri(path)
+      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+      .body(Body::from(query_dsl_request))
+      .unwrap();
+
+    let result = app.call(request).await;
+
+    let response = result.expect("Failed to make a call");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body();
+    let max_body_size = 10 * 1024 * 1024;
+    let bytes = to_bytes(body, max_body_size)
+      .await
+      .expect("Failed to read body");
+
+    let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
+    debug!("Response content: {}", body_str);
   }
 }

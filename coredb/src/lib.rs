@@ -374,6 +374,8 @@ impl CoreDB {
 
   /// Create a new index.
   pub async fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
+    debug!("COREDB: Creating index {}", index_name);
+
     let coredb_settings = self.settings.get_coredb_settings();
     let index_dir_path = coredb_settings.get_index_dir_path();
     let wal_dir_path = coredb_settings.get_wal_dir_path();
@@ -403,17 +405,42 @@ impl CoreDB {
 
   /// Delete an index.
   pub async fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
-    let index = self.index_map.remove(index_name);
-    match index {
-      Some(index) => {
-        index.1.delete().await?;
-        Ok(())
-      }
-      None => {
-        let error = CoreDBError::IndexNotFound(index_name.to_string());
-        Err(error)
+    debug!("COREDB: Deleting index {}", index_name);
+
+    let mut indexes_to_delete = Vec::new();
+
+    if ["default", ".default", "Default", ".Default"].contains(&index_name) {
+      return Err(CoreDBError::CannotDeleteIndex(index_name.to_string()));
+    }
+
+    // Create the list of indexes to delete.
+    // TODO: Handle regexes.
+    if index_name.eq("*") || index_name.eq("_all") {
+      // Collect keys to delete
+      self.index_map.iter().for_each(|entry| {
+        let name = entry.key().clone();
+        if !["default", ".default", "Default", ".Default"].contains(&name.as_str()) {
+          indexes_to_delete.push(name);
+        }
+      });
+    } else {
+      indexes_to_delete.push(index_name.to_string());
+    }
+
+    // Now delete the indexes without holding references to the index_map
+    // which results in deadlock as the 'remove' will wait for the references
+    // to be released.
+    for name in indexes_to_delete {
+      if let Some((_, index)) = self.index_map.remove(&name) {
+        println!("Deleting Individual ======== {}", name);
+        index.delete().await?;
+        println!("Back from individual delete ======== {}", name);
+      } else {
+        return Err(CoreDBError::IndexNotFound(name));
       }
     }
+
+    Ok(())
   }
 
   pub fn get_default_index_name(&self) -> &str {
