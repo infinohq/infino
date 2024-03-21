@@ -432,9 +432,7 @@ impl CoreDB {
     // to be released.
     for name in indexes_to_delete {
       if let Some((_, index)) = self.index_map.remove(&name) {
-        println!("Deleting Individual ======== {}", name);
         index.delete().await?;
-        println!("Back from individual delete ======== {}", name);
       } else {
         return Err(CoreDBError::IndexNotFound(name));
       }

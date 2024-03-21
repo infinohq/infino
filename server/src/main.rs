@@ -556,7 +556,7 @@ async fn append_metric(
               return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
             }
             _ => {
-              println!("An unexpected error occurred.");
+              error!("An unexpected error occurred.");
             }
           }
         }
