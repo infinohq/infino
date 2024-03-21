@@ -13,6 +13,7 @@ pub struct InfinoOSApiClient {
   // No configuration needed-
 }
 
+#[allow(unused)]
 impl InfinoOSApiClient {
   pub fn new() -> InfinoOSApiClient {
     InfinoOSApiClient {}
