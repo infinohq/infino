@@ -176,6 +176,11 @@ impl WriteAheadLog {
 
     Ok(())
   }
+
+  /// Get wal file path.
+  pub fn get_file_path(&self) -> String {
+    self.file_path.to_owned()
+  }
 }
 
 #[cfg(test)]
@@ -197,6 +202,9 @@ mod tests {
     let temp_file = NamedTempFile::new().unwrap();
     let path = temp_file.path().to_str().unwrap();
     let mut wal = WriteAheadLog::new(path).unwrap();
+
+    // Make sure that the wal file path is as expected.
+    assert_eq!(wal.get_file_path(), path);
 
     let entry = LogWalEntry::new(1627590000, &HashMap::new(), "Test log entry");
     let entry = WalEntry::Log(entry);

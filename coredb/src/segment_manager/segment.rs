@@ -209,6 +209,18 @@ impl Segment {
       && self.time_series_map.is_empty()
   }
 
+  /// Check if this segment is equal to another segment.
+  /// This is an approximate check and only considers lengths of different fields.
+  pub fn quick_equals(&self, other: &Segment) -> bool {
+    self.metadata.get_log_message_count() == other.metadata.get_log_message_count()
+      && self.metadata.get_term_count() == other.metadata.get_term_count()
+      && self.terms.len() == other.terms.len()
+      && self.forward_map.len() == other.forward_map.len()
+      && self.inverted_map.len() == other.inverted_map.len()
+      && self.labels.len() == other.labels.len()
+      && self.time_series_map.len() == other.time_series_map.len()
+  }
+
   // This functions with #[cfg(test)] annotation below should only be used in testing -
   // we should never insert directly in inverted map or in terms map.
   // (as otherwise it would compromise integrity of the segment - e.g, we may have an entry in inverted
@@ -642,6 +654,13 @@ impl Segment {
     let wal_file_path = format!("/tmp/{}.tmp", uuid::Uuid::new_v4());
     Self::new(&wal_file_path)
   }
+
+  #[cfg(test)]
+  pub fn get_wal_file_path(&self) -> String {
+    let wal_clone = self.wal.clone();
+    let wal_clone_lock = wal_clone.lock();
+    wal_clone_lock.get_file_path()
+  }
 }
 
 #[cfg(test)]
@@ -697,6 +716,40 @@ mod tests {
     } else {
       error!("Error parsing the query.");
     }
+  }
+
+  #[tokio::test]
+  async fn test_new_segment_from_wal() {
+    let segment = Segment::new_with_temp_wal();
+
+    // Add a few log messages.
+    for i in 0..10 {
+      let time = Utc::now().timestamp_millis() as u64;
+      let log_message = format!("some log message {}", i);
+      segment
+        .append_log_message(time, &HashMap::new(), &log_message)
+        .unwrap();
+    }
+
+    // Add a few metric points.
+    let mut label_map = HashMap::new();
+    label_map.insert("label_name_1".to_owned(), "label_value_1".to_owned());
+    for i in 0..100 {
+      let time = Utc::now().timestamp_millis() as u64;
+      segment
+        .append_metric_point("metric_name_1", &label_map, time, i as f64)
+        .unwrap();
+    }
+
+    // Flush the wal.
+    segment.flush_wal().unwrap();
+
+    // Create the segment with contents from the wal file.
+    let wal_file_path = segment.get_wal_file_path();
+    let segment_from_wal = Segment::new_from_wal(&wal_file_path).unwrap();
+
+    // Check that both the segments are equal.
+    assert!(segment.quick_equals(&segment_from_wal));
   }
 
   #[tokio::test]
