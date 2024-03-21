@@ -25,11 +25,11 @@ mod utils;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use std::collections::HashMap;
-use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::result::Result;
 use std::sync::Arc;
+use std::{env, result};
 
 use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::response::IntoResponse;
@@ -106,6 +106,15 @@ struct SummarizeQuery {
 struct SummarizeQueryResponse {
   summary: String,
   results: QueryDSLObject,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+/// Represents a natural language query.
+struct NaturalLanguageQuery {
+  text: String,
+  context: String,
+  start_time: Option<u64>,
+  end_time: Option<u64>,
 }
 
 /// Axum application for Infino server.
@@ -897,6 +906,42 @@ async fn summarize(
           "Internal server error".to_string(),
         )),
       }
+    }
+  }
+}
+
+/// Search logs+metrics in CoreDB using natural language query.
+async fn search_nl(
+  State(state): State<Arc<AppState>>,
+  Query(natural_language_query): Query<NaturalLanguageQuery>,
+  Path(index_name): Path<String>,
+) -> Result<String, (StatusCode, String)> {
+  debug!(
+    "Searching logs+metrics with natural language query: {:?}",
+    natural_language_query
+  );
+
+  let result = state
+    .coredb
+    .search_nl(
+      &index_name,
+      &natural_language_query.text,
+      &natural_language_query.context,
+      natural_language_query.start_time.unwrap_or(0),
+      natural_language_query
+        .end_time
+        .unwrap_or(Utc::now().timestamp_millis() as u64),
+    )
+    .await;
+
+  match result {
+    Ok(result) => Ok(result),
+    Err(coredb_error) => {
+      // TODO: granular error processing with correct error codes.
+      Err((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal server error: {}", coredb_error),
+      ))
     }
   }
 }

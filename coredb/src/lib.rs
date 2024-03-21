@@ -301,6 +301,22 @@ impl CoreDB {
       .await
   }
 
+  pub async fn search_nl(
+    &self,
+    index_name: &str,
+    text: &str,
+    context: &str,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<String, CoreDBError> {
+    let index = self
+      .index_map
+      .get(index_name)
+      .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
+
+    Ok("".to_string())
+  }
+
   /// Commit the index to disk.
   pub async fn commit(&self, is_shutdown: bool) -> Result<(), CoreDBError> {
     for index_entry in self.get_index_map() {
