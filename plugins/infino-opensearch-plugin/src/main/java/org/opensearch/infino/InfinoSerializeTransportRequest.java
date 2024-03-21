@@ -126,7 +126,7 @@ public class InfinoSerializeTransportRequest {
      */
     private void parseRequest(ShardSearchRequest searchRequest) throws IOException {
         setIndexName(searchRequest.indices()[0]);
-        setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
+        setEndpoint(InfinoPluginUtils.getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setOperation(InfinoOperation.SEARCH_DOCUMENTS);
         setMethod(GET);
 
@@ -156,7 +156,7 @@ public class InfinoSerializeTransportRequest {
      */
     private void parseRequest(BulkShardRequest bulkRequest) throws IOException {
         setIndexName(bulkRequest.indices()[0]);
-        setEndpoint(getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
+        setEndpoint(InfinoPluginUtils.getEnvVariable("INFINO_SERVER_URL", defaultInfinoEndpoint));
         setOperation(InfinoOperation.BULK_DOCUMENTS);
         setMethod(POST);
 
@@ -412,10 +412,6 @@ public class InfinoSerializeTransportRequest {
                             "start_time", startTime,
                             "end_time", endTime);
                 };
-            case SUMMARIZE:
-                return infinoEndpoint + "/" + indexName + "/summarize?" + buildQueryString(
-                        "start_time", startTime,
-                        "end_time", endTime);
             default:
                 throw new IllegalArgumentException("Unsupported GET path: " + path);
         }
@@ -431,24 +427,6 @@ public class InfinoSerializeTransportRequest {
 
     private String constructPutDeleteUrl() {
         return infinoEndpoint + "/:" + indexName;
-    }
-
-    /**
-     * Retrieves the value of the specified environment variable or returns the
-     * default value if the environment variable is not set.
-     *
-     * @param name         The name of the environment variable.
-     * @param defaultValue The default value to return if the environment variable
-     *                     is not set.
-     * @return The value of the environment variable or the default value.
-     */
-    public static String getEnvVariable(String name, String defaultValue) {
-        String value = System.getenv(name);
-        if (value == null || value.isEmpty()) {
-            logger.info("Environment variable " + name + " is not set. Using default value: " + defaultValue);
-            return defaultValue;
-        }
-        return value;
     }
 
     /**
@@ -482,18 +460,6 @@ public class InfinoSerializeTransportRequest {
 
         /** Delete one or more documents. */
         DELETE_DOCUMENTS,
-
-        /** Create an index. */
-        CREATE_INDEX,
-
-        /** Delete an index. */
-        DELETE_INDEX,
-
-        /** Ping Infino. */
-        PING,
-
-        /** Summarize results */
-        SUMMARIZE,
     }
 
     /**

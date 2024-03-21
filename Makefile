@@ -38,9 +38,9 @@ test: rust-check docker-check
 	RUST_BACKTRACE=1 cargo test --all
 
 build:
-	cargo build $(release)
+	cargo build $(release) 
 
-build-os-plugin:
+build-os-plugin: docker-build
 	cd plugins/infino-opensearch-plugin && ./gradlew build
 
 clean-os-plugin:
@@ -62,7 +62,8 @@ clean:
 	rm -fr server/data/
 	rm -fr server/wal/
 
-clean-all: clean clean-os-plugin
+	# clean plugin
+	clean-os-plugin
 
 docs:
 	echo "Generating documentation to docs/doc"
@@ -71,7 +72,7 @@ docs:
 
 docker-build: docker-check
 	echo "Running docker build..."
-	docker build -t $(docker-img-tag) -f docker/infino.dockerfile .
+	docker build --cache-from $(docker-img-tag) -t $(docker-img-tag) -f docker/infino.dockerfile .
 
 docker-build-multiarch: docker-check docker-buildx-check
 	@./scripts/build-docker-multiarch.sh --docker-img-tag $(docker-img-tag)

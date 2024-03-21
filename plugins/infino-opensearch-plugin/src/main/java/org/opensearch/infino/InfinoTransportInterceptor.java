@@ -66,24 +66,18 @@ import org.apache.logging.log4j.Logger;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
-import org.opensearch.OpenSearchException;
-import org.opensearch.action.DocWriteRequest;
+
 import org.opensearch.action.DocWriteResponse;
 import org.opensearch.action.OriginalIndices;
 import org.opensearch.action.DocWriteRequest.OpType;
 import org.opensearch.action.DocWriteResponse.Result;
-import org.opensearch.action.admin.indices.create.CreateIndexRequest;
-import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
+
 import org.opensearch.action.bulk.BulkItemResponse;
-import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.bulk.BulkShardRequest;
 import org.opensearch.action.bulk.BulkShardResponse;
 import org.opensearch.action.bulk.BulkItemResponse.Failure;
-import org.opensearch.action.support.replication.ReplicationResponse;
 import org.opensearch.action.delete.DeleteResponse;
-import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.replication.TransportReplicationAction.ConcreteShardRequest;
 import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.common.document.DocumentField;
@@ -187,30 +181,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
      */
     protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(BulkShardRequest request,
             InfinoOperation operation) {
-        logger.info("Initializing Transport Registration.");
-
         try {
-            logger.debug("Loading Transport Interceptor.");
-            return new InfinoSerializeTransportRequest(request, operation);
-        } catch (IOException e) {
-            logger.error("Error serializing REST URI for Infino: ", e);
-        }
-        return null;
-    }
-
-    /**
-     * Get get a new instance of the serializer class. Used for unit tests.
-     *
-     * @param request   - the Transport request to serialize
-     * @param operation - the operation associated with the request
-     * @return a configured InfinoSerializeTransportRequest object
-     */
-    protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(ShardSearchRequest request,
-            InfinoOperation operation) {
-        logger.info("Initializing Transport Registration.");
-
-        try {
-            logger.debug("Loading Transport Interceptor.");
             return new InfinoSerializeTransportRequest(request, operation);
         } catch (IOException e) {
             logger.error("Error serializing REST URI for Infino: ", e);
@@ -260,13 +231,11 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             boolean forceExecution,
             TransportRequestHandler<T> actualHandler) {
 
-        logger.info("Executing Infino Transport Handler with action " + action + " and executor " + executor);
+        logger.debug("Executing Infino Transport Handler with action " + action + " and executor " + executor);
 
         return new TransportRequestHandler<T>() {
             @Override
             public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
-                logger.debug("-----------------Received request and task--------------- " + request.toString() + " --- "
-                        + task.toString());
                 String action = task.getAction();
                 if (shouldBeIntercepted(action)) {
                     logger.debug("-----------------Intercepted request and task--------------- " + request.toString()
@@ -284,12 +253,10 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                     processTransportActions(request, operation, new ActionListener<TransportResponse>() {
                         @Override
                         public void onResponse(TransportResponse response) {
-                            logger.info("TransportResponse: " + response);
-
                             try {
                                 channel.sendResponse(response);
                             } catch (IOException e) {
-                                logger.error("Failed to send response", e);
+                                logger.error("Failed to send transport response", e);
                             }
                         }
 
@@ -299,7 +266,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                                 logger.error("Transport action failed.");
                                 channel.sendResponse(e);
                             } catch (IOException ex) {
-                                logger.error("Failed to send error response", ex);
+                                logger.error("Failed to send transport error response", ex);
                             }
                         }
                     });
@@ -340,11 +307,8 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         HttpClient httpClient = getHttpClient();
         HttpRequest forwardRequest;
 
-        logger.info("Transport Interceptor: Serializing REST request to Infino");
-
         // Serialize the request to a valid Infino URL
         try {
-            logger.debug("-----------------Sending request for serialization--------------- " + request.toString());
             switch (operation) {
                 case BULK_DOCUMENTS: {
                     @SuppressWarnings({ "unchecked", "rawtypes" })
@@ -373,7 +337,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
         BytesReference body = infinoRequest.getBody();
         String url = infinoRequest.getFinalUrl();
 
-        logger.info("Serialized TRANSPORT request for Infino to " + infinoRequest.getFinalUrl());
+        logger.debug("Serialized TRANSPORT request for Infino to " + infinoRequest.getFinalUrl());
 
         // Serialize the request to a valid Infino URL
         try {
@@ -392,7 +356,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             return;
         }
 
-        logger.info("Transport Interceptor: Sending HTTP Request to Infino: " + infinoRequest.getFinalUrl());
+        logger.debug("Transport Interceptor: Sending HTTP Request to Infino: " + infinoRequest.getFinalUrl());
 
         // Send request to Infino server and create a listener to handle the response.
         // Execute the HTTP request using our own thread factory.

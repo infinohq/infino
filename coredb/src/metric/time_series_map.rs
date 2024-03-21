@@ -56,6 +56,10 @@ impl TimeSeriesMap {
 
     Ok(())
   }
+
+  pub fn len(&self) -> usize {
+    self.time_series_map.len()
+  }
 }
 
 impl Default for TimeSeriesMap {

@@ -529,6 +529,77 @@ impl Segment {
 
     matching_document_ids
   }
+  /// Retrieve document IDs with regular expression term match.
+  ///
+  /// # Arguments
+  ///
+  /// * `regexp_term` - A regular expression term to match.
+  /// * `field` - The field to search within.
+  /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
+
+  pub async fn get_doc_ids_with_regexp_term(
+    &self,
+    regexp_term: &str,
+    case_insensitive: bool,
+  ) -> Result<Vec<u32>, QueryError> {
+    let regex = Regex::new(regexp_term);
+
+    // Get terms with the prefix formed by the regular expression
+    let prefix_matches =
+      self.get_terms_with_prefix(&self.regexp_to_prefix(regexp_term), case_insensitive);
+
+    let regex = match regex {
+      Ok(regex) => regex,
+      Err(err) => {
+        eprintln!("Error: {}", err);
+        return Err(QueryError::RegexpError(err.to_string()));
+      }
+    };
+
+    // Check all the terms for regex match
+    let matching_terms: Vec<String> = prefix_matches
+      .into_iter()
+      .filter(|term| regex.is_match(term.as_bytes()))
+      .collect();
+
+    // Search inverted index for matching terms
+    let or_doc_ids = self.search_inverted_index(matching_terms, "OR").await?;
+
+    Ok(or_doc_ids)
+  }
+
+  /// Converts a regular expression pattern into a prefix suitable for prefix matching.
+  fn regexp_to_prefix(&self, regexp: &str) -> String {
+    let mut prefix = String::new();
+    let mut is_escaping = false;
+
+    for c in regexp.chars() {
+      match c {
+        '\\' => {
+          if is_escaping {
+            prefix.push(c);
+            is_escaping = false;
+          } else {
+            is_escaping = true;
+          }
+        }
+        '*' | '?' | '+' | '[' | ']' => {
+          if !is_escaping {
+            break;
+          }
+          prefix.push(c);
+        }
+        _ => {
+          if !is_escaping {
+            prefix.push(c);
+          }
+          is_escaping = false;
+        }
+      }
+    }
+
+    prefix
+  }
 
   /// Retrieve document IDs with prefix phrase match.
   ///

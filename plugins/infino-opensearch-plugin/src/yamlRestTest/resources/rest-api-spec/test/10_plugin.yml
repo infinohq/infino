@@ -1,0 +1,8 @@
+---
+"Test Cat Plugins Endpoint":
+  - do:
+      cat.plugins:
+        h: component
+  - match:
+      $body: /^infino-opensearch-plugin/
+
