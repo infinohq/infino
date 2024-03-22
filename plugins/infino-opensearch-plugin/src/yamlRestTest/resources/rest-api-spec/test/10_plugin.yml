@@ -1,8 +1,14 @@
 ---
-"Test Cat Plugins Endpoint":
+setup:
+  - do:
+      cluster.put_settings:
+        body:
+          transient:
+            logger._root: "TRACE"
+---
+"Install the plugin":
   - do:
       cat.plugins:
         h: component
   - match:
       $body: /^infino-opensearch-plugin/
-

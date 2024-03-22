@@ -1274,7 +1274,24 @@ mod tests {
   async fn test_search_with_more_parameters() {
     let segment = create_mock_segment().await;
 
-    let query_dsl_query = r#"{"query":{"match":{"field1":{"query":"field1value","operator":"OR","prefix_length":0,"max_expansions":50,"fuzzy_transpositions":true,"lenient":false,"zero_terms_query":"NONE","auto_generate_synonyms_phrase_query":true,"boost":1.0}}}}"#;
+    let query_dsl_query = r#"{
+      "query": {
+        "match": {
+          "field1": {
+            "query": "field1value",
+            "operator": "OR",
+            "prefix_length": 0,
+            "max_expansions": 50,
+            "fuzzy_transpositions": true,
+            "lenient": false,
+            "zero_terms_query": "NONE",
+            "auto_generate_synonyms_phrase_query": true,
+            "boost": 1.0
+          }
+        }
+      }
+    }
+    "#;
 
     match QueryDslParser::parse(Rule::start, query_dsl_query) {
       Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {

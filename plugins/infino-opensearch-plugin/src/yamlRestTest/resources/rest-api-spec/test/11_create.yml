@@ -1,0 +1,17 @@
+---
+setup:
+  - do:
+      cluster.put_settings:
+        body:
+          transient:
+            logger._root: "TRACE"
+---
+"Create an index":
+  - do:
+      indices.create:
+        index: test_index
+        body:
+          settings:
+            index:
+              number_of_shards: "1"
+              number_of_replicas: "0"

@@ -49,6 +49,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
+import org.opensearch.core.index.Index;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.transport.TransportResponse;
@@ -78,14 +79,19 @@ import org.opensearch.action.bulk.BulkShardResponse;
 import org.opensearch.action.bulk.BulkItemResponse.Failure;
 import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.index.IndexResponse;
+import org.opensearch.action.support.IndicesOptions;
+import org.opensearch.action.support.replication.ReplicationRequest;
 import org.opensearch.action.support.replication.TransportReplicationAction.ConcreteShardRequest;
 import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.common.document.DocumentField;
 import org.opensearch.common.lucene.search.TopDocsAndMaxScore;
+import org.opensearch.common.xcontent.XContentHelper;
+import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.rest.RestRequest;
+import org.opensearch.search.DocValueFormat;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
 import org.opensearch.search.SearchShardTarget;
@@ -428,7 +434,7 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             TransportRequest transportRequest) {
 
         if (Thread.currentThread().isInterrupted()) {
-            logger.warn("Infino Plugin Rest handler thread interrupted. Exiting...");
+            logger.warn("Infino transport interceptor thread interrupted. Exiting...");
             Exception e = new Exception("Infino request thread was interrupted.");
             listener.onFailure(e);
             return;
@@ -451,6 +457,8 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
             }
 
             if (operation == InfinoOperation.SEARCH_DOCUMENTS) {
+                ShardSearchRequest request = (ShardSearchRequest) transportRequest;
+
                 Gson searchGson = new Gson();
                 JsonElement element = searchGson.fromJson(responseBody, JsonElement.class);
                 if (!element.isJsonObject()) {
@@ -467,59 +475,95 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                 JsonArray hitsArray = hitsObject.getAsJsonArray("hits");
                 long totalHitsValue = hitsObject.getAsJsonObject("total").get("value").getAsLong();
                 float maxScore = hitsObject.get("max_score").getAsFloat();
-                TotalHits totalHits = new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO);
-
-                QuerySearchResult queryResult = new QuerySearchResult();
 
                 List<SearchHit> searchHitsList = new ArrayList<>();
 
-                ScoreDoc[] scoreDocs = new ScoreDoc[searchHitsList.size()];
-                SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
-                SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
-                TopDocs topDocs = new TopDocs(new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO), scoreDocs);
+                ScoreDoc[] scoreDocs = new ScoreDoc[(int) totalHitsValue];
 
                 int i = 0;
                 for (JsonElement hitElement : hitsArray) {
                     JsonObject hitObj = hitElement.getAsJsonObject();
-                    JsonObject sourceObj = hitObj.getAsJsonObject("_source");
 
+                    // Extract meta fields
                     String id = hitObj.get("_id").getAsString();
-                    int docId = Integer.parseInt(id); // Ensure this ID parsing is what you intend, or handle exceptions
-
-                    Map<String, DocumentField> documentFields = new HashMap<>();
+                    int docId = Integer.parseInt(id);
+                    String scoreString = hitObj.get("_score").getAsString();
+                    float score = Float.parseFloat(scoreString);
                     Map<String, DocumentField> metaFields = new HashMap<>();
+                    hitObj.entrySet().stream()
+                            .filter(entry -> !entry.getKey().equals("_source"))
+                            .filter(entry -> !entry.getKey().equals("_id"))
+                            .filter(entry -> !entry.getKey().equals("_score"))
+                            .forEach(entry -> metaFields.put(entry.getKey(),
+                                    new DocumentField(entry.getKey(),
+                                            Collections.singletonList(entry.getValue().toString()))));
 
-                    for (Map.Entry<String, JsonElement> entry : sourceObj.entrySet()) {
-                        documentFields.put(entry.getKey(),
-                                new DocumentField(entry.getKey(),
-                                        Collections.singletonList(entry.getValue().getAsString())));
+                    // Extract source field
+                    JsonElement sourceElement = hitObj.get("_source");
+                    BytesReference source = null;
+                    if (sourceElement != null && !sourceElement.isJsonNull()) {
+                        String sourceString = sourceElement.toString();
+                        source = new BytesArray(sourceString);
                     }
 
-                    for (Map.Entry<String, JsonElement> entry : hitObj.entrySet()) {
-                        if (!entry.getKey().equals("_source")) {
-                            metaFields.put(entry.getKey(),
-                                    new DocumentField(entry.getKey(),
-                                            Collections.singletonList(entry.getValue().toString())));
+                    // Extract document fields
+                    Map<String, DocumentField> documentFields = new HashMap<>();
+                    if (source != null) {
+                        Map<String, Object> sourceMap = XContentHelper.convertToMap(source, true, XContentType.JSON)
+                                .v2();
+                        for (Map.Entry<String, Object> entry : sourceMap.entrySet()) {
+                            documentFields.put(entry.getKey(), new DocumentField(entry.getKey(),
+                                    Collections.singletonList(entry.getValue().toString())));
                         }
                     }
 
-                    if (searchHitsList.size() != 0) {
-                        SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
-                        searchHitsList.add(searchHit);
-                        scoreDocs[i] = new ScoreDoc(docId, searchHit.getScore());
-                    }
+                    SearchHit searchHit = new SearchHit(docId, id, documentFields, metaFields);
+                    searchHit.sourceRef(source);
+                    searchHitsList.add(searchHit);
+                    scoreDocs[i] = new ScoreDoc(docId, score);
                     i++;
                 }
 
+                // TODO: run string builder conditional on whether DEBUG or TRACE is set
+                StringBuilder logMessage = new StringBuilder();
+                logMessage.append("**********Hits from Infino are:\n");
+
+                for (SearchHit hit : searchHitsList) {
+                    logMessage.append("Hit ID: ").append(hit.getId()).append(", ");
+                    logMessage.append("Doc ID: ").append(hit.docId()).append(", ");
+                    logMessage.append("Fields: ").append(hit.getFields().toString()).append("\n");
+                }
+
+                // Log the detailed hits information
+                logger.debug(logMessage.toString());
+
+                // Build Query result
+
+                QuerySearchResult queryResult = new QuerySearchResult();
+                queryResult.setShardIndex(0);
+                queryResult.from(0);
+                queryResult.size((int) totalHitsValue);
+
+                TotalHits totalHits = new TotalHits(totalHitsValue, TotalHits.Relation.EQUAL_TO);
+                TopDocs topDocs = new TopDocs(totalHits, scoreDocs);
                 TopDocsAndMaxScore topDocsAndMaxScore = new TopDocsAndMaxScore(topDocs, maxScore);
-                queryResult.topDocs(topDocsAndMaxScore, null); // Assuming no sortValueFormats
-                queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
+                queryResult.topDocs(topDocsAndMaxScore, new DocValueFormat[] { DocValueFormat.RAW });
 
                 ShardSearchContextId contextId = new ShardSearchContextId("contextIdString", 1L);
-                SearchShardTarget shardTarget = new SearchShardTarget("nodeId", new ShardId(indexName, "indexUuid", 1),
-                        "clusterAlias", OriginalIndices.NONE);
+                SearchShardTarget shardTarget = new SearchShardTarget(
+                        "nodeId",
+                        request.shardId(),
+                        request.getClusterAlias(),
+                        new OriginalIndices(request.indices(), IndicesOptions.LENIENT_EXPAND_OPEN));
+                queryResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
+                queryResult.setSearchShardTarget(shardTarget);
 
+                // Build Fetch result
+
+                SearchHit[] searchHitsArray = searchHitsList.toArray(new SearchHit[0]);
+                SearchHits searchHits = new SearchHits(searchHitsArray, totalHits, maxScore);
                 FetchSearchResult fetchSearchResult = new FetchSearchResult(contextId, shardTarget);
+                fetchSearchResult.setShardSearchRequest((ShardSearchRequest) transportRequest);
                 fetchSearchResult.hits(searchHits);
 
                 // Create QueryFetchSearchResult with both query and fetch results
@@ -527,14 +571,58 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                         fetchSearchResult);
                 queryFetchSearchResult.setSearchShardTarget(shardTarget);
 
-                logger.debug("Response to Search Request is " + queryFetchSearchResult);
+                // TODO: run string builder conditional on whether DEBUG or TRACE is set
+
+                // Create a StringBuilder for the debug message
+                StringBuilder sb = new StringBuilder("--------------Response to Search Request is:\n");
+
+                // Append details from QueryFetchSearchResult
+                if (queryFetchSearchResult != null) {
+                    // QueryResult details
+                    if (queryFetchSearchResult.queryResult() != null) {
+                        QuerySearchResult qResult = queryFetchSearchResult.queryResult();
+                        sb.append("QueryResult: maxScore=").append(qResult.getMaxScore())
+                                .append(", totalHits=").append(qResult.getTotalHits().value)
+                                .append(", topDocs=").append(qResult.topDocs())
+                                .append("\n");
+                    }
+
+                    // FetchResult details
+                    if (queryFetchSearchResult.fetchResult() != null) {
+                        FetchSearchResult fResult = queryFetchSearchResult.fetchResult();
+                        sb.append("FetchResult: contextId=").append(fResult.getContextId())
+                                .append("\n");
+                    }
+
+                    // ShardTarget details
+                    if (queryFetchSearchResult.getSearchShardTarget() != null) {
+                        SearchShardTarget target = queryFetchSearchResult.getSearchShardTarget();
+                        sb.append("ShardTarget: nodeId=").append(target.getNodeId())
+                                .append(", index=").append(target.getIndex())
+                                .append(", shardId=").append(target.getShardId())
+                                .append("\n");
+                    }
+
+                    // Include hits details
+                    SearchHits resultHits = queryFetchSearchResult.fetchResult().hits();
+                    sb.append("Hits: [");
+                    for (SearchHit hit : resultHits.getHits()) {
+                        sb.append("\n  Hit: id=").append(hit.getId())
+                                .append(", index=").append(hit.getIndex())
+                                .append(", score=").append(hit.getScore())
+                                .append(", _source=").append(hit.getFields().toString()).append("\n");
+
+                    }
+                    sb.append("\n]");
+                }
+
+                logger.debug(sb.toString());
 
                 listener.onResponse(queryFetchSearchResult);
             } else if (operation == InfinoOperation.BULK_DOCUMENTS) {
                 Gson bulkGson = new GsonBuilder().create();
                 JsonObject rootObj = bulkGson.fromJson(responseBody, JsonObject.class);
 
-                long took = rootObj.has("took") ? rootObj.get("took").getAsLong() : 0;
                 JsonArray itemsArray = rootObj.getAsJsonArray("items");
 
                 List<BulkItemResponse> bulkItemResponses = new ArrayList<>();
@@ -593,6 +681,20 @@ public class InfinoTransportInterceptor implements TransportInterceptor {
                 BulkItemResponse[] responsesArray = bulkItemResponses.toArray(new BulkItemResponse[0]);
                 BulkShardResponse bulkShardResponse = new BulkShardResponse(new ShardId(indexName, "_na_", 1),
                         responsesArray);
+
+                // TODO: run string builder conditional on whether DEBUG or TRACE is set
+                StringBuilder sb = new StringBuilder();
+                sb.append("--------------Response to Bulk Request is:");
+                for (BulkItemResponse item : responsesArray) {
+                    sb.append("\nItemResponse: {");
+                    sb.append("Index=").append(item.getIndex());
+                    sb.append(", Type=").append(item.getOpType());
+                    sb.append(", Id=").append(item.getId());
+                    sb.append(", Status=").append(item.status());
+                    sb.append("}");
+                }
+
+                logger.debug(sb.toString());
 
                 listener.onResponse(bulkShardResponse);
             }

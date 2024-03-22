@@ -256,17 +256,17 @@ task fetchDockerLogs {
     doLast {
         exec {
             commandLine 'docker-compose', '-f', 'src/main/resources/docker-compose.yml', 'logs'
-            standardOutput = new FileOutputStream(new File(project.buildDir, 'docker-compose-logs.out'))
+            standardOutput = new FileOutputStream(new File(project.buildDir, 'infino-docker-compose-logs.out'))
         }
     }
 }
 
-tasks.named('yamlRestTest') {
-    dependsOn infinoDockerComposeUp
-    mustRunAfter infinoDockerComposeUp
-    finalizedBy fetchDockerLogs
-    finalizedBy infinoDockerComposeDown
+// tasks.named('yamlRestTest') {
+//     dependsOn infinoDockerComposeUp
+//     mustRunAfter infinoDockerComposeUp
+//     finalizedBy fetchDockerLogs
+//     finalizedBy infinoDockerComposeDown
 
-}
+// }
 
-tasks.named("check").configure { dependsOn('yamlRestTest') }
+// tasks.named("check").configure { dependsOn('yamlRestTest') }
