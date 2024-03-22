@@ -533,12 +533,12 @@ impl Segment {
 
     matching_document_ids
   }
+
   /// Retrieve document IDs with regular expression term match.
   ///
   /// # Arguments
   ///
   /// * `regexp_term` - A regular expression term to match.
-  /// * `field` - The field to search within.
   /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
 
   pub async fn get_doc_ids_with_regexp_term(
@@ -573,6 +573,7 @@ impl Segment {
   }
 
   /// Converts a regular expression pattern into a prefix suitable for prefix matching.
+  /// TODO: This method needs to be more nuanced to handle OR (|), Negations (~), and complex regex operators
   fn regexp_to_prefix(&self, regexp: &str) -> String {
     let mut prefix = String::new();
     let mut is_escaping = false;
@@ -587,7 +588,7 @@ impl Segment {
             is_escaping = true;
           }
         }
-        '*' | '?' | '+' | '[' | ']' => {
+        '*' | '?' | '+' | '[' | ']' | '.' | '|' | '$' => {
           if !is_escaping {
             break;
           }
@@ -603,6 +604,68 @@ impl Segment {
     }
 
     prefix
+  }
+
+  /// Retrieve document IDs with wildcard expression term match.
+  ///
+  /// # Arguments
+  ///
+  /// * `wildcard_term` - A wildcard expression term to match.
+  /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
+
+  pub async fn get_doc_ids_with_wildcard_term(
+    &self,
+    wildcard_term: &str,
+    case_insensitive: bool,
+  ) -> Result<Vec<u32>, QueryError> {
+    // Convert wildcard term to regex pattern
+    let regex_pattern = self.wildcard_to_regex(wildcard_term);
+
+    // Use the existing method for regex to get document IDs
+    self
+      .get_doc_ids_with_regexp_term(&regex_pattern, case_insensitive)
+      .await
+  }
+
+  /// Converts a wildcard query pattern into a regex pattern.
+  fn wildcard_to_regex(&self, wildcard: &str) -> String {
+    let mut regex_pattern = String::new();
+    let mut is_escaping = false;
+
+    for c in wildcard.chars() {
+      match c {
+        '\\' => {
+          if is_escaping {
+            regex_pattern.push(c);
+            is_escaping = false;
+          } else {
+            is_escaping = true;
+          }
+        }
+        '*' => {
+          if !is_escaping {
+            regex_pattern.push_str(".*");
+          } else {
+            regex_pattern.push(c);
+          }
+          is_escaping = false;
+        }
+        '?' => {
+          if !is_escaping {
+            regex_pattern.push('.');
+          } else {
+            regex_pattern.push(c);
+          }
+          is_escaping = false;
+        }
+        _ => {
+          regex_pattern.push(c);
+          is_escaping = false;
+        }
+      }
+    }
+
+    regex_pattern
   }
 
   /// Retrieve document IDs with prefix phrase match.

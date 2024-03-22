@@ -126,6 +126,9 @@ impl Segment {
       Rule::regexp_query => {
         results = self.process_regexp_query(node, timeout).await?;
       }
+      Rule::wildcard_query => {
+        results = self.process_wildcard_query(node, timeout).await?;
+      }
       _ => {
         return Err(QueryError::UnsupportedQuery(format!(
           "Unsupported rule: {:?}",
@@ -669,6 +672,70 @@ impl Segment {
       )),
       (_, None) => Err(QueryError::UnsupportedQuery(
         "Regexp query string is missing".to_string(),
+      )),
+    }
+  }
+
+  /// Wildcard Query Processor: https://opensearch.org/docs/latest/query-dsl/term/wildcard/
+  async fn process_wildcard_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+    timeout: u64,
+  ) -> Result<QueryDSLDocIds, QueryError> {
+    debug!("QueryDSL: Processing wildcard query {:?}", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
+
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut fieldname: Option<&str> = None;
+    let mut wildcard_text: Option<&str> = None;
+    let mut case_insensitive = false;
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::wildcard_string | Rule::value => self.set_query_text(&node, &mut wildcard_text),
+        Rule::case_insensitive => self.set_case_insensitive(&node, &mut case_insensitive, false),
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    match (fieldname, wildcard_text) {
+      (Some(field), Some(wildcard_text_str)) => {
+        let wildcard_field_term =
+          analyze_regex_query_text(wildcard_text_str.trim_matches('"'), field, case_insensitive);
+
+        match self
+          .get_doc_ids_with_wildcard_term(&wildcard_field_term, case_insensitive)
+          .await
+        {
+          Ok(matching_document_ids) => {
+            let mut results = QueryDSLDocIds::new();
+            let execution_time = check_query_time(timeout, query_start_time)?;
+            results.set_execution_time(execution_time);
+            results.set_ids(matching_document_ids);
+
+            debug!(
+              "QueryDSL: Returning results from wildcard query {:?}",
+              results
+            );
+
+            Ok(results)
+          }
+          Err(err) => Err(err),
+        }
+      }
+      (None, _) => Err(QueryError::UnsupportedQuery(
+        "Field name is missing".to_string(),
+      )),
+      (_, None) => Err(QueryError::UnsupportedQuery(
+        "Wildcard query string is missing".to_string(),
       )),
     }
   }
@@ -1257,6 +1324,50 @@ mod tests {
                 .unwrap()
                 .is_match(value)),
               "Each log should have 'key' field matching the regexp pattern."
+            );
+          }
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_wildcard_query() {
+    let segment = create_mock_segment().await;
+
+    let query_dsl_query = r#"{
+        "query": {
+            "wildcard": {
+                "key": {
+                    "value": "l*g"
+                }
+            }
+        }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert_eq!(
+            results.get_messages().len(),
+            5,
+            "There should be exactly 5 logs matching the wildcard query."
+          );
+
+          for log in results.get_messages().iter() {
+            let key_field_value = log.get_message().get_fields().get("key");
+
+            assert!(
+              key_field_value.map_or(false, |value| regex::Regex::new(r"l.*g")
+                .unwrap()
+                .is_match(value)),
+              "Each log should have 'key' field matching the wildcard pattern."
             );
           }
         }

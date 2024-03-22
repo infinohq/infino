@@ -53,6 +53,10 @@ impl InvertedMap {
     Ok(())
   }
 
+  pub fn len(&self) -> usize {
+    self.inverted_map.len()
+  }
+
   #[cfg(test)]
   pub fn insert_unchecked(&self, term_id: u32, postings_list: PostingsList) {
     self

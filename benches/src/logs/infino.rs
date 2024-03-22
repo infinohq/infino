@@ -45,12 +45,12 @@ impl InfinoEngine {
           break;
         }
         if let Ok(message) = line {
-          self.coredb.append_log_message(
+          let _ = self.coredb.append_log_message(
             "default",
             Utc::now().timestamp_millis() as u64,
             &HashMap::new(),
             message.as_str(),
-          );
+          ).await;
         }
       }
 

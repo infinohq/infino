@@ -105,8 +105,9 @@ regexp_terms  = { (case_insensitive | rewrite | flags | max_determinized_states)
 
 // Wildcard Queries: https://opensearch.org/docs/latest/query-dsl/term/wildcard/
 wildcard_query  = { start_brace ~ quote ~ "wildcard" ~ quote ~ colon ~ wildcard_search ~ end_brace }
-wildcard_search = { start_brace ~ fieldname ~ colon ~ start_brace ~ (wildcard ~ (comma ~ wildcard)*)? ~ end_brace ~ end_brace }
-wildcard        = { (wildcard_value | boost | case_insensitive) }
+wildcard_search = { start_brace ~ fieldname ~ colon ~ (wildcard_string | wildcard_array) ~ end_brace }
+wildcard_array  = { start_brace ~ value ~ (comma ~ wildcard_terms)* ~ end_brace }
+wildcard_terms  = { (boost | case_insensitive) }
 
 // Fuzzy Queries: https://opensearch.org/docs/latest/query-dsl/term/fuzzy/
 fuzzy_query  = { start_brace ~ quote ~ "fuzzy" ~ quote ~ colon ~ fuzzy_search ~ end_brace }
@@ -521,6 +522,7 @@ wildcard_before              = { quote ~ "before" ~ quote ~ colon ~ string }
 wildcard_not_after           = { quote ~ "not_after" ~ quote ~ colon ~ string }
 wildcard_not_before          = { quote ~ "not_before" ~ quote ~ colon ~ string }
 wildcard_not_within          = { quote ~ "not_within" ~ quote ~ colon ~ string }
+wildcard_string              = { string }
 wildcard_value               = { quote ~ "value" ~ quote ~ colon ~ string }
 wildcard_within              = { quote ~ "within" ~ quote ~ colon ~ string }
 within                       = { quote ~ "within" ~ quote ~ colon ~ integer }

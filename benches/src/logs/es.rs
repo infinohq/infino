@@ -13,7 +13,7 @@ use elasticsearch::{
   http::headers::HeaderMap,
   http::transport::{SingleNodeConnectionPool, TransportBuilder},
   http::Method,
-  indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts},
+  indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts, IndicesFlushParts},
   params::Refresh,
   BulkParts, Elasticsearch, Error, IndexParts,
 };
@@ -22,64 +22,75 @@ use url::Url;
 
 use crate::utils::io;
 
+const FLUSH_LIMIT_BYTES: u64 = 524288000; // 500MB
+
 static INDEX_NAME: &str = "perftest";
 
 pub struct ElasticsearchEngine {
   client: Elasticsearch,
+  with_infino_plugin: bool,
 }
 
 impl ElasticsearchEngine {
-  pub async fn new() -> ElasticsearchEngine {
+  pub async fn new(with_infino_plugin: bool) -> ElasticsearchEngine {
     let client = ElasticsearchEngine::create_client().unwrap();
 
-    let exists = client
-      .indices()
-      .exists(IndicesExistsParts::Index(&[INDEX_NAME]))
-      .send()
-      .await
-      .unwrap();
-
-    if exists.status_code().is_success() {
-      println!("Index {} already exists. Now deleting it.", INDEX_NAME);
-      let delete = client
+    if with_infino_plugin{
+      // Running against Elastic/OpenSeach with Infino plugin.
+      // As a temporary work around we need to create the Index
+      // by calling the Infino API endpoint and not via the plugin.
+      let reqwest_client = reqwest::Client::new();
+      let url = format!("http://localhost:3000/{}", INDEX_NAME);
+      let response = reqwest_client.put(&url).send().await.unwrap();
+      if !response.status().is_success() {
+        panic!("Error while creating index in Infino{:?}", response);
+      }
+    } else {
+      let exists = client
         .indices()
-        .delete(IndicesDeleteParts::Index(&[INDEX_NAME]))
+        .exists(IndicesExistsParts::Index(&[INDEX_NAME]))
         .send()
         .await
         .unwrap();
-
-      if !delete.status_code().is_success() {
-        panic!("Problem deleting index: {}", INDEX_NAME);
+      if exists.status_code().is_success() {
+        println!("Index {} already exists. Now deleting it.", INDEX_NAME);
+        let delete = client
+          .indices()
+          .delete(IndicesDeleteParts::Index(&[INDEX_NAME]))
+          .send()
+          .await
+          .unwrap();
+        if !delete.status_code().is_success() {
+          panic!("Problem deleting index: {}", INDEX_NAME);
+        }
+      }
+      let response = client
+        .indices()
+        .create(IndicesCreateParts::Index(INDEX_NAME))
+        .body(json!(
+            {
+              "mappings": {
+                "properties": {
+                  "message": {
+                    "type": "text"
+                  }
+                }
+              },
+              "settings": {
+                "index.number_of_shards": 1,
+                "index.number_of_replicas": 0
+              }
+            }
+        ))
+        .send()
+        .await
+        .unwrap();
+      if !response.status_code().is_success() {
+        println!("Error while creating index {:?}", response);
       }
     }
 
-    let response = client
-      .indices()
-      .create(IndicesCreateParts::Index(INDEX_NAME))
-      .body(json!(
-          {
-            "mappings": {
-              "properties": {
-                "message": {
-                  "type": "text"
-                }
-              }
-            },
-            "settings": {
-              "index.number_of_shards": 1,
-              "index.number_of_replicas": 0
-            }
-          }
-      ))
-      .send()
-      .await
-      .unwrap();
-
-    if !response.status_code().is_success() {
-      println!("Error while creating index {:?}", response);
-    }
-
-    ElasticsearchEngine { client }
+    ElasticsearchEngine { client , with_infino_plugin }
   }
 
   /// Indexes input data and returns the time required for insertion as microseconds.
@@ -88,6 +99,7 @@ impl ElasticsearchEngine {
     let num_docs_per_batch = 100;
     let mut num_docs_in_this_batch = 0;
     let mut logs_batch = Vec::new();
+    let mut bytes_sent_since_flush: u64 = 0;
     let now = Instant::now();
 
     if let Ok(lines) = io::read_lines(input_data_path) {
@@ -114,14 +126,13 @@ impl ElasticsearchEngine {
           if num_docs_in_this_batch == num_docs_per_batch {
             let mut body: Vec<JsonBody<_>> = Vec::with_capacity(num_docs_per_batch);
             for log in &logs_batch {
-              body.push(json!({"index": {"_id": log.get("id").unwrap()}}).into());
-              body.push(
-                json!({
+              let log_json = json!({
                     "date": log.get("date").unwrap(),
                     "message": log.get("message").unwrap(),
-                })
-                .into(),
-              );
+                });
+              bytes_sent_since_flush += log_json.to_string().len() as u64;
+              body.push(json!({"index": {"_id": log.get("id").unwrap()}}).into());
+              body.push(JsonBody::from(log_json));
             }
             #[allow(unused)]
             let insert = self
@@ -134,6 +145,21 @@ impl ElasticsearchEngine {
             //println!("#{} {:?}", num_docs, insert);
             num_docs_in_this_batch = 0;
             logs_batch.clear();
+
+            // Check if we need to flush
+            if !self.with_infino_plugin && bytes_sent_since_flush > FLUSH_LIMIT_BYTES {
+              #[allow(unused)]
+              let flush = self
+                .client
+                .indices()
+                .flush(IndicesFlushParts::Index(&[INDEX_NAME]))
+                .send()
+                .await
+                .unwrap();
+              println!("Flushed index {} after writing {} bytes", INDEX_NAME, bytes_sent_since_flush);
+              bytes_sent_since_flush = 0;
+            }
+
           } //end if num_docs_in_this_batch == num_docs_per_batch
         }
       }
