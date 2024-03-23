@@ -567,21 +567,12 @@ async fn append_metric(
   Ok(())
 }
 
-// TODO: This feels like a lot of string processing on each bulk request. Simplify this.
+#[allow(clippy::single_char_pattern)]
 fn process_bulk_json_body(json_body: &str) -> Result<Vec<Value>, (StatusCode, String)> {
-  // Preprocess the input to ensure it's in a JSON array format
-  let json_array_string = json_body
-    .trim() // Trim leading/trailing whitespace
-    .replace("\r\n", "\n") // Replace \r\n with \n
-    .split('\n') // Split by newline character
-    .filter(|s| !s.trim().is_empty()) // Filter out empty lines
-    .map(|s| s.trim().to_string()) // Trim whitespace from each line
-    .collect::<Vec<String>>()
-    .join(","); // Join the objects with commas
+  // Preprocess the bulk request input to ensure it's in a JSON array format
+  let json_array_string = format!("[{}]", json_body.replace("\r\n", ",").replace('\n', ","));
 
-  let json_array_string = format!("[{}]", json_array_string); // Wrap the string in square brackets
-
-  // Parse the preprocessed string as a JSON array
+  // Parse the preprocessed bulk request as a JSON array
   match serde_json::from_str::<Vec<Value>>(&json_array_string) {
     Ok(json_array) => {
       debug!(
@@ -594,7 +585,7 @@ fn process_bulk_json_body(json_body: &str) -> Result<Vec<Value>, (StatusCode, St
       error!("Failed to parse JSON array: {}", e);
       Err((
         StatusCode::BAD_REQUEST,
-        format!("Failed to parse JSON array from input: {}", e),
+        "Failed to parse JSON array from input.".to_string(),
       ))
     }
   }

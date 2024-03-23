@@ -261,12 +261,12 @@ task fetchDockerLogs {
     }
 }
 
-// tasks.named('yamlRestTest') {
-//     dependsOn infinoDockerComposeUp
-//     mustRunAfter infinoDockerComposeUp
-//     finalizedBy fetchDockerLogs
-//     finalizedBy infinoDockerComposeDown
+tasks.named('yamlRestTest') {
+    dependsOn infinoDockerComposeUp
+    mustRunAfter infinoDockerComposeUp
+    finalizedBy fetchDockerLogs
+    finalizedBy infinoDockerComposeDown
 
-// }
+}
 
-// tasks.named("check").configure { dependsOn('yamlRestTest') }
+tasks.named("check").configure { dependsOn('yamlRestTest') }
