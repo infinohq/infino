@@ -1,6 +1,8 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
+use std::num::ParseIntError;
+
 use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -148,6 +150,11 @@ impl From<serde_json::Error> for CoreDBError {
   }
 }
 
+impl From<ParseIntError> for CoreDBError {
+  fn from(error: ParseIntError) -> Self {
+    CoreDBError::IOError(error.to_string())
+  }
+}
 impl From<QueryError> for CoreDBError {
   fn from(error: QueryError) -> Self {
     CoreDBError::QueryError(error)

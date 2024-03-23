@@ -209,7 +209,7 @@ impl Index {
     };
 
     // Commit the empty index so that the index directory will be created.
-    index.commit(true).await.expect("Could not commit index");
+    index.commit(false).await.expect("Could not commit index");
 
     Ok(index)
   }
@@ -323,6 +323,25 @@ impl Index {
       });
 
     (segment_number, segment)
+  }
+
+  /// Get segment summary for the current segment.
+  fn get_current_segment_summary_ref(&self) -> (u32, Ref<'_, u32, SegmentSummary>) {
+    let segment_number = self.metadata.get_current_segment_number();
+    let segment_summary = self
+      .all_segments_summaries
+      .get(&segment_number)
+      .unwrap_or_else(|| {
+        // While committing, we write metadata last - so current segment should always be
+        // in self.all_segment_summaries. However, using a panic below in case there is an
+        // unexpected scenario where it isn't.
+        panic!(
+          "Could not get segment corresponding to segment number {} in memory",
+          segment_number
+        )
+      });
+
+    (segment_number, segment_summary)
   }
 
   /// Check whether the current segment is full, and if it is, create a new segment (which becomes the new
@@ -738,7 +757,8 @@ impl Index {
       .write(&self.all_segments_summaries, all_segments_file.as_str())
       .await?;
 
-    // Write the metadata to disk.
+    // Write the metadata to disk. Note that we write this last - which confirms that the metadata.current_segment_number
+    // will always have a summary corresponding to it in all_segments_summaries on disk.
     let metadata_path = get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
     self
       .storage
@@ -758,6 +778,104 @@ impl Index {
     let segment = Segment::refresh(&self.storage, &segment_dir_path).await?;
 
     Ok(segment)
+  }
+
+  /// The WAL files are in self.wal_dir_path, with names such as 3.wal, 4.wal, etc.
+  /// Return a sorted list of these file names along with the segment numbers.
+  async fn get_wal_files(&self) -> Result<Vec<(u32, String)>, CoreDBError> {
+    // Get all the files in the wal directory.
+    let entries = std::fs::read_dir(&self.wal_dir_path)?;
+
+    // Filter out files that end with ".wal" and extract their file names.
+    let mut wal_files: Vec<(u32, String)> = entries
+      .filter_map(|entry| {
+        if let Ok(entry) = entry {
+          if let Some(file_name) = entry.file_name().to_str() {
+            if file_name.ends_with(".wal") {
+              let segment_number = file_name
+                .parse::<u32>()
+                .unwrap_or_else(|err| panic!("Invalid wal file: {}, error: {}", file_name, err));
+              return Some((segment_number, file_name.to_owned()));
+            }
+          }
+        }
+        None
+      })
+      .collect();
+
+    // Sort the file names by segment number.
+    wal_files.sort_by_key(|&(segment_number, _)| segment_number);
+
+    Ok(wal_files)
+  }
+
+  /// Recover any missing segments using WAL.
+  async fn recover(&self) -> Result<(), CoreDBError> {
+    // Get all the WAL files.
+    let wal_files = self.get_wal_files().await?;
+
+    // If no WAL files are found, it means we had a clean shutdown earlier. No further
+    // recovery needed.
+    if wal_files.is_empty() {
+      info!("No write ahead log files found - nothing to recover.");
+      return Ok(());
+    }
+
+    // Get the segment summaries of the index so far.
+    let all_segments_summaries = self.get_all_segments_summaries().await?;
+    let (current_segment_number, current_segment_summary) = self.get_current_segment_summary_ref();
+
+    for (segment_number, wal_file_name) in wal_files {
+      let segment_to_use;
+
+      // Read segment from WAL.
+      let wal_file_path = get_joined_path(&self.wal_dir_path, &wal_file_name);
+      let wal_segment = Segment::new_from_wal(&wal_file_path)?;
+
+      // Read segment from disk.
+      let segment_dir_path = get_joined_path(&self.index_dir_path, &segment_number.to_string());
+      let disk_segment = Segment::refresh(&self.storage, &segment_dir_path).await;
+
+      match disk_segment {
+        Ok(disk_segment) => {
+          if wal_segment.quick_equals(&disk_segment) {
+            // Both the segments are the same. Use the segment from disk - to avoid unnecessory serialization.
+            info!(
+              "Segment number {}. Segment from WAL and from disk are the same. Using the segment from disk.",
+              segment_number
+            );
+            segment_to_use = disk_segment;
+          } else {
+            // Both the segments are not the same. Prefer the one from WAL, as it would be more recent.
+            info!(
+              "Segment number {}. Segment from WAL and from disk are *not* same. Using the segment from WAL.",
+              segment_number
+            );
+            wal_segment.commit(&self.storage, &segment_dir_path).await?;
+            segment_to_use = wal_segment;
+          }
+        }
+        Err(_) => {
+          // No segment found on disk. Use the one from WAL.
+          info!(
+            "Segment number {}. Segment found in WAL but not on disk. Using the segment from WAL.",
+            segment_number
+          );
+          wal_segment.commit(&self.storage, &segment_dir_path).await?;
+          segment_to_use = wal_segment;
+        }
+      }
+
+      // Create the segment summary and insert in all_segment_summaries.
+      let segment_summary = SegmentSummary::new(segment_number, &segment_to_use);
+      {
+        self
+          .all_segments_summaries
+          .insert(segment_number, segment_summary);
+      }
+    }
+
+    Ok(())
   }
 
   /// Read the index from the given index_dir_path.
@@ -802,6 +920,8 @@ impl Index {
       // No segment summary present - so this may not be an index directory. Return an error.
       return Err(CoreDBError::NotAnIndexDirectory(index_dir_path.to_string()));
     }
+
+    // Recover any segments that have WAL, but no stored segment in the Storage.
 
     // Convert all_segments_summaries into a vector, and sort it based on the end times in reverse chronological order.
     let mut all_segments_summaries_vec: Vec<_> = all_segments_summaries.iter().collect();
@@ -2504,5 +2624,83 @@ mod tests {
       .expect("Error in search_logs");
 
     assert_eq!(search_result.get_messages().len(), 3);
+  }
+
+  #[tokio::test]
+  async fn test_recover() {
+    let storage_type = StorageType::Local;
+
+    // Create a new index with a low threshold for the segment size.
+    let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) = create_index_with_thresholds(
+      "test_multiple_segments_logs",
+      &storage_type,
+      1024 * 1024,
+      1000, // Create a new segment after every 1000 messages.
+      10000,
+      10,
+    )
+    .await;
+
+    let message_prefix = "message";
+
+    // This would create a total of 6 segments.
+    // 5 segments of 1000 logs each, and 1 segment with 1 log message.
+    let expected_num_segments = 6;
+
+    // Append 5001 log messages, creating 6 segments.
+    for i in 0..5001 {
+      let message = format!("{} {}", message_prefix, i);
+      index
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        )
+        .await
+        .expect("Could not append log message");
+    }
+    let wal_files = index.get_wal_files().await.unwrap();
+    assert_eq!(wal_files.len(), expected_num_segments);
+
+    // Now commit the index. This will commit all segments except the current one, as well
+    // as delete the wal files for all segments except the current one.
+    index.commit(false).await.unwrap();
+    let wal_files = index.get_wal_files().await.unwrap();
+    assert_eq!(wal_files.len(), 1);
+
+    // Write a a couple thousand more log messages. This will create 2 more segments, making
+    // the total number of WAL files to be 3.
+    for i in 0..2000 {
+      let message = format!("{} {}", message_prefix, i);
+      index
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        )
+        .await
+        .expect("Could not append log message");
+    }
+    let wal_files = index.get_wal_files().await.unwrap();
+    assert_eq!(wal_files.len(), 3);
+
+    // Now let us assume that there was an ungraceful shutdown. The index will be left in this state,
+    // with index.commit(true) never called to flush the
+
+    // Now create a new index from the same index and wal directory - simulating the service came back up
+    // again and recovered. The new (recovered) index should have 5001+2000 = 7001 log messages.
+    let recovered_index = Index::refresh(
+      &StorageType::Local,
+      &index_dir_path,
+      &wal_dir_path,
+      2 * 1024 * 1024,
+    )
+    .await
+    .unwrap();
+
+    // The recovered index should have 8 segments. 7 segments should have 1000 messages each,
+    // while the last one should have 1 message.
+    assert_eq!(recovered_index.metadata.get_segment_count(), 8);
+    assert_eq!(recovered_index.get_current_segment_ref().0, 8);
   }
 }
