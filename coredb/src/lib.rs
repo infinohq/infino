@@ -460,7 +460,7 @@ impl CoreDB {
       let merge_policy = self
         .get_merge_policy()
         .ok_or(CoreDBError::InvalidPolicy())?;
-      let all_segments_summaries = index_entry.get_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.read_all_segments_summaries().await?;
       // Get all the keys of the segments in memory
       let segments_in_memory = index_entry.get_memory_segments_numbers();
       // Apply the merge policy directly here based on the enum variant
@@ -486,7 +486,7 @@ impl CoreDB {
     for index_entry in self.get_index_map() {
       // TODO: this does not need to read all_segments_summaries from disk - can use the one already
       // in memory in Index::all_segments_summaries()
-      let all_segments_summaries = index_entry.value().get_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.value().read_all_segments_summaries().await?;
 
       let retention_policy = self
         .get_retention_policy()

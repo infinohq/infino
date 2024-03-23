@@ -648,8 +648,8 @@ impl Index {
     ))
   }
 
-  /// Get the summaries of the segments in this index.
-  pub async fn get_all_segments_summaries(
+  /// Read the summaries of the segments in this index from object store.
+  pub async fn read_all_segments_summaries(
     &self,
   ) -> Result<DashMap<u32, SegmentSummary>, CoreDBError> {
     info!(
@@ -676,6 +676,26 @@ impl Index {
     );
 
     Ok(all_segments_summaries)
+  }
+
+  /// Write all_segments_summaries and metadata to object store.
+  async fn write_summaries_and_metadata(&self) -> Result<(), CoreDBError> {
+    // Write the summaries to disk.
+    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
+    self
+      .storage
+      .write(&self.all_segments_summaries, all_segments_file.as_str())
+      .await?;
+
+    // Write the metadata to disk. Note that we write this last - which confirms that the metadata.current_segment_number
+    // will always have a summary corresponding to it in all_segments_summaries on disk.
+    let metadata_path = get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
+    self
+      .storage
+      .write(&self.metadata, metadata_path.as_str())
+      .await?;
+
+    Ok(())
   }
 
   /// Commit an index to disk. The flag is_shutdown indicates if the commit is being called as part of the shutdown
@@ -750,20 +770,8 @@ impl Index {
       self.remove_wal(current_segment_number).await?;
     }
 
-    // Write the summaries to disk.
-    let all_segments_file = get_joined_path(&self.index_dir_path, ALL_SEGMENTS_FILE_NAME);
-    self
-      .storage
-      .write(&self.all_segments_summaries, all_segments_file.as_str())
-      .await?;
-
-    // Write the metadata to disk. Note that we write this last - which confirms that the metadata.current_segment_number
-    // will always have a summary corresponding to it in all_segments_summaries on disk.
-    let metadata_path = get_joined_path(&self.index_dir_path, METADATA_FILE_NAME);
-    self
-      .storage
-      .write(&self.metadata, metadata_path.as_str())
-      .await?;
+    // Write self.all_segments_summaries and self.metadata
+    self.write_summaries_and_metadata().await?;
 
     Ok(())
   }
@@ -792,10 +800,12 @@ impl Index {
         if let Ok(entry) = entry {
           if let Some(file_name) = entry.file_name().to_str() {
             if file_name.ends_with(".wal") {
-              let segment_number = file_name
-                .parse::<u32>()
-                .unwrap_or_else(|err| panic!("Invalid wal file: {}, error: {}", file_name, err));
-              return Some((segment_number, file_name.to_owned()));
+              let segment_number_str = &file_name[..file_name.len() - 4]; // Remove ".wal"
+              if let Ok(segment_number) = segment_number_str.parse::<u32>() {
+                return Some((segment_number, file_name.to_owned()));
+              } else {
+                panic!("Invalid wal file: {}", file_name);
+              }
             }
           }
         }
@@ -809,7 +819,19 @@ impl Index {
     Ok(wal_files)
   }
 
+  // Get the maximum segment number allocated so far.
+  fn get_max_segment_number(&self) -> u32 {
+    self
+      .all_segments_summaries
+      .iter()
+      .map(|entry| *entry.key())
+      .max()
+      .unwrap_or(0)
+  }
+
   /// Recover any missing segments using WAL.
+  /// Note that this function should only called from refresh() when the server starts up, and is not intended to be
+  /// called from multiple threads.
   async fn recover(&self) -> Result<(), CoreDBError> {
     // Get all the WAL files.
     let wal_files = self.get_wal_files().await?;
@@ -822,8 +844,9 @@ impl Index {
     }
 
     // Get the segment summaries of the index so far.
-    let all_segments_summaries = self.get_all_segments_summaries().await?;
-    let (current_segment_number, current_segment_summary) = self.get_current_segment_summary_ref();
+    let (mut current_segment_number, current_segment_summary) =
+      self.get_current_segment_summary_ref();
+    let mut current_segment_end_time = current_segment_summary.get_end_time();
 
     for (segment_number, wal_file_name) in wal_files {
       let segment_to_use;
@@ -867,13 +890,44 @@ impl Index {
       }
 
       // Create the segment summary and insert in all_segment_summaries.
-      let segment_summary = SegmentSummary::new(segment_number, &segment_to_use);
+      let segment_to_use_summary = SegmentSummary::new(segment_number, &segment_to_use);
       {
         self
           .all_segments_summaries
-          .insert(segment_number, segment_summary);
+          .insert(segment_number, segment_to_use_summary);
+      }
+
+      // Update current segment number if:
+      // (a) segment_to_use is more recent - as indicated by its end time.
+      // (b) segment_to_use is exactly as old as current segment, but its segment number is greater.
+      //
+      // This presents an interesting scenario, in case the client due to a bug has pushed "future" events,
+      // to a segment say S1, in the past. In that case, we'll assume S1 to be the current segment after recovery.
+      // However, as newer appends come in, some of them will get appended to S1, and as its capacity is full, new
+      // segments get created correctly. So, there won't be a correctness issue.
+      // TODO: the scenario above needs to be tested.
+      let segment_to_use_end_time = segment_to_use.get_end_time();
+      if segment_to_use_end_time > current_segment_end_time
+        || (segment_to_use_end_time == current_segment_end_time
+          && segment_number > current_segment_number)
+      {
+        current_segment_number = segment_number;
+        current_segment_end_time = segment_to_use_end_time;
       }
     }
+
+    // Set the current segment number in the metadata.
+    self
+      .metadata
+      .set_current_segment_number(current_segment_number);
+
+    // Set the segment count, which is actually used for determining the number of the next segment.
+    // It should be set to max_segment_number + 1.
+    let max_segment_number = self.get_max_segment_number();
+    self.metadata.set_segment_count(max_segment_number + 1);
+
+    // Write the updated all_segments_summaries and metadata
+    self.write_summaries_and_metadata().await?;
 
     Ok(())
   }
@@ -914,7 +968,16 @@ impl Index {
       uncommitted_segment_numbers,
     };
 
-    let all_segments_summaries = index.get_all_segments_summaries().await?;
+    // Read all segments summaries.
+    let all_segments_summaries = index.read_all_segments_summaries().await?;
+    index.all_segments_summaries = all_segments_summaries;
+
+    // Recover the index from any partial failures in the past. This may create new segments from WAL in case
+    // the prior shutdown was from a crash, as well as may update metadata and all_segments_summaries.
+    index.recover().await?;
+
+    // Read all_segments_summaries again, as it may be changed by recover() above.
+    let all_segments_summaries = index.read_all_segments_summaries().await?;
 
     if all_segments_summaries.is_empty() {
       // No segment summary present - so this may not be an index directory. Return an error.
