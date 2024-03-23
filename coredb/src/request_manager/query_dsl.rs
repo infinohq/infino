@@ -752,7 +752,10 @@ impl Segment {
     root_node: &Pair<'_, Rule>,
     timeout: u64,
   ) -> Result<QueryDSLDocIds, QueryError> {
-    debug!("QueryDSL: Processing match phrase prefix query {:?}", root_node);
+    debug!(
+      "QueryDSL: Processing match phrase prefix query {:?}",
+      root_node
+    );
 
     let query_start_time = Utc::now().timestamp_millis() as u64;
 
