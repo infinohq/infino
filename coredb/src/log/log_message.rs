@@ -20,6 +20,9 @@ pub struct LogMessage {
 
   /// Any content that should be searchable without specifying a field name.
   text: String,
+
+  /// Indicates whether the log message has been deleted.
+  is_deleted: bool,
 }
 
 impl LogMessage {
@@ -29,6 +32,7 @@ impl LogMessage {
       time,
       fields: HashMap::new(),
       text: text.to_owned(),
+      is_deleted: false,
     }
   }
 
@@ -38,6 +42,7 @@ impl LogMessage {
       time,
       fields: fields.clone(),
       text: text.to_owned(),
+      is_deleted: false,
     }
   }
 
@@ -60,6 +65,14 @@ impl LogMessage {
   /// Get the message.
   pub fn get_text(&self) -> &str {
     &self.text
+  }
+
+  pub fn is_deleted(&self) -> bool {
+    self.is_deleted
+  }
+
+  pub fn set_deleted(&mut self) {
+    self.is_deleted = true;
   }
 
   /// Get the terms corresponding to this log message.

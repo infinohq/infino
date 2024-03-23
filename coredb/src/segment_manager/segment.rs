@@ -661,6 +661,18 @@ impl Segment {
     let wal_clone_lock = wal_clone.lock();
     wal_clone_lock.get_file_path()
   }
+
+  pub fn mark_log_message_as_deleted(&self, log_message_ids: &[u32]) -> u32 {
+    let mut deleted_count = 0;
+    for log_message_id in log_message_ids.iter() {
+      // get the log message mutably
+      if let Some(mut log_message) = self.forward_map.get_mut(log_message_id) {
+        log_message.set_deleted();
+        deleted_count += 1;
+      }
+    }
+    deleted_count
+  }
 }
 
 #[cfg(test)]

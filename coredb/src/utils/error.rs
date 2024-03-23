@@ -128,6 +128,9 @@ pub enum QueryError {
 
   #[error("Regexp Error: {0}")]
   RegexpError(String),
+
+  #[error("Unable to search and mark logs as deleted")]
+  SearchAndMarkLogsError,
 }
 
 impl From<object_store::Error> for CoreDBError {

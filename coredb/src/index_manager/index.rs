@@ -998,6 +998,35 @@ impl Index {
     let wal_file_name = &format!("{}.wal", segment_number);
     get_joined_path(wal_dir_path, wal_file_name)
   }
+
+  /// Mark logs as deleted for given query in the given time range and return count of logs marked as deleted.
+  pub async fn delete_logs_by_query(
+    &self,
+    ids: &[u32],
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<u32, CoreDBError> {
+    debug!(
+      "INDEX: ids {:?}, range_start_time {:?}, and range_end_time {:?}\n",
+      ids, range_start_time, range_end_time
+    );
+    // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
+    let segment_numbers = self
+      .get_overlapping_segments(range_start_time, range_end_time)
+      .await;
+
+    // Delete logs in each of the segments.
+    let mut deleted_count = 0;
+    for segment_number in segment_numbers {
+      let segment = self.memory_segments_map.get(&segment_number);
+      let deleted_results = match segment {
+        Some(segment) => segment.mark_log_message_as_deleted(ids),
+        None => 0,
+      };
+      deleted_count += deleted_results;
+    }
+    Ok(deleted_count)
+  }
 }
 
 #[cfg(test)]

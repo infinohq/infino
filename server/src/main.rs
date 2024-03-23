@@ -186,6 +186,10 @@ async fn app(
     // PUT and DELETE methods
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
+    .route(
+      "/:index_name/_delete_by_query",
+      delete(delete_logs_by_query),
+    )
     // ---
     // State that is passed to each request.
     .with_state(shared_state.clone())
@@ -805,6 +809,80 @@ async fn search_logs(
       let result_json =
         serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
       Ok(result_json)
+    }
+    Err(coredb_error) => {
+      match coredb_error {
+        CoreDBError::QueryError(ref search_logs_error) => {
+          // Handle the error and return an appropriate status code and error message.
+          match search_logs_error {
+            QueryError::JsonParseError(_) => {
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
+            }
+            QueryError::IndexNotFoundError(_) => {
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
+            }
+            QueryError::TimeOutError(_) => {
+              Err((StatusCode::INTERNAL_SERVER_ERROR, coredb_error.to_string()))
+            }
+            QueryError::NoQueryProvided => Err((StatusCode::BAD_REQUEST, coredb_error.to_string())),
+            _ => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+          }
+        }
+        _ => Err((
+          StatusCode::INTERNAL_SERVER_ERROR,
+          "Internal server error".to_string(),
+        )),
+      }
+    }
+  }
+}
+
+/// Delete logs by query in CoreDB.
+async fn delete_logs_by_query(
+  State(state): State<Arc<AppState>>,
+  Query(logs_query): Query<LogsQuery>,
+  Path(index_name): Path<String>,
+  json_body: String,
+) -> Result<String, (StatusCode, String)> {
+  debug!(
+    "Deleting logs with URL query: {:?}, JSON body: {:?}",
+    logs_query, json_body
+  );
+
+  let start_time = logs_query
+    .start_time
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or(0); // Default to 0 if None
+
+  let end_time = logs_query
+    .end_time
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or_else(|| Utc::now().timestamp_millis() as u64); // Default to current time if None
+
+  let results = state
+    .coredb
+    .delete_logs_by_query(
+      &index_name,
+      &logs_query.q.unwrap_or_default(),
+      &json_body,
+      start_time,
+      end_time,
+    )
+    .await;
+
+  match results {
+    Ok(log_messages) => {
+      // Return the number of deleted messages.
+      Ok(log_messages.to_string())
     }
     Err(coredb_error) => {
       match coredb_error {
