@@ -567,6 +567,30 @@ async fn append_metric(
   Ok(())
 }
 
+#[allow(clippy::single_char_pattern)]
+fn process_bulk_json_body(json_body: &str) -> Result<Vec<Value>, (StatusCode, String)> {
+  // Preprocess the bulk request input to ensure it's in a JSON array format
+  let json_array_string = format!("[{}]", json_body.replace("\r\n", ",").replace('\n', ","));
+
+  // Parse the preprocessed bulk request as a JSON array
+  match serde_json::from_str::<Vec<Value>>(&json_array_string) {
+    Ok(json_array) => {
+      debug!(
+        "Successfully parsed JSON array with {} elements",
+        json_array.len()
+      );
+      Ok(json_array)
+    }
+    Err(e) => {
+      error!("Failed to parse JSON array: {}", e);
+      Err((
+        StatusCode::BAD_REQUEST,
+        "Failed to parse JSON array from input.".to_string(),
+      ))
+    }
+  }
+}
+
 /// Bulk append data to CoreDB.
 #[allow(unused_assignments)]
 #[allow(dead_code)]
@@ -589,23 +613,7 @@ async fn bulk(
 
   let is_queue = state.queue.is_some();
 
-  let lines = json_body.lines();
-
-  let mut actions = Vec::new();
-
-  for line in lines {
-    debug!("Processing line: {}", line);
-    if let Ok(json_line) = serde_json::from_str::<Value>(line) {
-      debug!("Successfully parsed JSON line: {}", json_line);
-      actions.push(json_line);
-    } else {
-      error!("Failed to parse line into JSON: '{}'", line);
-      return Err((
-        StatusCode::BAD_REQUEST,
-        "Invalid JSON line in NDJSON body.".to_string(),
-      ));
-    }
-  }
+  let actions = process_bulk_json_body(&json_body)?;
 
   let server_settings = state.settings.get_server_settings();
   let timestamp_key = server_settings.get_timestamp_key();
@@ -2058,11 +2066,6 @@ mod tests {
 
     let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
 
-    let bulk_request = format!(
-      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"title\": \"Document 1\", \"content\": \"Example content 1\"}}\r\n{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"2\"}}}}\r\n{{\"create\": {{\"_index\": \"{}\", \"_id\": \"3\"}}}}\r\n{{\"title\": \"Document 3\", \"content\": \"Example content 3\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 1\"}}}}",
-      index_name, index_name, index_name, index_name
-    );
-
     // Create a single index.
     let response = app
       .call(
@@ -2075,6 +2078,12 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    // *** Test newline delimited inserts
+    let bulk_request = format!(
+      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"title\": \"Document 1\", \"content\": \"Example content 1\"}}\r\n{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"2\"}}}}\r\n{{\"create\": {{\"_index\": \"{}\", \"_id\": \"3\"}}}}\r\n{{\"title\": \"Document 3\", \"content\": \"Example content 3\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 1\"}}}}",
+      index_name, index_name, index_name, index_name
+    );
 
     let body = bulk_request;
     let path = format!("/{}/bulk", index_name);
@@ -2103,6 +2112,40 @@ mod tests {
     // Make sure documents are inserted correctly.
     assert_eq!(response_json["errors"], false);
 
+    // *** Test comma delimited inserts
+    let bulk_request = format!(
+      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"5\"}}}},{{\"title\": \"Document 5\", \"content\": \"Example content 5\"}},{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"6\"}}}},{{\"create\": {{\"_index\": \"{}\", \"_id\": \"7\"}}}},{{\"title\": \"Document 7\", \"content\": \"Example content 7\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"8\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 8\"}}}}",
+      index_name, index_name, index_name, index_name
+    );
+
+    let body = bulk_request;
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Make sure documents are inserted correctly.
+    assert_eq!(response_json["errors"], false);
+
+    // *** Test searches against the inserts
     let query_dsl_request = "{\"query\":{\"match\":{\"test_field\":{\"query\":\"test_value\",\"operator\":\"OR\",\"prefix_length\":0,\"max_expansions\":50,\"fuzzy_transpositions\":true,\"lenient\":false,\"zero_terms_query\":\"NONE\",\"auto_generate_synonyms_phrase_query\":true,\"boost\":1.0}}}}";
     let path = format!("/{}/search_logs", index_name);
 

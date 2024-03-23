@@ -108,7 +108,6 @@ pub struct QueryDSLObject {
 
   timed_out: bool,
 
-  #[serde(skip_serializing)]
   index: String,
 
   #[serde(skip_serializing)]

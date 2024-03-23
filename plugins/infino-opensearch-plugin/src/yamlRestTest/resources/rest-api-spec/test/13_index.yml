@@ -1,0 +1,29 @@
+---
+setup:
+  - do:
+      cluster.put_settings:
+        body:
+          transient:
+            logger._root: "TRACE"
+  - do:
+      indices.create:
+        index: test_index
+        body:
+          settings:
+            index:
+              number_of_shards: "1"
+              number_of_replicas: "0"
+---
+"Upload a single document":
+  - do:
+      index:
+        index: test_index
+        id: "0"
+        body:
+          date: "2016-12-31T00:00:00"
+          value_field: "0"
+---
+teardown:
+  - do:
+      indices.delete:
+        index: test_index

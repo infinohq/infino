@@ -135,8 +135,6 @@ impl Serialize for QueryLogMessage {
     let log_message = &self.message;
     let mut map = serializer.serialize_map(None)?;
 
-    //TODO: Inject the index name
-    map.serialize_entry("_index", "DUMMY")?;
     map.serialize_entry("_id", &self.id)?;
     map.serialize_entry("_score", &1.0)?;
 
@@ -252,6 +250,8 @@ impl Segment {
     ),
     QueryError,
   > {
+    debug!("SEGMENT: Getting postings list for terms {:?}", terms);
+
     let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
     let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
     let mut last_block_list: Vec<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> = Vec::new();
@@ -306,6 +306,8 @@ impl Segment {
     shortest_list_index: usize,
     results: &mut Vec<u32>,
   ) -> Result<(), QueryError> {
+    debug!("SEGMENT: Get matching doc IDs with logical and");
+
     let accumulator = &mut Vec::new();
 
     if postings_lists.is_empty() {
@@ -472,6 +474,8 @@ impl Segment {
     last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
     results: &mut Vec<u32>,
   ) -> Result<(), QueryError> {
+    debug!("SEGMENT: Getting matching doc ids with logical OR");
+
     if postings_lists.is_empty() {
       debug!("No postings lists. Returning");
       return Ok(());

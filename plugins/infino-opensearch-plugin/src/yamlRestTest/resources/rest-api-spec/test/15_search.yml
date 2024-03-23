@@ -1,0 +1,64 @@
+---
+setup:
+  - do:
+      cluster.put_settings:
+        body:
+          transient:
+            logger._root: "TRACE"
+  - do:
+      indices.create:
+        index: test_index
+        body:
+          settings:
+            index:
+              number_of_shards: "1"
+              number_of_replicas: "0"
+  - do:
+      bulk:
+        body:
+          - index:
+              _index: test_index
+              _id: "1"
+          - date: "2017-01-01T00:00:00"
+            value_field: "1"
+          - index:
+              _index: test_index
+              _id: "2"
+          - date: "2017-01-02T00:00:00"
+            value_field: "2"
+          - index:
+              _index: test_index
+              _id: "3"
+          - date: "2017-01-03T00:00:00"
+            value_field: "3"
+          - index:
+              _index: test_index
+              _id: "4"
+          - date: "2017-01-04T00:00:00"
+            value_field: "4"
+          - index:
+              _index: test_index
+              _id: "5"
+          - date: "2017-01-05T00:00:00"
+            value_field: "5"
+          - index:
+              _index: test_index
+              _id: "6"
+          - date: "2017-01-06T00:00:00"
+            value_field: "6"
+---
+"Search for a document":
+  - do:
+      search:
+        index: test_index
+        body:
+          query:
+            match:
+              value_field: "3"
+  - match: { hits.total.value: 1 }
+  - match: { hits.hits.0._source.value_field: "3" }
+---
+teardown:
+  - do:
+      indices.delete:
+        index: test_index
