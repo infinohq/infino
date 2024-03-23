@@ -129,6 +129,11 @@ impl Segment {
       Rule::wildcard_query => {
         results = self.process_wildcard_query(node, timeout).await?;
       }
+      Rule::match_phrase_prefix_query => {
+        results = self
+          .process_match_phrase_prefix_query(node, timeout)
+          .await?;
+      }
       _ => {
         return Err(QueryError::UnsupportedQuery(format!(
           "Unsupported rule: {:?}",
@@ -579,11 +584,12 @@ impl Segment {
           analyze_query_text(prefix_text_str, Some(field), case_insensitive).await;
 
         match self
-          .get_doc_ids_with_prefix_phrase(
+          .get_doc_ids_with_prefix_term_or_full_text_phrase(
             prefix_phrase_terms,
             field,
             prefix_text_str.trim_matches('"'),
             case_insensitive,
+            false,
           )
           .await
         {
@@ -739,6 +745,76 @@ impl Segment {
       )),
     }
   }
+
+  /// Match Phrase Prefix Query Processor: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase-prefix/
+  async fn process_match_phrase_prefix_query(
+    &self,
+    root_node: &Pair<'_, Rule>,
+    timeout: u64,
+  ) -> Result<QueryDSLDocIds, QueryError> {
+    debug!("QueryDSL: Processing match phrase prefix query {:?}", root_node);
+
+    let query_start_time = Utc::now().timestamp_millis() as u64;
+
+    let mut stack: VecDeque<Pair<Rule>> = VecDeque::new();
+    stack.push_back(root_node.clone());
+
+    let mut fieldname: Option<&str> = None;
+    let mut query_text: Option<&str> = None;
+
+    while let Some(node) = stack.pop_front() {
+      match node.as_rule() {
+        Rule::fieldname => self.set_fieldname(&node, &mut fieldname),
+        Rule::match_phrase_prefix_string | Rule::query => {
+          self.set_query_text(&node, &mut query_text)
+        }
+        _ => {
+          for inner_node in node.into_inner() {
+            stack.push_back(inner_node);
+          }
+        }
+      }
+    }
+
+    match (fieldname, query_text) {
+      (Some(field), Some(query_str)) => {
+        let prefix_phrase_terms: Vec<String> =
+          analyze_query_text(query_str, Some(field), false).await;
+
+        match self
+          .get_doc_ids_with_prefix_term_or_full_text_phrase(
+            prefix_phrase_terms,
+            field,
+            query_str.trim_matches('"'),
+            false,
+            true,
+          )
+          .await
+        {
+          Ok(matching_document_ids) => {
+            let mut results = QueryDSLDocIds::new();
+            let execution_time = check_query_time(timeout, query_start_time)?;
+            results.set_execution_time(execution_time);
+            results.set_ids(matching_document_ids);
+
+            debug!(
+              "QueryDSL: Returning results from match phrase prefix query {:?}",
+              results
+            );
+
+            Ok(results)
+          }
+          Err(err) => Err(err),
+        }
+      }
+      (None, _) => Err(QueryError::UnsupportedQuery(
+        "Field name is missing".to_string(),
+      )),
+      (_, None) => Err(QueryError::UnsupportedQuery(
+        "Query string is missing".to_string(),
+      )),
+    }
+  }
 }
 
 #[cfg(test)]
@@ -764,6 +840,10 @@ mod tests {
       ("log 3 1", "test log for different term"),
       ("log 4", "field1~field1value testing field name and value"),
       ("log 5", "field1~field2value testing field name two value"),
+      (
+        "test temp long 5",
+        "field2~field3value testing match phrase prefix",
+      ),
     ];
 
     for (key, message) in log_messages.iter() {
@@ -1356,8 +1436,8 @@ mod tests {
         Ok(results) => {
           assert_eq!(
             results.get_messages().len(),
-            5,
-            "There should be exactly 5 logs matching the wildcard query."
+            6,
+            "There should be exactly 6 logs matching the wildcard query."
           );
 
           for log in results.get_messages().iter() {
@@ -1394,6 +1474,48 @@ mod tests {
             .get_messages()
             .iter()
             .all(|log| log.get_message().get_text().contains("field1~field1value")));
+        }
+        Err(err) => {
+          panic!("Error in search_logs: {:?}", err);
+        }
+      },
+      Err(err) => {
+        panic!("Error parsing query DSL: {:?}", err);
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn test_search_with_match_phrase_prefix_query() {
+    let segment = create_mock_segment().await;
+
+    let query_dsl_query = r#"{
+        "query": {
+            "match_phrase_prefix": {
+                "key": {
+                    "query": "temp lo"
+                }
+            }
+        }
+    }"#;
+
+    match QueryDslParser::parse(Rule::start, query_dsl_query) {
+      Ok(ast) => match segment.search_logs(&ast, 0, u64::MAX).await {
+        Ok(results) => {
+          assert_eq!(
+            results.get_messages().len(),
+            1,
+            "There should be exactly 1 log matching the query."
+          );
+
+          for log in results.get_messages() {
+            let key_field_value = log.get_message().get_fields().get("key");
+
+            assert!(
+              key_field_value.map_or(false, |value| value.contains("temp lo")),
+              "Each log should have 'key' field containing 'temp lo'."
+            );
+          }
         }
         Err(err) => {
           panic!("Error in search_logs: {:?}", err);
