@@ -7,8 +7,8 @@ use crate::utils::custom_serde::atomic_cell_serde;
 /// Metadata for CoreDB's index.
 pub struct Metadata {
   /// Number of segments.
-  /// Note that this may not be same as the number of segments in the index, esp when
-  /// merging of older segments is implemented. The primary use of this field is to
+  /// Note that this may not be same as the number of segments in the index, esp with
+  /// merging of older segments. The primary use of this field is to
   /// provide a unique numeric key for each segment in the index.
   #[serde(with = "atomic_cell_serde")]
   segment_count: AtomicCell<u32>,
@@ -62,6 +62,11 @@ impl Metadata {
   /// Fetch the segment count and increment it by 1.
   pub fn fetch_increment_segment_count(&self) -> u32 {
     self.segment_count.fetch_add(1)
+  }
+
+  /// Set the segment count to the given value.
+  pub fn set_segment_count(&self, value: u32) {
+    self.segment_count.store(value);
   }
 
   /// Set the current segment number to the given value.
@@ -134,5 +139,7 @@ mod tests {
     assert_eq!(m.get_log_messages_threshold(), 5);
     assert_eq!(m.get_metric_points_threshold(), 50);
     assert_eq!(m.get_uncommitted_segments_threshold(), 3);
+    m.set_segment_count(20);
+    assert_eq!(m.get_segment_count(), 20);
   }
 }
