@@ -199,7 +199,7 @@ async fn run_server() {
 
   // Set the flag to indicate the background threads to shutdown, and wait for them to finish.
   IS_SHUTDOWN.store(true);
-  info!("Shutting down background threads and waiting for it to finish...");
+  info!("Shutting down background threads and waiting for them to finish...");
   if let Err(err) = background_threads_handle.await {
     error!("Error while shutting down the background threads {}", err);
   }
