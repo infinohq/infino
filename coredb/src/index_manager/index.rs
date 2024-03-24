@@ -830,8 +830,11 @@ impl Index {
   }
 
   /// Recover any missing segments using WAL.
-  /// Note that this function should only called from refresh() when the server starts up, and is not intended to be
-  /// called from multiple threads.
+  /// Notes:
+  /// (a) this function should only called from refresh() when the server starts up, and is not intended to be
+  /// called from multiple threads,
+  /// (b) a system failure can happen while running this function - so this function should be idempotent.
+  /// Running this function multiple times should end up in the same index state.
   async fn recover(&self) -> Result<(), CoreDBError> {
     // Get all the WAL files.
     let wal_files = self.get_wal_files().await?;
@@ -843,10 +846,19 @@ impl Index {
       return Ok(());
     }
 
-    // Get the segment summaries of the index so far.
-    let (mut current_segment_number, current_segment_summary) =
-      self.get_current_segment_summary_ref();
-    let mut current_segment_end_time = current_segment_summary.get_end_time();
+    // At the end of this function, when recovery is complete, we delete all wal files, except for the one
+    // corresponding to the current segment.
+    let mut wal_files_to_delete: HashMap<u32, String> = HashMap::new();
+
+    // Get the (last known) current segment number and its end time.
+    let mut current_segment_number;
+    let mut current_segment_end_time;
+    {
+      // Read current_segment_summary in a block to avoid deadlock / drop the reference in DashMap asap.
+      let current_segment_summary;
+      (current_segment_number, current_segment_summary) = self.get_current_segment_summary_ref();
+      current_segment_end_time = current_segment_summary.get_end_time();
+    }
 
     for (segment_number, wal_file_name) in wal_files {
       let segment_to_use;
@@ -906,6 +918,7 @@ impl Index {
       // However, as newer appends come in, some of them will get appended to S1, and as its capacity is full, new
       // segments get created correctly. So, there won't be a correctness issue.
       // TODO: the scenario above needs to be tested.
+
       let segment_to_use_end_time = segment_to_use.get_end_time();
       if segment_to_use_end_time > current_segment_end_time
         || (segment_to_use_end_time == current_segment_end_time
@@ -914,6 +927,9 @@ impl Index {
         current_segment_number = segment_number;
         current_segment_end_time = segment_to_use_end_time;
       }
+
+      // Add the WAL file as a candidate for deletion once the recovery is complete.
+      wal_files_to_delete.insert(segment_number, wal_file_path);
     }
 
     // Set the current segment number in the metadata.
@@ -928,6 +944,13 @@ impl Index {
 
     // Write the updated all_segments_summaries and metadata
     self.write_summaries_and_metadata().await?;
+
+    // At this point, recovery is complete. Delete the WAL files of all recovered segments, except the current segment.
+    for (segment_number, wal_file_path) in wal_files_to_delete {
+      if segment_number != current_segment_number {
+        std::fs::remove_file(wal_file_path)?;
+      }
+    }
 
     Ok(())
   }
@@ -2370,13 +2393,6 @@ mod tests {
 
     // We'll have num_segments segments, plus one empty segment at the end.
     assert_eq!(index.all_segments_summaries.len() as u64, num_segments + 1);
-
-    // We shouldn't have more than specified segments in memory.
-    println!(
-      "##### memory = {}, num segments in memory = {}",
-      index.memory_segments_map.len(),
-      num_segments_in_memory
-    );
     assert!(index.memory_segments_map.len() as u64 <= num_segments_in_memory);
 
     // Check the queries return results as expected.
@@ -2692,14 +2708,16 @@ mod tests {
   #[tokio::test]
   async fn test_recover() {
     let storage_type = StorageType::Local;
+    let log_metric_threshold = 1000;
 
     // Create a new index with a low threshold for the segment size.
     let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) = create_index_with_thresholds(
       "test_multiple_segments_logs",
       &storage_type,
       1024 * 1024,
-      1000, // Create a new segment after every 1000 messages.
-      10000,
+      // Create a new segment after every log_metric_threshold log messages or metric points.
+      log_metric_threshold,
+      log_metric_threshold,
       10,
     )
     .await;
@@ -2710,8 +2728,8 @@ mod tests {
     // 5 segments of 1000 logs each, and 1 segment with 1 log message.
     let expected_num_segments = 6;
 
-    // Append 5001 log messages, creating 6 segments.
-    for i in 0..5001 {
+    // **Part 1**: Append (5*log_metric_threshold+1) log messages/metric points, creating 6 segments.
+    for i in 0..5 * log_metric_threshold + 1 {
       let message = format!("{} {}", message_prefix, i);
       index
         .append_log_message(
@@ -2722,18 +2740,37 @@ mod tests {
         .await
         .expect("Could not append log message");
     }
-    let wal_files = index.get_wal_files().await.unwrap();
-    assert_eq!(wal_files.len(), expected_num_segments);
+    index.flush_wal().await;
+    let wal_file_names = index.get_wal_files().await.unwrap();
+    assert_eq!(wal_file_names.len(), expected_num_segments);
+    for (segment_number, wal_file_name) in wal_file_names {
+      let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_name);
+      let lines = std::fs::read_to_string(wal_file_path)
+        .map(|contents| contents.lines().count())
+        .unwrap();
 
-    // Now commit the index. This will commit all segments except the current one, as well
-    // as delete the wal files for all segments except the current one.
+      // All WAL files will have log_metric_threshold lines, except the last one which will have 1 line.
+      if segment_number == 5 {
+        assert_eq!(lines, 1);
+      } else {
+        assert_eq!(lines, log_metric_threshold as usize);
+      }
+    }
+
+    // **Part 2**: Commit the index, this will delete 5 WAL files, and will leave only the WAL file corresponding
+    // to the current segment.
     index.commit(false).await.unwrap();
-    let wal_files = index.get_wal_files().await.unwrap();
-    assert_eq!(wal_files.len(), 1);
+    let wal_file_names = index.get_wal_files().await.unwrap();
+    assert_eq!(wal_file_names.len(), 1);
+    let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_names.get(0).unwrap().1);
+    let lines = std::fs::read_to_string(wal_file_path)
+      .map(|contents| contents.lines().count())
+      .unwrap();
+    assert_eq!(lines, 1);
 
-    // Write a a couple thousand more log messages. This will create 2 more segments, making
+    // **Part 3**: Write a 2*loc_metric_threshold log messages/metric points. This will create 2 more segments, making
     // the total number of WAL files to be 3.
-    for i in 0..2000 {
+    for i in 0..2 * log_metric_threshold {
       let message = format!("{} {}", message_prefix, i);
       index
         .append_log_message(
@@ -2744,14 +2781,29 @@ mod tests {
         .await
         .expect("Could not append log message");
     }
+    index.flush_wal().await;
     let wal_files = index.get_wal_files().await.unwrap();
     assert_eq!(wal_files.len(), 3);
+    for (segment_number, wal_file_name) in wal_file_names {
+      let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_name);
+      let lines = std::fs::read_to_string(wal_file_path)
+        .map(|contents| contents.lines().count())
+        .unwrap();
 
-    // Now let us assume that there was an ungraceful shutdown. The index will be left in this state,
-    // with index.commit(true) never called to flush the
+      // All WAL files will have log_metric_threshold lines, except the last one which will have 1 line.
+      if segment_number == 7 {
+        assert_eq!(lines, 1);
+      } else {
+        assert_eq!(lines, log_metric_threshold as usize);
+      }
+    }
 
-    // Now create a new index from the same index and wal directory - simulating the service came back up
-    // again and recovered. The new (recovered) index should have 5001+2000 = 7001 log messages.
+    // **Part 4**: Now let us assume that there was an ungraceful shutdown. The index will be left in this state,
+    // with index.commit(true) never called to commit the last current segment. Note that the ungraceful shutdown
+    // was after index.flush_wal(), so we should be able to recover all the data.
+    //
+    // We simulate the ungraceful shutdown+recovery just by reading a new index from the same directory. (Somewhat
+    // similar to a new service started after shutting down.)
     let recovered_index = Index::refresh(
       &StorageType::Local,
       &index_dir_path,
@@ -2764,6 +2816,66 @@ mod tests {
     // The recovered index should have 8 segments. 7 segments should have 1000 messages each,
     // while the last one should have 1 message.
     assert_eq!(recovered_index.metadata.get_segment_count(), 8);
-    assert_eq!(recovered_index.get_current_segment_ref().0, 8);
+    assert_eq!(recovered_index.get_current_segment_ref().0, 7);
+    for segment_number in 0..8 {
+      let segment = &recovered_index
+        .memory_segments_map
+        .get(&segment_number)
+        .unwrap();
+      if segment_number == 7 {
+        assert_eq!(segment.get_log_message_count(), 1);
+      } else {
+        assert_eq!(segment.get_log_message_count(), log_metric_threshold);
+      }
+    }
+
+    // **Part 5**: Assume that we now cleanly shutdown recovered index - with index.commit(is_shuwdown=true).
+    // This should cleanup all the WAL files, except for the one for current segment.
+    recovered_index.commit(true).await.unwrap();
+    let wal_file_names = recovered_index.get_wal_files().await.unwrap();
+    let (current_segment_number, _) = recovered_index.get_current_segment_ref();
+    assert_eq!(wal_file_names.len(), 1);
+    assert_eq!(
+      wal_file_names.get(0).unwrap().1,
+      format!("{}.wal", current_segment_number)
+    );
+
+    // **Part 6**: Add one more log message/metric point to the recovered index. And simulate a failure without
+    // flushing WAL or committing the index. This log message/metric point will be lost as WAL wasn't flushed
+    // or the index wasn't committed. This is consistent with other observability stores, listed here:
+    // "WAL usage broken in modern time series databases":
+    // https://valyala.medium.com/wal-usage-looks-broken-in-modern-time-series-databases-b62a627ab704
+    recovered_index
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        "final log message",
+      )
+      .await
+      .expect("Could not append log message");
+
+    // Simulate recovery by recreating the index.
+    let recovered_index_2 = Index::refresh(
+      &StorageType::Local,
+      &index_dir_path,
+      &wal_dir_path,
+      2 * 1024 * 1024,
+    )
+    .await
+    .unwrap();
+
+    // The recovered index has only 1 line in WAL - as the above log message/metric point was never written to WAL.
+    let wal_file_names = recovered_index_2.get_wal_files().await.unwrap();
+    assert_eq!(wal_file_names.len(), 1);
+    let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_names.get(0).unwrap().1);
+    let lines = std::fs::read_to_string(wal_file_path)
+      .map(|contents| contents.lines().count())
+      .unwrap();
+    assert_eq!(lines, 1);
+
+    // The current segment of the recovered index has only 1 log message/metric point, as the above log message/metric
+    // point was lost during recovery (as it was never in WAL).
+    let current_segment = recovered_index_2.get_current_segment_ref().1;
+    assert_eq!(current_segment.get_log_message_count(), 1);
   }
 }
