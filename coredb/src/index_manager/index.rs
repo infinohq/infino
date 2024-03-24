@@ -845,7 +845,7 @@ impl Index {
       return Ok(());
     }
 
-    info!("WAL files exist, prior Infino shutdown wasn't clean. Starting recovery...")
+    info!("WAL files exist, prior Infino shutdown wasn't clean. Starting recovery...");
 
     // At the end of this function, when recovery is complete, we delete all wal files, except for the one
     // corresponding to the current segment.
