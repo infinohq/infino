@@ -495,6 +495,7 @@ impl Index {
     ast: &Pairs<'_, query_dsl::Rule>,
     range_start_time: u64,
     range_end_time: u64,
+    is_delete_by_query: bool,
   ) -> Result<QueryDSLObject, CoreDBError> {
     debug!(
       "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
@@ -514,16 +515,40 @@ impl Index {
     for segment_number in segment_numbers {
       let segment = self.memory_segments_map.get(&segment_number);
       let mut segment_results = match segment {
-        Some(segment) => segment
-          .search_logs(&ast.clone(), range_start_time, range_end_time)
-          .await
-          .unwrap_or_else(|_| QueryDSLObject::new()),
+        Some(segment) => {
+          let results = segment
+            .search_logs(&ast.clone(), range_start_time, range_end_time)
+            .await
+            .unwrap_or_else(|_| QueryDSLObject::new());
+
+          if is_delete_by_query {
+            let logs_ids: Vec<u32> = results.get_messages().iter().map(|m| m.get_id()).collect();
+            let deleted_logs = segment.mark_log_message_as_deleted(&logs_ids);
+            debug!(
+              "INDEX: Deleted log messages: {:?} from segment: {}",
+              deleted_logs, segment_number
+            );
+          }
+
+          results
+        }
         None => {
           let segment = self.refresh_segment(segment_number).await?;
-          segment
+          let result = segment
             .search_logs(ast, range_start_time, range_end_time)
             .await
-            .unwrap_or_else(|_| QueryDSLObject::new())
+            .unwrap_or_else(|_| QueryDSLObject::new());
+
+          if is_delete_by_query {
+            let logs_ids: Vec<u32> = results.get_messages().iter().map(|m| m.get_id()).collect();
+            let deleted_logs = segment.mark_log_message_as_deleted(&logs_ids);
+            debug!(
+              "INDEX: Deleted log messages: {:?} from segment: {}",
+              deleted_logs, segment_number
+            );
+          }
+
+          result
         }
       };
 
@@ -1002,30 +1027,20 @@ impl Index {
   /// Mark logs as deleted for given query in the given time range and return count of logs marked as deleted.
   pub async fn delete_logs_by_query(
     &self,
-    ids: &[u32],
+    ast: &Pairs<'_, query_dsl::Rule>,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<u32, CoreDBError> {
-    debug!(
-      "INDEX: ids {:?}, range_start_time {:?}, and range_end_time {:?}\n",
-      ids, range_start_time, range_end_time
-    );
-    // First, get the segments overlapping with the given time range. This is in the reverse chronological order.
-    let segment_numbers = self
-      .get_overlapping_segments(range_start_time, range_end_time)
+    // Call search_logs with is_delete_by_query set to true.
+    let results = self
+      .search_logs(ast, range_start_time, range_end_time, true)
       .await;
 
-    // Delete logs in each of the segments.
-    let mut deleted_count = 0;
-    for segment_number in segment_numbers {
-      let segment = self.memory_segments_map.get(&segment_number);
-      let deleted_results = match segment {
-        Some(segment) => segment.mark_log_message_as_deleted(ids),
-        None => 0,
-      };
-      deleted_count += deleted_results;
+    // Return the count of logs marked as deleted.
+    match results {
+      Ok(results) => Ok(results.get_messages().len() as u32),
+      Err(e) => Err(e),
     }
-    Ok(deleted_count)
   }
 }
 
@@ -1254,7 +1269,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, 0, u64::MAX)
+      .search_logs(&ast, 0, u64::MAX, false)
       .await
       .expect("Error in search_logs");
 
@@ -1291,7 +1306,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, 0, u64::MAX)
+      .search_logs(&ast, 0, u64::MAX, false)
       .await
       .expect("Error in search_logs");
 
@@ -1673,7 +1688,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, start_time, end_time)
+      .search_logs(&ast, start_time, end_time, false)
       .await
       .expect("Error in search_logs");
     assert_eq!(results.get_messages().len(), num_log_messages);
@@ -1687,7 +1702,7 @@ mod tests {
       let ast =
         QueryDslParser::parse(query_dsl::Rule::start, suffix).expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, start_time, end_time)
+        .search_logs(&ast, start_time, end_time, false)
         .await
         .expect("Error in search_logs");
       assert_eq!(results.get_messages().len(), 1);
@@ -1702,7 +1717,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, start_time, end_time)
+        .search_logs(&ast, start_time, end_time, false)
         .await
         .expect("Error in search_logs");
 
@@ -1754,7 +1769,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, 0, Utc::now().timestamp_millis() as u64)
+        .search_logs(&ast, 0, Utc::now().timestamp_millis() as u64, false)
         .await
         .expect("Error in search_logs");
 
@@ -2072,7 +2087,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, 0, expected_len as u64)
+      .search_logs(&ast, 0, expected_len as u64, false)
       .await
       .expect("Error in search_logs");
     assert_eq!(expected_len, results.get_messages().len());
@@ -2142,6 +2157,7 @@ mod tests {
         &ast,
         start_time as u64,
         Utc::now().timestamp_millis() as u64,
+        false,
       )
       .await
       .expect("Error in search_logs");
@@ -2241,7 +2257,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, 0, u64::MAX)
+        .search_logs(&ast, 0, u64::MAX, false)
         .await
         .expect("Error in search_logs");
       assert_eq!(results.get_messages().len(), 1);
@@ -2254,7 +2270,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, 0, u64::MAX)
+        .search_logs(&ast, 0, u64::MAX, false)
         .await
         .expect("Error in search_logs");
       assert_eq!(results.get_messages().len(), 1);
@@ -2528,10 +2544,190 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let search_result = index
-      .search_logs(&ast, 0, 10000)
+      .search_logs(&ast, 0, 10000, false)
       .await
       .expect("Error in search_logs");
 
     assert_eq!(search_result.get_messages().len(), 3);
+  }
+
+  #[tokio::test]
+  async fn test_basic_delete_logs_by_query() {
+    let storage_type = StorageType::Local;
+    let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
+      create_index("test_basic_search", &storage_type).await;
+    let num_log_messages = 1000;
+    let message_prefix = "this is my log message";
+    let mut expected_log_messages: Vec<String> = Vec::new();
+
+    for i in 1..num_log_messages {
+      let message = format!("{} {}", message_prefix, i);
+      index
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        )
+        .await
+        .expect("Could not append log message");
+      expected_log_messages.push(message);
+    }
+    // Now add a unique log message.
+    index
+      .append_log_message(
+        Utc::now().timestamp_millis() as u64,
+        &HashMap::new(),
+        "thisisunique",
+      )
+      .await
+      .expect("Could not append log message");
+
+    let query_message = r#"{
+      "query": {
+        "bool": {
+          "must": [
+            { "match": { "_all" : { "query": "message", "operator" : "AND" } } }
+          ]
+        }
+      }
+    }
+    "#;
+
+    // For the query "message", handle errors from search_logs
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
+    let mut results = index
+      .search_logs(&ast, 0, u64::MAX, false)
+      .await
+      .expect("Error in search_logs");
+
+    // Continue with assertions
+    assert_eq!(results.get_messages().len(), num_log_messages - 1);
+
+    // extract ids from results
+    let mut ids: Vec<u32> = Vec::new();
+    for log in results.get_messages() {
+      ids.push(log.get_id());
+    }
+
+    // Delete logs by query
+    let results_delete = index
+      .delete_logs_by_query(&ast, 0, u64::MAX)
+      .await
+      .expect("Error in delete_logs_by_query");
+
+    assert_eq!(results_delete as usize, num_log_messages - 1);
+
+    // Search logs again
+    results = index
+      .search_logs(&ast, 0, u64::MAX, false)
+      .await
+      .expect("Error in search_logs");
+
+    // Continue with assertions
+    assert_eq!(results.get_messages().len(), 0);
+  }
+
+  #[tokio::test]
+  async fn test_multiple_segments_delete_logs_by_query() {
+    let storage_type = StorageType::Local;
+    let start_time = Utc::now().timestamp_millis() as u64;
+    let commit_after = 1000;
+
+    // Create a new index with a low threshold for the segment size.
+    let (mut index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) =
+      create_index_with_thresholds(
+        "test_multiple_segments_logs",
+        &storage_type,
+        1024 * 1024,
+        commit_after,
+        10000,
+        10,
+      )
+      .await;
+
+    let message_prefix = "message";
+    let num_log_messages = 10000;
+
+    // Append log messages.
+    let mut num_log_messages_from_last_commit = 0;
+    for i in 1..=num_log_messages {
+      let message = format!("{} {}", message_prefix, i);
+      index
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          &message,
+        )
+        .await
+        .expect("Could not append log message");
+
+      // Commit after indexing more than commit_after messages.
+      num_log_messages_from_last_commit += 1;
+      if num_log_messages_from_last_commit > commit_after {
+        index.commit(true).await.expect("Could not commit index");
+        num_log_messages_from_last_commit = 0;
+        sleep(Duration::from_millis(1000));
+      }
+    }
+
+    // Commit and sleep to ensure the index is written to disk.
+    index.commit(true).await.expect("Could not commit index");
+    sleep(Duration::from_millis(1000));
+
+    let end_time = Utc::now().timestamp_millis() as u64;
+
+    // Read the index from disk.
+    index = match Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024).await {
+      Ok(index) => index,
+      Err(err) => {
+        error!("Error refreshing index: {:?}", err);
+        return;
+      }
+    };
+
+    // Ensure that more than 1 segment was created.
+    assert!(index.memory_segments_map.len() > 1);
+
+    // The current segment should be empty (i.e., have 0 documents).
+    let (_, current_segment_ref) = index.get_current_segment_ref();
+    let current_segment = current_segment_ref.value();
+    assert_eq!(current_segment.get_log_message_count(), 0);
+
+    for item in &index.memory_segments_map {
+      let segment_number = item.key();
+      let segment = item.value();
+      if *segment_number == index.metadata.get_current_segment_number() {
+        assert_eq!(segment.get_log_message_count(), 0);
+      }
+    }
+
+    let query_message = &format!(
+      r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
+      message_prefix
+    );
+
+    // Ensure the prefix is in every log message.
+    let ast =
+      QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
+    let results = index
+      .search_logs(&ast, start_time, end_time, false)
+      .await
+      .expect("Error in search_logs");
+    assert_eq!(results.get_messages().len(), num_log_messages);
+
+    // From results extract log_ids
+    let mut log_ids: Vec<u32> = Vec::new();
+    for log in results.get_messages() {
+      log_ids.push(log.get_id());
+    }
+
+    // Delete logs by query
+    let results_delete = index
+      .delete_logs_by_query(&ast, 0, u64::MAX)
+      .await
+      .expect("Error in delete_logs_by_query");
+
+    assert_eq!(results_delete as usize, num_log_messages);
   }
 }

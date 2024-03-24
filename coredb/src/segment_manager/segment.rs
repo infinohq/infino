@@ -508,7 +508,7 @@ impl Segment {
         .ok_or(QueryError::LogMessageNotFound(*log_message_id))?;
       let log_message = retval.value();
       let time = log_message.get_time();
-      if time >= range_start_time && time <= range_end_time {
+      if time >= range_start_time && time <= range_end_time && !log_message.is_deleted() {
         log_messages.push(QueryLogMessage::new_with_params(
           *log_message_id,
           LogMessage::new_with_fields_and_text(
@@ -569,6 +569,7 @@ impl Segment {
       .iter()
       .chain(segment2.forward_map.iter())
       .map(|ref_multi| (*ref_multi.key(), ref_multi.value().clone()))
+      .filter(|(_, log_message)| !log_message.is_deleted())
       .collect();
 
     log_messages.sort_by_key(|(_, log_message)| log_message.get_time());
@@ -1498,5 +1499,29 @@ mod tests {
         .unwrap();
       assert_eq!(results.len(), 500 - i);
     }
+  }
+
+  #[tokio::test]
+  async fn test_mark_logs_as_deleted() {
+    let segment = Segment::new_with_temp_wal();
+
+    // Add 1000 log messages.
+    let time = Utc::now().timestamp_millis() as u64;
+    for i in 0..1000 {
+      segment
+        .append_log_message(time, &HashMap::new(), format!("log_message_{}", i).as_str())
+        .unwrap();
+    }
+
+    // Create ids as [u32] from 1 to 500 to mark as deleted.
+    let ids: Vec<u32> = (0..500).collect();
+    segment.mark_log_message_as_deleted(&ids);
+
+    let all_ids: Vec<u32> = (0..1000).collect();
+
+    let log = segment
+      .get_log_messages_from_ids(&all_ids, 0, u64::MAX)
+      .unwrap();
+    assert_eq!(log.len(), 500);
   }
 }
