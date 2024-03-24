@@ -652,7 +652,7 @@ impl Index {
   pub async fn read_all_segments_summaries(
     &self,
   ) -> Result<DashMap<u32, SegmentSummary>, CoreDBError> {
-    info!(
+    debug!(
       "Getting segment summaries of index from index_dir_path: {}",
       self.index_dir_path
     );
@@ -765,9 +765,8 @@ impl Index {
       );
       self.commit_segment(current_segment_number).await?;
 
-      // The current segment is now fully committed - so remove its write ahead log as we do not need it anymore for
-      // any recovery.
-      self.remove_wal(current_segment_number).await?;
+      // The current segment is now fully committed. However, we do not remove its WAL as it
+      // might be needed for future recoveries.
     }
 
     // Write self.all_segments_summaries and self.metadata
@@ -876,6 +875,8 @@ impl Index {
         Ok(disk_segment) => {
           if wal_segment.quick_equals(&disk_segment) {
             // Both the segments are the same. Use the segment from disk - to avoid unnecessory serialization.
+            // This typically happens for the current segment in clean shutdown, as we do not delete WAL file for the
+            // current segment in Index::commit().
             debug!(
               "Segment number {}. Segment from WAL and from disk are the same. Using the segment from disk.",
               segment_number
