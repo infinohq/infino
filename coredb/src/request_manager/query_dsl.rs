@@ -354,9 +354,9 @@ impl Segment {
       let analyzed_query = analyze_query_text(query_str, fieldname, case_insensitive).await;
       let search_results = self.search_inverted_index(analyzed_query, "AND").await?;
 
+      results.set_ids(search_results);
       let execution_time = check_query_time(timeout, query_start_time)?;
       results.set_execution_time(execution_time);
-      results.set_ids(search_results);
     } else {
       return Err(QueryError::UnsupportedQuery(
         "Query string is missing".to_string(),
@@ -414,9 +414,10 @@ impl Segment {
     if !query_terms.is_empty() {
       let search_results = self.search_inverted_index(query_terms, "OR").await?;
 
+      results.set_ids(search_results);
+
       let execution_time = check_query_time(timeout, query_start_time)?;
       results.set_execution_time(execution_time);
-      results.set_ids(search_results);
     } else {
       return Err(QueryError::UnsupportedQuery(
         "No query terms found".to_string(),
@@ -470,9 +471,11 @@ impl Segment {
         .search_inverted_index(analyzed_query, term_operator)
         .await?;
 
-      let execution_time = check_query_time(timeout, query_start_time)?;
-      results.set_execution_time(execution_time);
       results.set_ids(search_results);
+
+      let execution_time = check_query_time(timeout, query_start_time)?;
+
+      results.set_execution_time(execution_time);
     } else {
       return Err(QueryError::UnsupportedQuery(
         "Query string is missing".to_string(),
@@ -528,9 +531,9 @@ impl Segment {
         let matching_document_ids =
           self.get_exact_phrase_matches(&search_result, Some(field), query_str.trim_matches('"'));
 
+        results.set_ids(matching_document_ids);
         let execution_time = check_query_time(timeout, query_start_time)?;
         results.set_execution_time(execution_time);
-        results.set_ids(matching_document_ids);
 
         debug!(
           "QueryDSL: Returning results from match phrase query {:?}",
@@ -595,9 +598,11 @@ impl Segment {
         {
           Ok(matching_document_ids) => {
             let mut results = QueryDSLDocIds::new();
+
+            results.set_ids(matching_document_ids);
+
             let execution_time = check_query_time(timeout, query_start_time)?;
             results.set_execution_time(execution_time);
-            results.set_ids(matching_document_ids);
 
             debug!(
               "QueryDSL: Returning results from prefix query {:?}",
@@ -659,9 +664,11 @@ impl Segment {
         {
           Ok(matching_document_ids) => {
             let mut results = QueryDSLDocIds::new();
+
+            results.set_ids(matching_document_ids);
+
             let execution_time = check_query_time(timeout, query_start_time)?;
             results.set_execution_time(execution_time);
-            results.set_ids(matching_document_ids);
 
             debug!(
               "QueryDSL: Returning results from regexp query {:?}",
@@ -723,9 +730,11 @@ impl Segment {
         {
           Ok(matching_document_ids) => {
             let mut results = QueryDSLDocIds::new();
+
+            results.set_ids(matching_document_ids);
+
             let execution_time = check_query_time(timeout, query_start_time)?;
             results.set_execution_time(execution_time);
-            results.set_ids(matching_document_ids);
 
             debug!(
               "QueryDSL: Returning results from wildcard query {:?}",
@@ -796,9 +805,9 @@ impl Segment {
         {
           Ok(matching_document_ids) => {
             let mut results = QueryDSLDocIds::new();
+            results.set_ids(matching_document_ids);
             let execution_time = check_query_time(timeout, query_start_time)?;
             results.set_execution_time(execution_time);
-            results.set_ids(matching_document_ids);
 
             debug!(
               "QueryDSL: Returning results from match phrase prefix query {:?}",
