@@ -141,9 +141,9 @@ match_phrase_terms  = { (analyzer | slop | zero_terms_query) }
 
 // Match Phrase Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
 match_phrase_prefix_query  = { start_brace ~ quote ~ "match_phrase_prefix" ~ quote ~ colon ~ match_phrase_prefix_search ~ end_brace }
-match_phrase_prefix_search = { start_brace ~ fieldname ~ colon ~ match_phrase_prefix_array ~ end_brace }
-match_phrase_prefix_array  = { start_brace ~ query ~ (comma ~ match_phrase_prefix)* ~ end_brace }
-match_phrase_prefix        = { (analyzer | slop | zero_terms_query) }
+match_phrase_prefix_search = { start_brace ~ fieldname ~ colon ~ ( match_phrase_prefix_string | match_phrase_prefix_array )~ end_brace }
+match_phrase_prefix_array  = { start_brace ~ query ~ (comma ~ match_phrase_prefix_terms)* ~ end_brace }
+match_phrase_prefix_terms  = { (analyzer | slop | zero_terms_query) }
 
 // Multi Match Queries: https://opensearch.org/docs/latest/query-dsl/full-text/multi-match/
 multi_match_query  = { start_brace ~ quote ~ "multi_match" ~ quote ~ colon ~ multi_match_search ~ end_brace }
@@ -449,6 +449,7 @@ line_string                  = { geo_type ~ "lineString" ~ quote ~ "" ~ comma ~ 
 linear_ring                  = { start_bracket ~ (geo_coordinate ~ (comma ~ geo_coordinate)*)? ~ end_bracket }
 lt                           = { quote ~ "lt" ~ quote ~ colon ~ (number | date) }
 lte                          = { quote ~ "lte" ~ quote ~ colon ~ (number | date) }
+match_phrase_prefix_string   = { string }
 match_phrase_string          = { string }
 match_string                 = { string }
 max_boost                    = { quote ~ "max_boost" ~ quote ~ colon ~ float }
