@@ -74,14 +74,9 @@ impl CoreDB {
         let index_names = storage.read_dir(index_dir_path).await;
         match index_names {
           Ok(index_names) => {
-            info!(
-              "Index directory {} already exists. Loading existing index",
-              index_dir_path
-            );
-
             if index_names.is_empty() {
               info!(
-                "Index directory {} does not exist. Creating it.",
+                "Index directory {} exists, but has no indices. Creating the default index.",
                 index_dir_path
               );
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
@@ -98,6 +93,10 @@ impl CoreDB {
               .await?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
+              info!(
+                "Index directory {} already exists. Loading existing indices.",
+                index_dir_path
+              );
               for index_name in index_names {
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
                 let full_wal_path_name = format!("{}/{}", wal_dir_path, index_name);
@@ -460,7 +459,7 @@ impl CoreDB {
       let merge_policy = self
         .get_merge_policy()
         .ok_or(CoreDBError::InvalidPolicy())?;
-      let all_segments_summaries = index_entry.get_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.read_all_segments_summaries().await?;
       // Get all the keys of the segments in memory
       let segments_in_memory = index_entry.get_memory_segments_numbers();
       // Apply the merge policy directly here based on the enum variant
@@ -486,7 +485,7 @@ impl CoreDB {
     for index_entry in self.get_index_map() {
       // TODO: this does not need to read all_segments_summaries from disk - can use the one already
       // in memory in Index::all_segments_summaries()
-      let all_segments_summaries = index_entry.value().get_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.value().read_all_segments_summaries().await?;
 
       let retention_policy = self
         .get_retention_policy()
