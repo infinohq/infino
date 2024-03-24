@@ -845,6 +845,8 @@ impl Index {
       return Ok(());
     }
 
+    info!("WAL files exist, prior Infino shutdown wasn't clean. Starting recovery...")
+
     // At the end of this function, when recovery is complete, we delete all wal files, except for the one
     // corresponding to the current segment.
     let mut wal_files_to_delete: HashMap<u32, String> = HashMap::new();
@@ -874,14 +876,14 @@ impl Index {
         Ok(disk_segment) => {
           if wal_segment.quick_equals(&disk_segment) {
             // Both the segments are the same. Use the segment from disk - to avoid unnecessory serialization.
-            info!(
+            debug!(
               "Segment number {}. Segment from WAL and from disk are the same. Using the segment from disk.",
               segment_number
             );
             segment_to_use = disk_segment;
           } else {
             // Both the segments are not the same. Prefer the one from WAL, as it would be more recent.
-            info!(
+            debug!(
               "Segment number {}. Segment from WAL and from disk are *not* same. Using the segment from WAL.",
               segment_number
             );
@@ -891,7 +893,7 @@ impl Index {
         }
         Err(_) => {
           // No segment found on disk. Use the one from WAL.
-          info!(
+          debug!(
             "Segment number {}. Segment found in WAL but not on disk. Using the segment from WAL.",
             segment_number
           );
@@ -950,6 +952,8 @@ impl Index {
         std::fs::remove_file(wal_file_path)?;
       }
     }
+
+    info!("Recovery complete");
 
     Ok(())
   }
@@ -1312,6 +1316,7 @@ mod tests {
     );
 
     let segment_path = index.get_segment_dir_path(index.metadata.get_current_segment_number());
+    index.commit(true).await.unwrap();
     let segment_metadata_path = get_joined_path(&segment_path, &Segment::get_metadata_file_name());
     assert!(
       index
