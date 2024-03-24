@@ -799,8 +799,7 @@ impl Index {
       .filter_map(|entry| {
         if let Ok(entry) = entry {
           if let Some(file_name) = entry.file_name().to_str() {
-            if file_name.ends_with(".wal") {
-              let segment_number_str = &file_name[..file_name.len() - 4]; // Remove ".wal"
+            if let Some(segment_number_str) = file_name.strip_suffix(".wal") {
               if let Ok(segment_number) = segment_number_str.parse::<u32>() {
                 return Some((segment_number, file_name.to_owned()));
               } else {
@@ -2770,13 +2769,13 @@ mod tests {
     index.commit(false).await.unwrap();
     let wal_file_names = index.get_wal_files().await.unwrap();
     assert_eq!(wal_file_names.len(), 1);
-    let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_names.get(0).unwrap().1);
+    let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_names.first().unwrap().1);
     let lines = std::fs::read_to_string(wal_file_path)
       .map(|contents| contents.lines().count())
       .unwrap();
     assert_eq!(lines, 1);
 
-    // **Part 3**: Write a 2*loc_metric_threshold log messages/metric points. This will create 2 more segments, making
+    // **Part 3**: Write a 2*log_metric_threshold log messages/metric points. This will create 2 more segments, making
     // the total number of WAL files to be 3.
     for i in 0..2 * log_metric_threshold {
       let time = Utc::now().timestamp_millis() as u64;
@@ -2855,7 +2854,7 @@ mod tests {
     let (current_segment_number, _) = recovered_index.get_current_segment_ref();
     assert_eq!(wal_file_names.len(), 1);
     assert_eq!(
-      wal_file_names.get(0).unwrap().1,
+      wal_file_names.first().unwrap().1,
       format!("{}.wal", current_segment_number)
     );
 
@@ -2898,7 +2897,7 @@ mod tests {
     // The recovered index has only 1 line in WAL - as the above log message/metric point was never written to WAL.
     let wal_file_names = recovered_index_2.get_wal_files().await.unwrap();
     assert_eq!(wal_file_names.len(), 1);
-    let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_names.get(0).unwrap().1);
+    let wal_file_path = get_joined_path(&wal_dir_path, &wal_file_names.first().unwrap().1);
     let lines = std::fs::read_to_string(wal_file_path)
       .map(|contents| contents.lines().count())
       .unwrap();
