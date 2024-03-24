@@ -2705,14 +2705,18 @@ mod tests {
     assert_eq!(search_result.get_messages().len(), 3);
   }
 
+  #[test_case("log"; "when only logs are appended")]
+  #[test_case("metric"; "when only metric points are appended")]
   #[tokio::test]
-  async fn test_recover() {
+  // As of now append_type can be "log" or "metric". Keep it as string instead of bool, as more types
+  // such as "trace" may get appended in future.
+  async fn test_recover(append_type: &str) {
     let storage_type = StorageType::Local;
     let log_metric_threshold = 1000;
 
-    // Create a new index with a low threshold for the segment size.
+    // Create a new index with a log_metric_threshold for creating a new segment.
     let (index, index_dir_path, wal_dir_path, _index_dir, _wal_dir) = create_index_with_thresholds(
-      "test_multiple_segments_logs",
+      &format!("test_recover_{}", append_type),
       &storage_type,
       1024 * 1024,
       // Create a new segment after every log_metric_threshold log messages or metric points.
@@ -2722,23 +2726,27 @@ mod tests {
     )
     .await;
 
-    let message_prefix = "message";
+    let log_message_prefix = "message";
 
     // This would create a total of 6 segments.
-    // 5 segments of 1000 logs each, and 1 segment with 1 log message.
+    // 5 segments of 1000 logs/metric point each, and 1 segment with 1 log message/metric point.
     let expected_num_segments = 6;
 
     // **Part 1**: Append (5*log_metric_threshold+1) log messages/metric points, creating 6 segments.
     for i in 0..5 * log_metric_threshold + 1 {
-      let message = format!("{} {}", message_prefix, i);
-      index
-        .append_log_message(
-          Utc::now().timestamp_millis() as u64,
-          &HashMap::new(),
-          &message,
-        )
-        .await
-        .expect("Could not append log message");
+      let time = Utc::now().timestamp_millis() as u64;
+      if append_type == "log" {
+        let message = format!("{} {}", log_message_prefix, i);
+        index
+          .append_log_message(time, &HashMap::new(), &message)
+          .await
+          .expect("Could not append log message");
+      } else if append_type == "metric" {
+        index
+          .append_metric_point("metric_name", &HashMap::new(), time, i as f64)
+          .await
+          .expect("Could not append metric point");
+      }
     }
     index.flush_wal().await;
     let wal_file_names = index.get_wal_files().await.unwrap();
@@ -2771,15 +2779,19 @@ mod tests {
     // **Part 3**: Write a 2*loc_metric_threshold log messages/metric points. This will create 2 more segments, making
     // the total number of WAL files to be 3.
     for i in 0..2 * log_metric_threshold {
-      let message = format!("{} {}", message_prefix, i);
-      index
-        .append_log_message(
-          Utc::now().timestamp_millis() as u64,
-          &HashMap::new(),
-          &message,
-        )
-        .await
-        .expect("Could not append log message");
+      let time = Utc::now().timestamp_millis() as u64;
+      if append_type == "log" {
+        let message = format!("{} {}", log_message_prefix, i);
+        index
+          .append_log_message(time, &HashMap::new(), &message)
+          .await
+          .expect("Could not append log message");
+      } else if append_type == "metric" {
+        index
+          .append_metric_point("metric_name", &HashMap::new(), time, i as f64)
+          .await
+          .expect("Could not append metric point");
+      }
     }
     index.flush_wal().await;
     let wal_files = index.get_wal_files().await.unwrap();
@@ -2822,10 +2834,17 @@ mod tests {
         .memory_segments_map
         .get(&segment_number)
         .unwrap();
-      if segment_number == 7 {
-        assert_eq!(segment.get_log_message_count(), 1);
+
+      let value = if append_type == "log" {
+        segment.get_log_message_count()
       } else {
-        assert_eq!(segment.get_log_message_count(), log_metric_threshold);
+        segment.get_metric_point_count()
+      };
+
+      if segment_number == 7 {
+        assert_eq!(value, 1);
+      } else {
+        assert_eq!(value, log_metric_threshold);
       }
     }
 
@@ -2845,14 +2864,26 @@ mod tests {
     // or the index wasn't committed. This is consistent with other observability stores, listed here:
     // "WAL usage broken in modern time series databases":
     // https://valyala.medium.com/wal-usage-looks-broken-in-modern-time-series-databases-b62a627ab704
-    recovered_index
-      .append_log_message(
-        Utc::now().timestamp_millis() as u64,
-        &HashMap::new(),
-        "final log message",
-      )
-      .await
-      .expect("Could not append log message");
+    if append_type == "log" {
+      recovered_index
+        .append_log_message(
+          Utc::now().timestamp_millis() as u64,
+          &HashMap::new(),
+          "final log message",
+        )
+        .await
+        .expect("Could not append log message");
+    } else if append_type == "metric" {
+      recovered_index
+        .append_metric_point(
+          "metric_name",
+          &HashMap::new(),
+          Utc::now().timestamp_millis() as u64,
+          1.0,
+        )
+        .await
+        .expect("Could not append log message");
+    }
 
     // Simulate recovery by recreating the index.
     let recovered_index_2 = Index::refresh(
@@ -2876,6 +2907,11 @@ mod tests {
     // The current segment of the recovered index has only 1 log message/metric point, as the above log message/metric
     // point was lost during recovery (as it was never in WAL).
     let current_segment = recovered_index_2.get_current_segment_ref().1;
-    assert_eq!(current_segment.get_log_message_count(), 1);
+    let value = if append_type == "log" {
+      current_segment.get_log_message_count()
+    } else {
+      current_segment.get_metric_point_count()
+    };
+    assert_eq!(value, 1);
   }
 }
