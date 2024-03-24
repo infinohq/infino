@@ -42,16 +42,12 @@ fn check_and_start_flush_wal_thread(
 }
 
 /// Function to commit indices by starting a new thread as necessory.
-fn check_and_start_commit_thread(
-  state: Arc<AppState>,
-  commit_handle: &mut Option<JoinHandle<()>>,
-  is_shutdown: bool,
-) {
+fn check_and_start_commit_thread(state: Arc<AppState>, commit_handle: &mut Option<JoinHandle<()>>) {
   if !is_join_handle_running(commit_handle) {
     // The thread to flush WAL isn't started or has finished.
     // Start a new thread for commit, and update the commit_handle.
     *commit_handle = Some(tokio::spawn(async move {
-      let result = state.coredb.commit(is_shutdown).await;
+      let result = state.coredb.commit(false).await;
 
       // Handle the result of the commit operation
       match result {
@@ -120,13 +116,13 @@ pub async fn check_and_start_background_threads(state: Arc<AppState>) {
     // Start flush log thread - if one isn't running already.
     check_and_start_flush_wal_thread(state.clone(), &mut flush_wal_handle);
 
+    // Start commit thread - if one isn't running already.
+    check_and_start_commit_thread(state.clone(), &mut commit_handle);
+
     // Check if we need to shut down (typically triggered by the user by sending Ctrl-C on Infino server).
-    // We can check for this anywhere in the loop, but we check just before commit to avoid extra work
+    // We can check for this anywhere in the loop, but we check just after commit to avoid extra work
     // (such as running retention policy even after user initiates shutdown).
     let is_shutdown = IS_SHUTDOWN.load();
-
-    // Start commit thread - if one isn't running already.
-    check_and_start_commit_thread(state.clone(), &mut commit_handle, is_shutdown);
 
     // Exit from the loop after shutting down background threads if is_shutdown is set.
     if is_shutdown {
