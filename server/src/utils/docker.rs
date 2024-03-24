@@ -6,6 +6,7 @@ use std::process::Command;
 use log::info;
 
 /// Start a docker container with the given name and image.
+#[allow(dead_code)]
 pub fn start_docker_container(
   name: &str,
   image_name: &str,
@@ -37,6 +38,7 @@ pub fn start_docker_container(
 }
 
 /// Execute given command in the container with the given name.
+#[allow(dead_code)]
 pub fn exec_command(name: &str, args: &[&str]) -> Result<(), std::io::Error> {
   let mut command = Command::new("docker");
   command.arg("exec").arg(name).args(args);
@@ -53,6 +55,7 @@ pub fn exec_command(name: &str, args: &[&str]) -> Result<(), std::io::Error> {
 }
 
 /// Stop the docker container of given name.
+#[allow(dead_code)]
 pub fn stop_docker_container(name: &str) -> Result<(), std::io::Error> {
   // Build the Docker run command
   let mut command = Command::new("docker");
@@ -71,6 +74,7 @@ pub fn stop_docker_container(name: &str) -> Result<(), std::io::Error> {
 }
 
 /// Remove the docker container of the given name.
+#[allow(dead_code)]
 pub fn remove_docker_container(name: &str) -> Result<(), std::io::Error> {
   // Build the Docker run command
   let mut command = Command::new("docker");
