@@ -155,6 +155,7 @@ impl From<ParseIntError> for CoreDBError {
     CoreDBError::IOError(error.to_string())
   }
 }
+
 impl From<QueryError> for CoreDBError {
   fn from(error: QueryError) -> Self {
     CoreDBError::QueryError(error)
