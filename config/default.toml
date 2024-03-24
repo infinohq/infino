@@ -36,12 +36,3 @@ port = 3000
 host = "0.0.0.0"
 timestamp_key = "date"
 labels_key = "labels"
-use_rabbitmq = "no"             # specifies whether to write incoming messages to rabbitmq
-
-
-# In case the server section specifies to use rabbitmq (use_rabbitmq = yes),
-# configuration for rabbitmq needs to be specified. Sample configuration below.
-[rabbitmq]
-container_name = "infino-queue"
-stream_port = 5552
-listen_port = 5672

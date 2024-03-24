@@ -14,7 +14,6 @@ pub struct ServerSettings {
   host: String,
   timestamp_key: String,
   labels_key: String,
-  use_rabbitmq: bool,
 }
 
 impl ServerSettings {
@@ -37,43 +36,12 @@ impl ServerSettings {
   pub fn get_labels_key(&self) -> &str {
     &self.labels_key
   }
-
-  /// Get the flag to decide whether to use rabbitmq.
-  pub fn get_use_rabbitmq(&self) -> bool {
-    self.use_rabbitmq
-  }
-}
-
-#[derive(Debug, Deserialize)]
-/// Settings for rabbitmq queue.
-pub struct RabbitMQSettings {
-  container_name: String,
-  listen_port: u16,
-  stream_port: u16,
-}
-
-impl RabbitMQSettings {
-  /// Get comtainer name for rabbitmq docker container.
-  pub fn get_container_name(&self) -> &str {
-    &self.container_name
-  }
-
-  /// Get listen port for the queue.
-  pub fn get_listen_port(&self) -> u16 {
-    self.listen_port
-  }
-
-  /// Get stream port for the queue.
-  pub fn get_stream_port(&self) -> u16 {
-    self.stream_port
-  }
 }
 
 #[derive(Debug, Deserialize)]
 /// Settings for Core, read from config file.
 pub struct Settings {
   server: ServerSettings,
-  rabbitmq: Option<RabbitMQSettings>,
 }
 
 impl Settings {
@@ -103,16 +71,6 @@ impl Settings {
     &self.server
   }
 
-  /// Get coredb settings.
-  pub fn get_rabbitmq_settings(&self) -> &RabbitMQSettings {
-    let rabbitmq_settings = self
-      .rabbitmq
-      .as_ref()
-      .expect("Could not retrieve rabbitmq settings");
-
-    rabbitmq_settings
-  }
-
   #[cfg(test)]
   /// Get the default config file name.
   pub fn get_default_config_file_name() -> &'static str {
@@ -135,11 +93,5 @@ mod tests {
     assert_eq!(server_settings.get_host(), "0.0.0.0");
     assert_eq!(server_settings.get_timestamp_key(), "date");
     assert_eq!(server_settings.get_labels_key(), "labels");
-
-    // Check rabbitmq settings.
-    let rabbitmq_settings = settings.get_rabbitmq_settings();
-    assert_eq!(rabbitmq_settings.get_container_name(), "infino-queue");
-    assert_eq!(rabbitmq_settings.get_listen_port(), 5672);
-    assert_eq!(rabbitmq_settings.get_stream_port(), 5552);
   }
 }
