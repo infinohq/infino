@@ -259,7 +259,7 @@ fn parse_json(value: &serde_json::Value) -> Result<Vec<Map<String, Value>>, Infi
 }
 
 /// Helper function to get timestamp value from given json object.
-fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64, CoreDBError> {
+fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64, InfinoError> {
   let result = value.get(timestamp_key);
   let timestamp: u64;
   match result {
@@ -270,17 +270,15 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
         timestamp = v.as_u64().unwrap();
       } else {
         let msg = format!("Invalid timestamp {} in json {:?}", v, value);
-        return Err(CoreDBError::InvalidConfiguration(msg));
+        return Err(InfinoError::InvalidInput(msg));
       }
     }
     None => {
-      warn!(
-        "Could not find timestamp in json {:?}, adding current timestamp",
-        value
-      );
-      timestamp = chrono::Utc::now().timestamp_millis() as u64;
+      let msg = format!("Could not find timestamp in json {:?}", value);
+      return Err(InfinoError::InvalidInput(msg));
     }
   }
+
   Ok(timestamp)
 }
 
@@ -291,18 +289,13 @@ async fn append_single_log_message(
   state: Arc<AppState>,
   timestamp_key: &str,
 ) -> Result<u32, CoreDBError> {
-  let obj_string = serde_json::to_string(&obj).unwrap();
-  if is_queue {
-    state
-      .queue
-      .as_ref()
-      .unwrap()
-      .publish(&obj_string)
-      .await
-      .unwrap();
-  }
-
-  let timestamp = get_timestamp(&obj, timestamp_key)?;
+  let timestamp = get_timestamp(&obj, timestamp_key).unwrap_or_else(|err| {
+    warn!(
+      "Timestamp error, adding current time stamp. Entry {:?}: {}",
+      obj, err
+    );
+    chrono::Utc::now().timestamp_millis() as u64
+  });
 
   let mut fields: HashMap<String, String> = HashMap::new();
   let mut text = String::new();
@@ -567,8 +560,6 @@ async fn bulk(
     .clone()
     .write_all(&json_body.to_string().into_bytes()[..])
     .unwrap();
-
-  let is_queue = state.queue.is_some();
 
   let actions = process_bulk_json_body(&json_body)?;
 
@@ -1938,17 +1929,10 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
-    let container_name = "infino-test-main-rs";
 
-    create_test_config(
-      config_dir_path,
-      index_dir_path,
-      wal_dir_path,
-      container_name,
-      use_rabbitmq,
-    );
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _) = app(config_dir_path).await;
 
     // Create a single index.
     let response = app
@@ -2055,9 +2039,8 @@ mod tests {
     debug!("Response content: {}", body_str);
   }
 
-  #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_bulk_operation_no_timestamp(use_rabbitmq: bool) {
+  async fn test_bulk_operation_no_timestamp() {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_name = "bulk_test";
@@ -2065,166 +2048,23 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
-    let container_name = "infino-test-main-rs";
 
-    create_test_config(
-      config_dir_path,
-      index_dir_path,
-      wal_dir_path,
-      container_name,
-      use_rabbitmq,
-    );
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _) = app(config_dir_path).await;
 
-    let body = bulk_request;
-    let path = format!("/{}/bulk", index_name);
-
+    // Create a single index.
     let response = app
       .call(
         Request::builder()
-          .method(http::Method::POST)
-          .uri(&path)
-          .header("Content-Type", "application/x-ndjson")
-          .body(Body::from(body))
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
           .unwrap(),
       )
       .await
       .unwrap();
-
-    // Verify the response status code
     assert_eq!(response.status(), StatusCode::OK);
-
-    // Read the response body and verify the expected outcome
-    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
-      .await
-      .unwrap();
-    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
-
-    // Make sure documents are inserted correctly.
-    assert_eq!(response_json["errors"], false);
-
-    // *** Test comma delimited inserts
-    let bulk_request = format!(
-      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"5\"}}}},{{\"title\": \"Document 5\", \"content\": \"Example content 5\"}},{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"6\"}}}},{{\"create\": {{\"_index\": \"{}\", \"_id\": \"7\"}}}},{{\"title\": \"Document 7\", \"content\": \"Example content 7\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"8\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 8\"}}}}",
-      index_name, index_name, index_name, index_name
-    );
-
-    // *** Test comma delimited inserts
-    let bulk_request = format!(
-      r#"{{ "index": {{ "_index": "{}", "_id": "56301" }} }},
-  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }},
-  {{ "index": {{ "_index": "{}", "_id": "56302" }} }},
-  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }}"#,
-      index_name, index_name
-    );
-    let body = bulk_request;
-    let path = format!("/{}/bulk", index_name);
-
-    let response = app
-      .call(
-        Request::builder()
-          .method(http::Method::POST)
-          .uri(&path)
-          .header("Content-Type", "application/x-ndjson")
-          .body(Body::from(body))
-          .unwrap(),
-      )
-      .await
-      .unwrap();
-
-    // Verify the response status code
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Read the response body and verify the expected outcome
-    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
-      .await
-      .unwrap();
-    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
-
-    // Make sure documents are inserted correctly.
-    assert_eq!(response_json["errors"], false);
-
-    // *** Test searches against the inserts
-    let query_dsl_request = "{\"query\":{\"match\":{\"test_field\":{\"query\":\"test_value\",\"operator\":\"OR\",\"prefix_length\":0,\"max_expansions\":50,\"fuzzy_transpositions\":true,\"lenient\":false,\"zero_terms_query\":\"NONE\",\"auto_generate_synonyms_phrase_query\":true,\"boost\":1.0}}}}";
-    let path = format!("/{}/search_logs", index_name);
-
-    let request = Request::builder()
-      .method(http::Method::GET)
-      .uri(path)
-      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-      .body(Body::from(query_dsl_request))
-      .unwrap();
-
-    let result = app.call(request).await;
-
-    let response = result.expect("Failed to make a call");
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = response.into_body();
-    let max_body_size = 10 * 1024 * 1024;
-    let bytes = to_bytes(body, max_body_size)
-      .await
-      .expect("Failed to read body");
-
-    let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
-    debug!("Response content: {}", body_str);
-  }
-
-  #[test_case(false ; "do not use rabbitmq")]
-  #[tokio::test]
-  async fn test_bulk_operation_no_timestamp(use_rabbitmq: bool) {
-    let config_dir = TempDir::new("config_test").unwrap();
-    let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "bulk_test";
-    let index_dir = TempDir::new(index_name).unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
-    let container_name = "infino-test-main-rs";
-
-    create_test_config(
-      config_dir_path,
-      index_dir_path,
-      wal_dir_path,
-      container_name,
-      use_rabbitmq,
-    );
-
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
-
-    let body = bulk_request;
-    let path = format!("/{}/bulk", index_name);
-
-    let response = app
-      .call(
-        Request::builder()
-          .method(http::Method::POST)
-          .uri(&path)
-          .header("Content-Type", "application/x-ndjson")
-          .body(Body::from(body))
-          .unwrap(),
-      )
-      .await
-      .unwrap();
-
-    // Verify the response status code
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Read the response body and verify the expected outcome
-    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
-      .await
-      .unwrap();
-    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
-
-    // Make sure documents are inserted correctly.
-    assert_eq!(response_json["errors"], false);
-
-    // *** Test comma delimited inserts
-    let bulk_request = format!(
-      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"5\"}}}},{{\"title\": \"Document 5\", \"content\": \"Example content 5\"}},{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"6\"}}}},{{\"create\": {{\"_index\": \"{}\", \"_id\": \"7\"}}}},{{\"title\": \"Document 7\", \"content\": \"Example content 7\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"8\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 8\"}}}}",
-      index_name, index_name, index_name, index_name
-    );
 
     // *** Test comma delimited inserts
     let bulk_request = format!(
