@@ -190,17 +190,24 @@ async fn run_server() {
     connection_string
   );
 
-  axum::serve(listener, app)
+  if let Err(err) = axum::serve(listener, app)
     .with_graceful_shutdown(shutdown_signal())
     .await
-    .unwrap();
+  {
+    error!("Error while starting or running axum server: {}", err);
+  }
 
   // Set the flag to indicate the background threads to shutdown, and wait for them to finish.
   IS_SHUTDOWN.store(true);
-  info!("Shutting down background threads and waiting for it to finish...");
-  background_threads_handle
-    .await
-    .expect("Error while shutting down the background threads");
+  info!("Shutting down background threads and waiting for them to finish...");
+  if let Err(err) = background_threads_handle.await {
+    error!("Error while shutting down the background threads {}", err);
+  }
+
+  info!("Starting final commit of coredb...");
+  if let Err(err) = shared_state.clone().coredb.commit(true).await {
+    error!("Failed to commit coredb: {}", err);
+  }
 
   info!("Completed Infino server shutdown");
 }

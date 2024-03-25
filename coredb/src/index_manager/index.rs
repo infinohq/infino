@@ -344,27 +344,36 @@ impl Index {
     (segment_number, segment_summary)
   }
 
+  /// Checks if the current segment is full.
+  /// Returns
+  /// * bool to indicate if the current segment is full,
+  /// * the current segment number,
+  /// * end time of the current segment.
+  fn is_current_segment_full(&self) -> (bool, u32, u64) {
+    let (current_segment_number, current_segment) = self.get_current_segment_ref();
+    let num_log_messages = current_segment.get_log_message_count();
+    let num_metric_points = current_segment.get_metric_point_count();
+    let current_segment_end_time = current_segment.get_end_time();
+
+    // If either the log messages *OR* metric points in the segment are equal to or above the threshold,
+    // the segment is full.
+    if num_log_messages >= self.metadata.get_log_messages_threshold()
+      || num_metric_points >= self.metadata.get_metric_points_threshold()
+    {
+      return (true, current_segment_number, current_segment_end_time);
+    }
+
+    (false, current_segment_number, current_segment_end_time)
+  }
+
   /// Check whether the current segment is full, and if it is, create a new segment (which becomes the new
   /// current segment where append operations go to).
   async fn check_and_create_new_segment(&self) {
-    let current_segment_number;
-    let num_log_messages;
-    let num_metric_points;
-    let current_segment_end_time;
-    {
-      // Write this in a new block, so that current_segment, which is a reference to an entry in DashMap,
-      // is dropped by the end of the block.
-      let current_segment;
-      (current_segment_number, current_segment) = self.get_current_segment_ref();
-      num_log_messages = current_segment.get_log_message_count();
-      num_metric_points = current_segment.get_metric_point_count();
-      current_segment_end_time = current_segment.get_end_time();
-    }
-
-    // Check if the current segment is full - and return if it isn't.
-    if num_log_messages < self.metadata.get_log_messages_threshold()
-      && num_metric_points < self.metadata.get_metric_points_threshold()
-    {
+    // If the current segment isn't full - no new segment needs to be created.
+    let (is_full, current_segment_number, current_segment_end_time) =
+      self.is_current_segment_full();
+    if !is_full {
+      // The current segment isn't yet full - so we do not create a new segment.
       return;
     }
 
@@ -652,7 +661,7 @@ impl Index {
   pub async fn read_all_segments_summaries(
     &self,
   ) -> Result<DashMap<u32, SegmentSummary>, CoreDBError> {
-    info!(
+    debug!(
       "Getting segment summaries of index from index_dir_path: {}",
       self.index_dir_path
     );
@@ -758,16 +767,19 @@ impl Index {
 
     // Commit the current segment if commit is called during shutdown.
     if is_shutdown {
-      let current_segment_number = self.metadata.get_current_segment_number();
+      let (is_full, current_segment_number, _) = self.is_current_segment_full();
+
       info!(
         "Now committing current segment with segment number {}",
         current_segment_number
       );
       self.commit_segment(current_segment_number).await?;
 
-      // The current segment is now fully committed - so remove its write ahead log as we do not need it anymore for
-      // any recovery.
-      self.remove_wal(current_segment_number).await?;
+      // The current segment is now fully committed. Remove its WAL only if this segment is full.
+      // We keep the WAL otherwise as it might be needed for subsequent recoveries.
+      if is_full {
+        self.remove_wal(current_segment_number).await?;
+      }
     }
 
     // Write self.all_segments_summaries and self.metadata
@@ -845,7 +857,7 @@ impl Index {
       return Ok(());
     }
 
-    info!("WAL files exist, prior Infino shutdown wasn't clean. Starting recovery...");
+    info!("WAL files exist, starting recovery...");
 
     // At the end of this function, when recovery is complete, we delete all wal files, except for the one
     // corresponding to the current segment.
@@ -876,24 +888,35 @@ impl Index {
         Ok(disk_segment) => {
           if wal_segment.quick_equals(&disk_segment) {
             // Both the segments are the same. Use the segment from disk - to avoid unnecessory serialization.
+            // This typically happens for the current segment in clean shutdown, as we do not delete WAL file for the
+            // current segment in Index::commit().
             debug!(
               "Segment number {}. Segment from WAL and from disk are the same. Using the segment from disk.",
               segment_number
             );
             segment_to_use = disk_segment;
           } else {
-            // Both the segments are not the same. Prefer the one from WAL, as it would be more recent.
-            debug!(
-              "Segment number {}. Segment from WAL and from disk are *not* same. Using the segment from WAL.",
+            // Both the segments are not the same. Prefer the one that has more log messages or more metric points.
+            // (Note that since flush is OS dependent, it is possible that WAL segment has less data than disk segment.)
+            info!(
+              "Segment number {}. Segment from WAL and from disk are *not* same.",
               segment_number
             );
-            wal_segment.commit(&self.storage, &segment_dir_path).await?;
-            segment_to_use = wal_segment;
+            if wal_segment.get_log_message_count() > disk_segment.get_log_message_count()
+              || wal_segment.get_metric_point_count() > disk_segment.get_metric_point_count()
+            {
+              info!("Using WAL segment");
+              wal_segment.commit(&self.storage, &segment_dir_path).await?;
+              segment_to_use = wal_segment;
+            } else {
+              info!("Using disk segment");
+              segment_to_use = disk_segment;
+            }
           }
         }
         Err(_) => {
           // No segment found on disk. Use the one from WAL.
-          debug!(
+          info!(
             "Segment number {}. Segment found in WAL but not on disk. Using the segment from WAL.",
             segment_number
           );
@@ -921,9 +944,8 @@ impl Index {
       // TODO: the scenario above needs to be tested.
 
       let segment_to_use_end_time = segment_to_use.get_end_time();
-      if segment_to_use_end_time > current_segment_end_time
-        || (segment_to_use_end_time == current_segment_end_time
-          && segment_number > current_segment_number)
+      if segment_number > current_segment_number
+        && (segment_to_use_end_time == 0 || segment_to_use_end_time > current_segment_end_time)
       {
         current_segment_number = segment_number;
         current_segment_end_time = segment_to_use_end_time;
@@ -1365,7 +1387,7 @@ mod tests {
     }
 
     expected.commit(true).await.expect("Could not commit");
-    let received = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024)
+    let received = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
       .await
       .unwrap();
 
@@ -1652,7 +1674,6 @@ mod tests {
         original_segment.get_metric_point_count(),
         original_segment_num_metric_points
       );
-
       assert!(original_segment.get_uncompressed_size() > 0);
 
       {
@@ -1814,11 +1835,10 @@ mod tests {
       }
     }
 
-    // Commit and sleep to ensure the index is written to disk.
-    index.commit(true).await.expect("Could not commit index");
-    sleep(Duration::from_millis(1000));
-
     let end_time = Utc::now().timestamp_millis() as u64;
+
+    // Commit the index to disk, as in the next step we read from disk using Index::refresh()
+    index.commit(true).await.unwrap();
 
     // Read the index from disk.
     index = match Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024).await {
@@ -2497,7 +2517,7 @@ mod tests {
         .append_log_message(end, &HashMap::new(), message_end)
         .await
         .expect("Could not append log message");
-      index.commit(true).await.expect("Could not commit index");
+      index.commit(false).await.expect("Could not commit index");
     }
 
     // We'll have num_segments segments, plus one empty segment at the end.
