@@ -100,6 +100,7 @@ impl Segment {
       match entry {
         WalEntry::Log(log_entry) => {
           let result = segment.append_log_message_internal(
+            log_entry.get_log_message_id(),
             log_entry.get_time(),
             log_entry.get_fields(),
             log_entry.get_text(),
@@ -243,6 +244,7 @@ impl Segment {
   /// during recovery when we are building a segment and do not want to write WAL.
   fn append_log_message_internal(
     &self,
+    log_message_id: u32,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
@@ -250,8 +252,8 @@ impl Segment {
     let log_message = LogMessage::new_with_fields_and_text(time, fields, text);
     let terms = log_message.get_terms();
 
-    // Increment the number of log messages appended so far, and get the id for this log message.
-    let log_message_id = self.metadata.fetch_increment_log_message_count();
+    // Increment the number of log messages appended so far
+    let _ = self.metadata.fetch_increment_log_message_count();
 
     let trie = self.trie.clone();
 
@@ -285,6 +287,7 @@ impl Segment {
   // Note that this function isn't async - this helps with testing and esuring correctness.
   pub fn append_log_message(
     &self,
+    log_message_id: u32,
     time: u64,
     fields: &HashMap<String, String>,
     text: &str,
@@ -295,14 +298,14 @@ impl Segment {
     );
 
     // Write to write-ahead-log.
-    let wal_entry = WalEntry::Log(LogWalEntry::new(time, fields, text));
+    let wal_entry = WalEntry::Log(LogWalEntry::new(log_message_id, time, fields, text));
     {
       let wal_clone = self.wal.clone();
       let wal = &mut wal_clone.lock();
       wal.append(&wal_entry).unwrap();
     }
 
-    self.append_log_message_internal(time, fields, text)
+    self.append_log_message_internal(log_message_id, time, fields, text)
   }
 
   /// Append a metric point to this segment, without writing WAL.
@@ -563,24 +566,25 @@ impl Segment {
       .ok_or(CoreDBError::IOError("Invalid path".to_string()))?;
     // TODO: disable WAL while merging segments
     let merged_segment = Segment::new(path);
-    // Merge log messages
-    let mut log_messages: Vec<_> = segment1
-      .forward_map
-      .iter()
-      .chain(segment2.forward_map.iter())
-      .map(|ref_multi| (*ref_multi.key(), ref_multi.value().clone()))
-      .filter(|(_, log_message)| !log_message.is_deleted())
-      .collect();
 
-    log_messages.sort_by_key(|(_, log_message)| log_message.get_time());
-
-    for (_, log_message) in log_messages {
+    // iteratate over segment 1 and segmnet 2 forward map and call append
+    for entry in segment1.forward_map.iter() {
+      let log_message = entry.value();
+      let time = log_message.get_time();
+      let fields = log_message.get_fields();
+      let text = log_message.get_text();
       merged_segment
-        .append_log_message(
-          log_message.get_time(),
-          log_message.get_fields(),
-          log_message.get_text(),
-        )
+        .append_log_message(*entry.key(), time, fields, text)
+        .map_err(CoreDBError::from)?;
+    }
+
+    for entry in segment2.forward_map.iter() {
+      let log_message = entry.value();
+      let time = log_message.get_time();
+      let fields = log_message.get_fields();
+      let text = log_message.get_text();
+      merged_segment
+        .append_log_message(*entry.key(), time, fields, text)
         .map_err(CoreDBError::from)?;
     }
 
@@ -740,7 +744,7 @@ mod tests {
       let time = Utc::now().timestamp_millis() as u64;
       let log_message = format!("some log message {}", i);
       segment
-        .append_log_message(time, &HashMap::new(), &log_message)
+        .append_log_message(i, time, &HashMap::new(), &log_message)
         .unwrap();
     }
 
@@ -795,6 +799,7 @@ mod tests {
 
     original_segment
       .append_log_message(
+        0,
         Utc::now().timestamp_millis() as u64,
         &HashMap::new(),
         "this is my 1st log message",
@@ -944,7 +949,7 @@ mod tests {
     let time = Utc::now().timestamp_millis() as u64;
 
     segment
-      .append_log_message(time, &HashMap::new(), "some log message")
+      .append_log_message(0, time, &HashMap::new(), "some log message")
       .unwrap();
 
     assert_eq!(segment.metadata.get_start_time(), time);
@@ -985,9 +990,10 @@ mod tests {
     let segment = Segment::new_with_temp_wal();
 
     let start_time = Utc::now().timestamp_millis() as u64;
-    for _ in 0..num_messages {
+    for i in 0..num_messages {
       segment
         .append_log_message(
+          i,
           Utc::now().timestamp_millis() as u64,
           &HashMap::new(),
           "some log message",
@@ -1089,7 +1095,7 @@ mod tests {
 
           // Append the log message to the segment.
           segment_arc
-            .append_log_message(time, &fields, &log_text)
+            .append_log_message(i, time, &fields, &log_text)
             .unwrap();
 
           // Collect terms for trie verification.
@@ -1124,10 +1130,10 @@ mod tests {
     let segment = Segment::new_with_temp_wal();
 
     segment
-      .append_log_message(start, &HashMap::new(), "message_1")
+      .append_log_message(0, start, &HashMap::new(), "message_1")
       .unwrap();
     segment
-      .append_log_message(end, &HashMap::new(), "message_2")
+      .append_log_message(1, end, &HashMap::new(), "message_2")
       .unwrap();
     assert_eq!(segment.metadata.get_start_time(), start);
     assert_eq!(segment.metadata.get_end_time(), end);
@@ -1156,13 +1162,13 @@ mod tests {
     let segment = Segment::new_with_temp_wal();
 
     segment
-      .append_log_message(1000, &HashMap::new(), "hello world")
+      .append_log_message(0, 1000, &HashMap::new(), "hello world")
       .unwrap();
     segment
-      .append_log_message(1001, &HashMap::new(), "some message")
+      .append_log_message(1, 1001, &HashMap::new(), "some message")
       .unwrap();
     segment
-      .append_log_message(1002, &HashMap::new(), "hello world hello world")
+      .append_log_message(2, 1002, &HashMap::new(), "hello world hello world")
       .unwrap();
 
     // Test terms map.
@@ -1290,10 +1296,10 @@ mod tests {
 
     // insert logs in both the segments
     segment1
-      .append_log_message(time, &HashMap::new(), "log message 1")
+      .append_log_message(0, time, &HashMap::new(), "log message 1")
       .unwrap();
     segment2
-      .append_log_message(time, &HashMap::new(), "log message 2")
+      .append_log_message(1, time, &HashMap::new(), "log message 2")
       .unwrap();
 
     let merged_segment = Segment::merge(segment1, segment2).unwrap();
@@ -1335,10 +1341,11 @@ mod tests {
     let segment2 = Segment::new_with_temp_wal();
     let time = Utc::now().timestamp_millis() as u64;
 
-    // Insert 1000 unique logs in segment 1 and 2
+    // Insert 10 unique logs in segment 1 and 2
     for i in 0..10 {
       segment1
         .append_log_message(
+          i,
           time,
           &HashMap::new(),
           format!("log_message_1_{}", i).as_str(),
@@ -1346,6 +1353,7 @@ mod tests {
         .unwrap();
       segment2
         .append_log_message(
+          i + 10,
           time,
           &HashMap::new(),
           format!("log_message_2_{}", i).as_str(),
@@ -1393,6 +1401,13 @@ mod tests {
     assert_eq!(merged_segment.metadata.get_label_count(), 22);
     assert_eq!(merged_segment.metadata.get_metric_point_count(), 22);
     assert_eq!(merged_segment.metadata.get_term_count(), 20);
+
+    // Iterate over merged segments forward map and check if log ids 1-20 are present
+    let ids: Vec<u32> = (0..20).collect();
+    let logs = merged_segment
+      .get_log_messages_from_ids(&ids, 0, u64::MAX)
+      .unwrap();
+    assert_eq!(logs.len(), 20);
   }
 
   #[tokio::test]
@@ -1509,7 +1524,12 @@ mod tests {
     let time = Utc::now().timestamp_millis() as u64;
     for i in 0..1000 {
       segment
-        .append_log_message(time, &HashMap::new(), format!("log_message_{}", i).as_str())
+        .append_log_message(
+          i,
+          time,
+          &HashMap::new(),
+          format!("log_message_{}", i).as_str(),
+        )
         .unwrap();
     }
 

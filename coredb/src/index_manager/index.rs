@@ -437,8 +437,10 @@ impl Index {
       let current_segment;
       (current_segment_number, current_segment) = self.get_current_segment_ref();
 
+      let log_message_id = self.metadata.fetch_increment_log_message_count();
+
       // Append the log message to the current segment.
-      doc_id = current_segment.append_log_message(time, fields, message)?;
+      doc_id = current_segment.append_log_message(log_message_id, time, fields, message)?;
 
       drop(current_segment);
     }
@@ -1122,7 +1124,8 @@ impl Index {
   pub async fn merge_segments(&self, segment_list: &Vec<u32>) -> Result<u32, CoreDBError> {
     // Fetch list of segments to merge from segment_list
     let mut segments: Vec<Segment> = Vec::new();
-    for segment_number in segment_list {
+    // We create stack of vector, so we create segment in reverse order and then pop
+    for segment_number in segment_list.iter().rev() {
       let segment = self.refresh_segment(*segment_number).await?;
       segments.push(segment);
     }
