@@ -1366,7 +1366,7 @@ mod tests {
     }
 
     expected.commit(true).await.expect("Could not commit");
-    let received = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024)
+    let received = Index::refresh(&storage_type, &index_dir_path, &wal_dir_path, 1024 * 1024)
       .await
       .unwrap();
 

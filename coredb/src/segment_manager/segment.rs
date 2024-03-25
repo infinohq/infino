@@ -407,6 +407,13 @@ impl Segment {
     // Acquire a lock - so that only one thread can commit at a time.
     let _lock = self.commit_lock.lock().await;
 
+    {
+      // Flush write ahead log for this segment.
+      let wal = self.wal.clone();
+      let mut wal = wal.lock();
+      wal.flush()?;
+    }
+
     // Function to serialize a component to a given path.
     async fn serialize_component<T: serde::Serialize>(
       component: &T,
