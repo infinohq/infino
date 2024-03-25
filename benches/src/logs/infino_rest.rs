@@ -118,12 +118,10 @@ impl InfinoApiClient {
       text, elapsed
     );
 
-    //println!("Response {:?}", response);
     match response {
       Ok(res) => {
         #[allow(unused)]
         let text = res.text().await.unwrap();
-        //println!("Result {}", text);
       }
       Err(err) => {
         println!("Error while fetching from Infino: {}", err);

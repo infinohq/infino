@@ -494,28 +494,51 @@ async fn append_metric(
   Ok(())
 }
 
-#[allow(clippy::single_char_pattern)]
+/// Process the bulk request body that may include newline-delimited JSON, comma-delimited entries,
+/// or a mix of both, into a Vec of serde_json::Value.
 fn process_bulk_json_body(json_body: &str) -> Result<Vec<Value>, (StatusCode, String)> {
-  // Preprocess the bulk request input to ensure it's in a JSON array format
-  let json_array_string = format!("[{}]", json_body.replace("\r\n", ",").replace('\n', ","));
+  let mut processed_entries = Vec::new();
 
-  // Parse the preprocessed bulk request as a JSON array
-  match serde_json::from_str::<Vec<Value>>(&json_array_string) {
-    Ok(json_array) => {
-      debug!(
-        "Successfully parsed JSON array with {} elements",
-        json_array.len()
-      );
-      Ok(json_array)
+  // Trim the leading '[' and trailing ']' to handle JSON array input
+  let trimmed_json_body = json_body
+    .trim()
+    .trim_start_matches('[')
+    .trim_end_matches(']');
+
+  // Normalize the input: replace "}," with "}\n" to ensure each JSON object is on its own line
+  let normalized_json_body = trimmed_json_body
+    .replace("},", "}\n")
+    .replace(",\n", "\n")
+    .replace(", \n", "\n");
+
+  // Split the normalized input into lines
+  for line in normalized_json_body.lines() {
+    let trimmed_line = line.trim();
+    // Skip empty lines
+    if trimmed_line.is_empty() {
+      continue;
     }
-    Err(e) => {
-      error!("Failed to parse JSON array: {}", e);
-      Err((
-        StatusCode::BAD_REQUEST,
-        "Failed to parse JSON array from input.".to_string(),
-      ))
+
+    // Attempt to parse each line as a separate JSON object
+    match serde_json::from_str::<Value>(trimmed_line) {
+      Ok(json_obj) => processed_entries.push(json_obj),
+      Err(e) => {
+        // Log and return an error if parsing fails
+        error!("Failed to parse JSON object: {}", e);
+        return Err((
+          StatusCode::BAD_REQUEST,
+          format!("Failed to parse JSON object: {}", trimmed_line),
+        ));
+      }
     }
   }
+
+  // Log the successful parsing of entries
+  debug!(
+    "Successfully parsed {} JSON objects",
+    processed_entries.len()
+  );
+  Ok(processed_entries)
 }
 
 /// Bulk append data to CoreDB.
@@ -1963,6 +1986,94 @@ mod tests {
       index_name, index_name, index_name, index_name
     );
 
+    let body = bulk_request;
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Make sure documents are inserted correctly.
+    assert_eq!(response_json["errors"], false);
+
+    // *** Test searches against the inserts
+    let query_dsl_request = "{\"query\":{\"match\":{\"test_field\":{\"query\":\"test_value\",\"operator\":\"OR\",\"prefix_length\":0,\"max_expansions\":50,\"fuzzy_transpositions\":true,\"lenient\":false,\"zero_terms_query\":\"NONE\",\"auto_generate_synonyms_phrase_query\":true,\"boost\":1.0}}}}";
+    let path = format!("/{}/search_logs", index_name);
+
+    let request = Request::builder()
+      .method(http::Method::GET)
+      .uri(path)
+      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+      .body(Body::from(query_dsl_request))
+      .unwrap();
+
+    let result = app.call(request).await;
+
+    let response = result.expect("Failed to make a call");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body();
+    let max_body_size = 10 * 1024 * 1024;
+    let bytes = to_bytes(body, max_body_size)
+      .await
+      .expect("Failed to read body");
+
+    let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
+    debug!("Response content: {}", body_str);
+  }
+
+  #[tokio::test]
+  async fn test_bulk_operation_no_timestamp() {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "bulk_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
+
+    let (mut app, _, _) = app(config_dir_path).await;
+
+    // Create a single index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // *** Test comma delimited inserts
+    let bulk_request = format!(
+      r#"{{ "index": {{ "_index": "{}", "_id": "56301" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }},
+  {{ "index": {{ "_index": "{}", "_id": "56302" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }}"#,
+      index_name, index_name
+    );
     let body = bulk_request;
     let path = format!("/{}/bulk", index_name);
 

@@ -2,10 +2,10 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 use crate::logs::clickhouse::ClickhouseEngine;
 use crate::logs::es::ElasticsearchEngine;
+use crate::logs::infino_os_rest::InfinoOpenSearchEngine;
 use crate::logs::infino::InfinoEngine;
 use crate::logs::infino_rest::InfinoApiClient;
 #[allow(unused_imports)]
-use crate::logs::infino_os_rest::InfinoOSApiClient;
 use crate::utils::io::get_directory_size;
 use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
 use std::{fs, thread, time};
@@ -34,6 +34,16 @@ static CLICKHOUSE_SEARCH_QUERIES: &[&str] = &[
 ];
 
 static ELASTICSEARCH_SEARCH_QUERIES: &[&str] = &[
+  "Directory",
+  "Digest: done",
+  "2006] [notice] mod_jk2 Shutting down",
+  "mod_jk child workerEnv in error state 5",
+  "Directory index forbidden",
+  "Jun 09 06:07:05 2005] [notice] LDAP:",
+  "unable to stat",
+];
+
+static INFINO_OPENSEARCH_SEARCH_QUERIES: &[&str] = &[
   "Directory",
   "Digest: done",
   "2006] [notice] mod_jk2 Shutting down",
@@ -225,15 +235,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   if run_all || opt.infino_os {
     // INFINO OS REST START
-    println!("\n\n***Now running Infino OpenSearch via the REST API client***");
+    println!("\n\n***Now running Infino OpenSearch via the Elastic REST API client***");
 
     // Index the data using infino and find the output size.
-    let infino_os =  ElasticsearchEngine::new(true).await;
+    let infino_os =  InfinoOpenSearchEngine::new().await;
     let cell_infino_os_index_time = infino_os.index_lines(&opt.input_file, max_docs).await;
 
     // Perform search on infino index
     let cell_infino_os_search_time = infino_os
-      .search_multiple_queries(ELASTICSEARCH_SEARCH_QUERIES)
+      .search_multiple_queries(INFINO_OPENSEARCH_SEARCH_QUERIES)
       .await;
 
     idx_size_title_str += " Infino-OS |";
@@ -247,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     log_search_lat_title_str += " Infino-OS |";
     log_search_lat_dashes_str += " ----- |";
     log_search_lat_values_str += &format!(" {} |",
-                  cell_infino_os_search_time / ELASTICSEARCH_SEARCH_QUERIES.len() as u128);
+                  cell_infino_os_search_time / INFINO_OPENSEARCH_SEARCH_QUERIES.len() as u128);
     // INFINO OS REST END
   }
 
@@ -256,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n\n***Now running Elasticsearch***");
 
     // Index the data using elasticsearch and find the output size.
-    let es = ElasticsearchEngine::new(false).await;
+    let es = ElasticsearchEngine::new().await;
     let cell_es_index_time = es.index_lines(&opt.input_file, max_docs).await;
 
     // Force merge the index so that the index size is optimized.
@@ -337,9 +347,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for _ in 1..10 {
       cell_infino_metrics_search_time += infino_metrics_client.search_metrics().await;
     }
-    cell_infino_metrics_search_time /= 10;
+    cell_infino_metrics_search_time /= 10000;
     println!(
-      "Infino metrics search avg {} microseconds",
+      "Infino metrics search avg {} ms",
       cell_infino_metrics_search_time
     );
 
@@ -364,9 +374,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for _ in 1..10 {
       cell_prometheus_search_time += prometheus_client.search_logs().await;
     }
-    cell_prometheus_search_time /= 10;
+    cell_prometheus_search_time /= 10000;
     println!(
-      "Prometheus timeseries search avg {} microseconds",
+      "Prometheus timeseries search avg {} ms",
       cell_prometheus_search_time
     );
 
