@@ -409,11 +409,6 @@ impl Segment {
 
     {
       // Flush write ahead log for this segment.
-      println!(
-        "##### Flushing WAL for segment with dir {}, log message count {}",
-        dir,
-        self.metadata.get_log_message_count()
-      );
       let wal = self.wal.clone();
       let mut wal = wal.lock();
       wal.flush()?;
