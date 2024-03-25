@@ -676,13 +676,15 @@ impl Segment {
   /// * `field` - The field to search within.
   /// * `prefix_text_str` - The exact prefix text string to match.
   /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
+  /// * `is_full_text_phrase` - Signifies whether it is term query or match phase query, for differentiating in the matching logic
   ///
-  pub async fn get_doc_ids_with_prefix_phrase(
+  pub async fn get_doc_ids_with_prefix_term_or_full_text_phrase(
     &self,
     prefix_phrase_terms: Vec<String>,
     field: &str,
     prefix_text_str: &str,
     case_insensitive: bool,
+    is_full_text_phrase: bool,
   ) -> Result<Vec<u32>, QueryError> {
     let mut matching_document_ids = Vec::new();
 
@@ -722,15 +724,25 @@ impl Segment {
 
       or_doc_ids.dedup();
 
-      // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
-      // and return the specific document IDs
+      if is_full_text_phrase {
+        // From the given document IDs, filter document IDs which contain the exact phrase (in the given field)
+        // and return the specific document IDs
+        matching_document_ids.extend(self.get_exact_phrase_matches(
+          &or_doc_ids,
+          Some(field),
+          prefix_text_str,
+        ));
+      } else {
+        // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
+        // and return the specific document IDs
 
-      matching_document_ids.extend(self.get_bool_prefix_matches(
-        &or_doc_ids,
-        field,
-        prefix_text_str,
-        case_insensitive,
-      ));
+        matching_document_ids.extend(self.get_bool_prefix_matches(
+          &or_doc_ids,
+          field,
+          prefix_text_str,
+          case_insensitive,
+        ));
+      }
     }
 
     Ok(matching_document_ids)
