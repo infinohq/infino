@@ -516,7 +516,6 @@ impl Index {
     ast: &Pairs<'_, query_dsl::Rule>,
     range_start_time: u64,
     range_end_time: u64,
-    is_delete_by_query: bool,
   ) -> Result<QueryDSLObject, CoreDBError> {
     debug!(
       "INDEX: Ast {:?}, range_start_time {:?}, and range_end_time {:?}\n",
@@ -536,40 +535,16 @@ impl Index {
     for segment_number in segment_numbers {
       let segment = self.memory_segments_map.get(&segment_number);
       let mut segment_results = match segment {
-        Some(segment) => {
-          let results = segment
-            .search_logs(&ast.clone(), range_start_time, range_end_time)
-            .await
-            .unwrap_or_else(|_| QueryDSLObject::new());
-
-          if is_delete_by_query {
-            let logs_ids: Vec<u32> = results.get_messages().iter().map(|m| m.get_id()).collect();
-            let deleted_logs = segment.mark_log_message_as_deleted(&logs_ids);
-            debug!(
-              "INDEX: Deleted log messages: {:?} from segment: {}",
-              deleted_logs, segment_number
-            );
-          }
-
-          results
-        }
+        Some(segment) => segment
+          .search_logs(&ast.clone(), range_start_time, range_end_time)
+          .await
+          .unwrap_or_else(|_| QueryDSLObject::new()),
         None => {
           let segment = self.refresh_segment(segment_number).await?;
-          let result = segment
+          segment
             .search_logs(ast, range_start_time, range_end_time)
             .await
-            .unwrap_or_else(|_| QueryDSLObject::new());
-
-          if is_delete_by_query {
-            let logs_ids: Vec<u32> = results.get_messages().iter().map(|m| m.get_id()).collect();
-            let deleted_logs = segment.mark_log_message_as_deleted(&logs_ids);
-            debug!(
-              "INDEX: Deleted log messages: {:?} from segment: {}",
-              deleted_logs, segment_number
-            );
-          }
-
-          result
+            .unwrap_or_else(|_| QueryDSLObject::new())
         }
       };
 
@@ -1173,9 +1148,6 @@ impl Index {
     // isolate the shards by wrapping it in a block
     {
       for segment_number in segment_list {
-        let segment = self.refresh_segment(*segment_number).await?; // Expensive: We are refreshing the segment twice in same function
-        segment.empty_deleted_log_ids();
-
         self.all_segments_summaries.remove(segment_number);
         self.memory_segments_map.remove(segment_number); // This is not required but precautionary
       }
@@ -1242,20 +1214,26 @@ impl Index {
   /// Mark logs as deleted for given query in the given time range and return count of logs marked as deleted.
   pub async fn delete_logs_by_query(
     &self,
-    ast: &Pairs<'_, query_dsl::Rule>,
+    log_ids: Vec<u32>,
     range_start_time: u64,
     range_end_time: u64,
   ) -> Result<u32, CoreDBError> {
-    // Call search_logs with is_delete_by_query set to true.
-    let results = self
-      .search_logs(ast, range_start_time, range_end_time, true)
+    // From segment summary map figure out all the segments that overlap with the given time range.
+    let segment_numbers = self
+      .get_overlapping_segments(range_start_time, range_end_time)
       .await;
-
-    // Return the count of logs marked as deleted.
-    match results {
-      Ok(results) => Ok(results.get_messages().len() as u32),
-      Err(e) => Err(e),
+    // Load the segment and delete the logs.
+    for segment_number in segment_numbers {
+      let segment = self.memory_segments_map.get(&segment_number);
+      let _segment_results = match segment {
+        Some(segment) => segment.mark_log_message_as_deleted(&log_ids),
+        None => {
+          let segment = self.refresh_segment(segment_number).await?;
+          segment.mark_log_message_as_deleted(&log_ids)
+        }
+      };
     }
+    Ok(log_ids.len() as u32)
   }
 }
 
@@ -1485,7 +1463,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, 0, u64::MAX, false)
+      .search_logs(&ast, 0, u64::MAX)
       .await
       .expect("Error in search_logs");
 
@@ -1522,7 +1500,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, 0, u64::MAX, false)
+      .search_logs(&ast, 0, u64::MAX)
       .await
       .expect("Error in search_logs");
 
@@ -1904,7 +1882,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, start_time, end_time, false)
+      .search_logs(&ast, start_time, end_time)
       .await
       .expect("Error in search_logs");
     assert_eq!(results.get_messages().len(), num_log_messages);
@@ -1918,7 +1896,7 @@ mod tests {
       let ast =
         QueryDslParser::parse(query_dsl::Rule::start, suffix).expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, start_time, end_time, false)
+        .search_logs(&ast, start_time, end_time)
         .await
         .expect("Error in search_logs");
       assert_eq!(results.get_messages().len(), 1);
@@ -1933,7 +1911,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, start_time, end_time, false)
+        .search_logs(&ast, start_time, end_time)
         .await
         .expect("Error in search_logs");
 
@@ -1985,7 +1963,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, 0, Utc::now().timestamp_millis() as u64, false)
+        .search_logs(&ast, 0, Utc::now().timestamp_millis() as u64)
         .await
         .expect("Error in search_logs");
 
@@ -2303,7 +2281,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, 0, expected_len as u64, false)
+      .search_logs(&ast, 0, expected_len as u64)
       .await
       .expect("Error in search_logs");
     assert_eq!(expected_len, results.get_messages().len());
@@ -2373,7 +2351,6 @@ mod tests {
         &ast,
         start_time as u64,
         Utc::now().timestamp_millis() as u64,
-        false,
       )
       .await
       .expect("Error in search_logs");
@@ -2466,7 +2443,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, 0, u64::MAX, false)
+        .search_logs(&ast, 0, u64::MAX)
         .await
         .expect("Error in search_logs");
       assert_eq!(results.get_messages().len(), 1);
@@ -2479,7 +2456,7 @@ mod tests {
       let ast = QueryDslParser::parse(query_dsl::Rule::start, query_message)
         .expect("Failed to parse query");
       let results = index
-        .search_logs(&ast, 0, u64::MAX, false)
+        .search_logs(&ast, 0, u64::MAX)
         .await
         .expect("Error in search_logs");
       assert_eq!(results.get_messages().len(), 1);
@@ -2753,7 +2730,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let search_result = index
-      .search_logs(&ast, 0, 10000, false)
+      .search_logs(&ast, 0, 10000)
       .await
       .expect("Error in search_logs");
 
@@ -2764,7 +2741,7 @@ mod tests {
   async fn test_basic_delete_logs_by_query() {
     let storage_type = StorageType::Local;
     let (index, _index_dir_path, _wal_dir_path, _index_dir, _wal_dir) =
-      create_index("test_basic_search", &storage_type).await;
+      create_index("test_basic_delete_logs_by_query", &storage_type).await;
     let num_log_messages = 1000;
     let message_prefix = "this is my log message";
     let mut expected_log_messages: Vec<String> = Vec::new();
@@ -2806,7 +2783,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let mut results = index
-      .search_logs(&ast, 0, u64::MAX, false)
+      .search_logs(&ast, 0, u64::MAX)
       .await
       .expect("Error in search_logs");
 
@@ -2821,7 +2798,7 @@ mod tests {
 
     // Delete logs by query
     let results_delete = index
-      .delete_logs_by_query(&ast, 0, u64::MAX)
+      .delete_logs_by_query(ids, 0, u64::MAX)
       .await
       .expect("Error in delete_logs_by_query");
 
@@ -2829,7 +2806,7 @@ mod tests {
 
     // Search logs again
     results = index
-      .search_logs(&ast, 0, u64::MAX, false)
+      .search_logs(&ast, 0, u64::MAX)
       .await
       .expect("Error in search_logs");
 
@@ -2920,7 +2897,7 @@ mod tests {
     let ast =
       QueryDslParser::parse(query_dsl::Rule::start, query_message).expect("Failed to parse query");
     let results = index
-      .search_logs(&ast, start_time, end_time, false)
+      .search_logs(&ast, start_time, end_time)
       .await
       .expect("Error in search_logs");
     assert_eq!(results.get_messages().len(), num_log_messages);
@@ -2933,7 +2910,7 @@ mod tests {
 
     // Delete logs by query
     let results_delete = index
-      .delete_logs_by_query(&ast, 0, u64::MAX)
+      .delete_logs_by_query(log_ids, 0, u64::MAX)
       .await
       .expect("Error in delete_logs_by_query");
 

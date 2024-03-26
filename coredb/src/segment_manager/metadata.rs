@@ -51,6 +51,7 @@ pub struct Metadata {
   #[serde(with = "atomic_cell_serde")]
   end_time: AtomicCell<u64>,
 
+  /// Deleted log ids.
   deleted_log_ids: AtomicVector<u32>,
 }
 

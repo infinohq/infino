@@ -1,46 +1,48 @@
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
-
+use std::sync::Arc;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AtomicVector<T> {
   #[serde(skip_serializing, skip_deserializing)]
-  data: Mutex<Vec<T>>,
+  data: Arc<RwLock<Vec<T>>>,
 }
-
 impl<T> Default for AtomicVector<T> {
   fn default() -> Self {
     Self::new()
   }
 }
-
 impl<T> AtomicVector<T> {
   pub fn new() -> Self {
     AtomicVector {
-      data: Mutex::new(vec![]),
+      // Initialize with RwLock and Arc for shared, mutable access
+      data: Arc::new(RwLock::new(vec![])),
     }
   }
-
   pub fn get(&self) -> Vec<T>
   where
     T: Clone,
   {
-    self.data.lock().unwrap().clone()
+    // Direct access without unwrapping
+    self.data.read().clone()
   }
 
   pub fn push(&self, value: T) {
-    self.data.lock().unwrap().push(value);
+    // Direct access without unwrapping
+    self.data.write().push(value);
   }
 
   pub fn extend<I>(&self, iter: I)
   where
     I: IntoIterator<Item = T>,
   {
-    let mut data = self.data.lock().unwrap();
+    // Direct access, no need for unwrap
+    let mut data = self.data.write();
     data.extend(iter);
   }
 
   pub fn empty(&self) {
-    let mut data = self.data.lock().unwrap();
+    // Directly clearing the vector without unwrap
+    let mut data = self.data.write();
     data.clear();
   }
 }

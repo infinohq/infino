@@ -266,7 +266,7 @@ impl CoreDB {
       )))?;
 
     index
-      .search_logs(&ast, range_start_time, range_end_time, false)
+      .search_logs(&ast, range_start_time, range_end_time)
       .await
   }
 
@@ -531,41 +531,33 @@ impl CoreDB {
       index_name, url_query, json_query, range_start_time, range_end_time
     );
 
-    let mut json_query = json_query.to_string();
-
-    // Check if URL or JSON query is empty
-    let is_url_empty = url_query.trim().is_empty();
-    let is_json_empty = json_query.trim().is_empty();
-
-    // If no JSON query, convert the URL query to Query DSL or return an error if no URL query
-    if is_json_empty {
-      if is_url_empty {
-        debug!("No Query was provided. Exiting");
-        return Err(QueryError::NoQueryProvided.into());
-      } else {
-        // Update json_query with the constructed query from url_query
-        json_query = format!(
-          r#"{{ "query": {{ "match": {{ "_all": {{ "query" : "{}", "operator" : "AND" }} }} }} }}"#,
-          url_query
-        );
-      }
-    }
-
-    // TODO: separete function to build AST as it is copied from search_logs
-    // Build the query AST
-    let ast = Segment::parse_query(&json_query)?;
-
-    let index = self
-      .index_map
-      .get(index_name)
-      .ok_or(QueryError::IndexNotFoundError(format!(
-        "Can't find index {}",
+    // Call search_logs to get the list of logs to delete
+    let logs_to_delete = self
+      .search_logs(
         index_name,
-      )))?;
+        url_query,
+        json_query,
+        range_start_time,
+        range_end_time,
+      )
+      .await;
 
-    index
-      .delete_logs_by_query(&ast, range_start_time, range_end_time)
-      .await
+    match logs_to_delete {
+      Ok(logs) => {
+        let mut log_ids = Vec::new();
+        for log in logs.get_messages() {
+          log_ids.push(log.get_id());
+        }
+        let index = self
+          .index_map
+          .get(index_name)
+          .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
+        index
+          .delete_logs_by_query(log_ids, range_start_time, range_end_time)
+          .await
+      }
+      Err(_) => Err(CoreDBError::QueryError(QueryError::SearchAndMarkLogsError)),
+    }
   }
 }
 
