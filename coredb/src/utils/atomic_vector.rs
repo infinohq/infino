@@ -1,6 +1,5 @@
-use parking_lot::RwLock;
+use crate::utils::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AtomicVector<T> {
   #[serde(skip_serializing, skip_deserializing)]
