@@ -511,7 +511,10 @@ impl Segment {
         .ok_or(QueryError::LogMessageNotFound(*log_message_id))?;
       let log_message = retval.value();
       let time = log_message.get_time();
-      if time >= range_start_time && time <= range_end_time && !log_message.is_deleted() {
+      if time >= range_start_time
+        && time <= range_end_time
+        && !self.metadata.get_deleted_log_ids().contains(log_message_id)
+      {
         log_messages.push(QueryLogMessage::new_with_params(
           *log_message_id,
           LogMessage::new_with_fields_and_text(
@@ -558,35 +561,52 @@ impl Segment {
   // Take two segments and merge them into one.
   pub fn merge(segment1: Segment, segment2: Segment) -> Result<Segment, CoreDBError> {
     // Remove this once WAL can be made skippable
-    let temp_file =
-      tempfile::NamedTempFile::new().map_err(|e| CoreDBError::IOError(e.kind().to_string()))?;
-    let path = temp_file
-      .path()
-      .to_str()
-      .ok_or(CoreDBError::IOError("Invalid path".to_string()))?;
+    let temp_dir = tempfile::tempdir().map_err(|e| CoreDBError::IOError(e.to_string()))?;
+    let path = temp_dir.path().join("merged_segment");
+
     // TODO: disable WAL while merging segments
-    let merged_segment = Segment::new(path);
+    let mut merged_segment = Segment::new(
+      path
+        .to_str()
+        .ok_or(CoreDBError::IOError("Invalid path".to_string()))?,
+    );
 
-    // iteratate over segment 1 and segmnet 2 forward map and call append
-    for entry in segment1.forward_map.iter() {
-      let log_message = entry.value();
-      let time = log_message.get_time();
-      let fields = log_message.get_fields();
-      let text = log_message.get_text();
-      merged_segment
-        .append_log_message(*entry.key(), time, fields, text)
-        .map_err(CoreDBError::from)?;
-    }
+    let append_log_message =
+      |segment: &Segment, merged_segment: &mut Segment, log_id| -> Result<u32, CoreDBError> {
+        if let Some(log_message) = segment.forward_map.get(&log_id) {
+          let time = log_message.get_time();
+          let fields = log_message.get_fields();
+          let text = log_message.get_text();
 
-    for entry in segment2.forward_map.iter() {
-      let log_message = entry.value();
-      let time = log_message.get_time();
-      let fields = log_message.get_fields();
-      let text = log_message.get_text();
-      merged_segment
-        .append_log_message(*entry.key(), time, fields, text)
-        .map_err(CoreDBError::from)?;
-    }
+          merged_segment
+            .append_log_message(log_id, time, fields, text)
+            .map_err(CoreDBError::from)
+        } else {
+          Err(CoreDBError::InvalidLogId(format!(
+            "Log ID {} not found in segment",
+            log_id
+          )))
+        }
+      };
+
+    let merge_logs_of_segment =
+      |segment: &Segment, merged_segment: &mut Segment| -> Result<(), CoreDBError> {
+        let log_ids: Vec<u32> = segment
+          .forward_map
+          .iter()
+          .filter(|entry| !segment.metadata.get_deleted_log_ids().contains(entry.key()))
+          .map(|entry| *entry.key())
+          .collect();
+
+        for log_id in log_ids {
+          append_log_message(segment, merged_segment, log_id)?;
+        }
+
+        Ok(())
+      };
+
+    merge_logs_of_segment(&segment1, &mut merged_segment)?;
+    merge_logs_of_segment(&segment2, &mut merged_segment)?;
 
     merged_segment
       .copy_time_series_from_segment(&segment1)
@@ -597,7 +617,7 @@ impl Segment {
     merged_segment
       .copy_time_series_from_segment(&segment2)
       .map_err(|e| {
-        error!("Error copying time series from segment1: {:?}", e);
+        error!("Error copying time series from segment2: {:?}", e);
         e
       })?;
 
@@ -668,15 +688,12 @@ impl Segment {
   }
 
   pub fn mark_log_message_as_deleted(&self, log_message_ids: &[u32]) -> u32 {
-    let mut deleted_count = 0;
-    for log_message_id in log_message_ids.iter() {
-      // get the log message mutably
-      if let Some(mut log_message) = self.forward_map.get_mut(log_message_id) {
-        log_message.set_deleted();
-        deleted_count += 1;
-      }
-    }
-    deleted_count
+    self.metadata.add_deleted_log_ids(log_message_ids.to_vec());
+    log_message_ids.len() as u32
+  }
+
+  pub fn empty_deleted_log_ids(&self) {
+    self.metadata.empty_deleted_log_ids();
   }
 }
 

@@ -79,6 +79,9 @@ pub enum CoreDBError {
 
   #[error("Invalid policy")]
   InvalidPolicy(),
+
+  #[error("Invalid log Id {0}")]
+  InvalidLogId(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

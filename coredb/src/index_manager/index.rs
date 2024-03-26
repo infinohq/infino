@@ -1173,6 +1173,9 @@ impl Index {
     // isolate the shards by wrapping it in a block
     {
       for segment_number in segment_list {
+        let segment = self.refresh_segment(*segment_number).await?; // Expensive: We are refreshing the segment twice in same function
+        segment.empty_deleted_log_ids();
+
         self.all_segments_summaries.remove(segment_number);
         self.memory_segments_map.remove(segment_number); // This is not required but precautionary
       }

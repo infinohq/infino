@@ -24,6 +24,9 @@ pub struct SegmentSummary {
 
   /// Uncompressed size (i.e., size when the segment is loaded in memory)
   uncompressed_size: u64,
+  // TODO: add these later when update / delete by doc id needs to be implemented
+  // start_log_id: u32,
+  // end_log_id: u32,
 }
 
 impl SegmentSummary {
