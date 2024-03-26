@@ -857,12 +857,6 @@ impl Index {
       return Ok(());
     }
 
-    info!("WAL files exist, starting recovery...");
-
-    // At the end of this function, when recovery is complete, we delete all wal files, except for the one
-    // corresponding to the current segment.
-    let mut wal_files_to_delete: HashMap<u32, String> = HashMap::new();
-
     // Get the (last known) current segment number and its end time.
     let mut current_segment_number;
     let mut current_segment_end_time;
@@ -872,6 +866,34 @@ impl Index {
       (current_segment_number, current_segment_summary) = self.get_current_segment_summary_ref();
       current_segment_end_time = current_segment_summary.get_end_time();
     }
+
+    // No recovery is needed if there is only one WAL file, it is for the current segment, and its contents
+    // (log messages and metrics) exactly correspond to the corresponding serialized segment.
+    if wal_files.len() == 1 {
+      if let Some((segment_number, wal_file_name)) = wal_files.first() {
+        if *segment_number == current_segment_number {
+          let wal_file_path = get_joined_path(&self.wal_dir_path, wal_file_name);
+          let wal_segment = Segment::new_from_wal(&wal_file_path)?;
+
+          let current_segment_dir_path =
+            get_joined_path(&self.index_dir_path, &current_segment_number.to_string());
+          let current_segment = Segment::refresh(&self.storage, &current_segment_dir_path).await?;
+
+          if wal_segment.quick_equals(&current_segment) {
+            info!("Only WAL file for the current segment is found and the segment is up to date. Nothing to recover.");
+            return Ok(());
+          }
+        }
+      }
+    }
+
+    // The above conditions aren't true - so likely the shutdown wasn't clean. Start the recovery.
+
+    info!("WAL files exist, starting recovery...");
+
+    // At the end of this function, when recovery is complete, we delete all wal files, except for the one
+    // corresponding to the current segment.
+    let mut wal_files_to_delete: HashMap<u32, String> = HashMap::new();
 
     for (segment_number, wal_file_name) in wal_files {
       let segment_to_use;
