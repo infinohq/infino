@@ -28,6 +28,10 @@ pub struct Metadata {
   /// Threshold of allowed number of uncommitted segments.
   #[serde(with = "atomic_cell_serde")]
   uncommitted_segments_threshold: AtomicCell<u32>,
+
+  /// Number of log messages.
+  #[serde(with = "atomic_cell_serde")]
+  log_message_count: AtomicCell<u32>,
 }
 
 impl Metadata {
@@ -45,6 +49,7 @@ impl Metadata {
       log_messages_threshold: AtomicCell::new(log_messages_threshold),
       metric_points_threshold: AtomicCell::new(metric_points_threshold),
       uncommitted_segments_threshold: AtomicCell::new(uncommitted_segments_threshold),
+      log_message_count: AtomicCell::new(0),
     }
   }
 
@@ -102,6 +107,16 @@ impl Metadata {
   /// Set uncommitted segments threshold
   pub fn set_uncommitted_segments_threshold(&self, val: u32) {
     self.uncommitted_segments_threshold.store(val);
+  }
+
+  /// Get number of log message in this segment.
+  pub fn get_log_message_count(&self) -> u32 {
+    self.log_message_count.load()
+  }
+
+  /// Get the current log message count in this segment and increment it by 1.
+  pub fn fetch_increment_log_message_count(&self) -> u32 {
+    self.log_message_count.fetch_add(1)
   }
 }
 

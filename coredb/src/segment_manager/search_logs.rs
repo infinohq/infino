@@ -1978,13 +1978,13 @@ mod tests {
     let segment = Segment::new_with_temp_wal();
 
     segment
-      .append_log_message(1001, &HashMap::new(), "log 1")
+      .append_log_message(0, 1001, &HashMap::new(), "log 1")
       .unwrap();
     segment
-      .append_log_message(1002, &HashMap::new(), "log 2")
+      .append_log_message(1, 1002, &HashMap::new(), "log 2")
       .unwrap();
     segment
-      .append_log_message(1003, &HashMap::new(), "log 3")
+      .append_log_message(2, 1003, &HashMap::new(), "log 3")
       .unwrap();
 
     // Get all log message IDs from the forward map.
@@ -2002,7 +2002,7 @@ mod tests {
     let mut fields = HashMap::new();
     fields.insert("field_name".to_string(), "log 3".to_string());
     segment
-      .append_log_message(1004, &fields, "some message")
+      .append_log_message(3, 1004, &fields, "some message")
       .unwrap();
 
     let all_log_ids_with_fields: Vec<u32> = segment

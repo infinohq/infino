@@ -11,14 +11,16 @@ const MAX_ENTRIES: usize = 1000;
 // Log message entry in the write ahead log.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct LogWalEntry {
+  log_message_id: u32,
   time: u64,
   fields: HashMap<String, String>,
   text: String,
 }
 
 impl LogWalEntry {
-  pub fn new(time: u64, fields: &HashMap<String, String>, text: &str) -> Self {
+  pub fn new(log_message_id: u32, time: u64, fields: &HashMap<String, String>, text: &str) -> Self {
     Self {
+      log_message_id,
       time,
       fields: fields.clone(),
       text: text.to_owned(),
@@ -35,6 +37,10 @@ impl LogWalEntry {
 
   pub fn get_text(&self) -> &str {
     &self.text
+  }
+
+  pub fn get_log_message_id(&self) -> u32 {
+    self.log_message_id
   }
 }
 
@@ -206,7 +212,7 @@ mod tests {
     // Make sure that the wal file path is as expected.
     assert_eq!(wal.get_file_path(), path);
 
-    let entry = LogWalEntry::new(1627590000, &HashMap::new(), "Test log entry");
+    let entry = LogWalEntry::new(1, 1627590000, &HashMap::new(), "Test log entry");
     let entry = WalEntry::Log(entry);
 
     // Add 2 entries. wal.flash() is not called yet, so the file should not contain 'Test log entry'.
