@@ -858,11 +858,16 @@ mod tests {
       ),
     ];
 
-    for (key, message) in log_messages.iter() {
+    for (log_id_count, (key, message)) in log_messages.iter().enumerate() {
       let mut fields = HashMap::new();
       fields.insert("key".to_string(), key.to_string());
       segment
-        .append_log_message(Utc::now().timestamp_millis() as u64, &fields, message)
+        .append_log_message(
+          log_id_count as u32,
+          Utc::now().timestamp_millis() as u64,
+          &fields,
+          message,
+        )
         .unwrap();
     }
 
