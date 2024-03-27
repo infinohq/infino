@@ -637,10 +637,10 @@ async fn bulk(
             }
             Err(error) => {
               let mut status_code = 200;
-              errors = true;
               match error {
                 CoreDBError::TooManyAppendsError() => {
                   status_code = 429;
+                  errors = true;
                 }
                 // If the index is not found, create it.
                 CoreDBError::IndexNotFound(_) => {
@@ -653,6 +653,7 @@ async fn bulk(
                     let msg = format!("Could not create index {}", index_name);
                     error!("{}", msg);
                     status_code = 400;
+                    errors = true;
                   } else {
                     debug!(
                       "Successfully created index {} in bulk operation",
@@ -664,6 +665,7 @@ async fn bulk(
                 }
                 _ => {
                   status_code = 500;
+                  errors = true;
                 }
               };
 
@@ -695,6 +697,7 @@ async fn bulk(
       Some("delete") => {
         let msg = "Missing document for update operation.".to_string();
         warn!("{}", msg);
+        errors = true;
         continue;
       }
       Some("update") => {
