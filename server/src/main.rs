@@ -600,11 +600,6 @@ async fn bulk(
 
     match operation.as_deref() {
       Some("index") | Some("create") => {
-        if i >= actions.len() {
-          let msg = "Missing document for index/create operation.".to_string();
-          error!("{}", msg);
-          return Err((StatusCode::BAD_REQUEST, msg));
-        }
         let document = &actions[i];
         i += 1; // Move past the document for the next iteration.
 
@@ -691,20 +686,21 @@ async fn bulk(
         } else {
           let msg = "Document for index/create operation is not a valid JSON object.".to_string();
           error!("{}", msg);
-          return Err((StatusCode::BAD_REQUEST, msg));
+          errors = true;
+          continue;
         }
       }
       Some("delete") => {
-        let msg = "Missing document for update operation.".to_string();
+        let msg = "Delete document operations unsupported.".to_string();
         warn!("{}", msg);
-        errors = true;
         continue;
       }
       Some("update") => {
         if i >= actions.len() {
           let msg = "Missing document for update operation.".to_string();
           error!("{}", msg);
-          return Err((StatusCode::BAD_REQUEST, msg));
+          errors = true;
+          continue;
         }
         let update_doc = &actions[i];
         i += 1; // Move past the document for the next iteration.
@@ -715,18 +711,21 @@ async fn bulk(
           } else {
             let msg = "Invalid update document format.".to_string();
             error!("{}", msg);
-            return Err((StatusCode::BAD_REQUEST, msg));
+            errors = true;
+            continue;
           }
         } else {
           let msg = "Update operation requires a valid JSON object.".to_string();
           error!("{}", msg);
-          return Err((StatusCode::BAD_REQUEST, msg));
+          errors = true;
+          continue;
         }
       }
       _ => {
         let msg = "Unknown or unsupported action in bulk append request.".to_string();
         error!("{}", msg);
-        return Err((StatusCode::BAD_REQUEST, msg));
+        errors = true;
+        continue;
       }
     }
   }
@@ -2334,11 +2333,11 @@ mod tests {
 
     // *** Test comma delimited inserts
     let bulk_request = format!(
-      r#"{{ "index": {{ "_index": "{}" }} }},
-  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }},
-  {{ "index": {{ "_index": "{}", "_id": "56302" }} }},
+      r#"    {{ "bad_request": {{ "_id": "56301" }} }},
+      {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }},
+      {{ "index": {{ "_index": "{}", "_id": "56302" }} }},
   {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }}"#,
-      index_name, index_name
+      index_name
     );
     let body = bulk_request;
     let path = format!("/{}/bulk", index_name);
