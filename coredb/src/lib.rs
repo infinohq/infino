@@ -183,7 +183,7 @@ impl CoreDB {
       None => {
         let error = QueryError::IndexNotFoundError(index_name.to_string());
         error!("Failed to get index '{}': {:?}", index_name, error);
-        return Err(utils::error::CoreDBError::QueryError(error));
+        return Err(utils::error::CoreDBError::IndexNotFound(error.to_string()));
       }
     };
 
