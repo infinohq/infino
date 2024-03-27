@@ -588,6 +588,14 @@ async fn bulk(
       obj.keys().next().map(String::from) // Gets the first key as the operation type.
     });
 
+    debug!(
+      "Now executing operation {} from bulk",
+      operation
+        .clone()
+        .expect("couldn't get operation from bulk")
+        .to_string()
+    );
+
     match operation.as_deref() {
       Some("index") | Some("create") => {
         if i >= actions.len() {
@@ -631,8 +639,25 @@ async fn bulk(
                 CoreDBError::TooManyAppendsError() => {
                   status_code = 429;
                 }
+                // If the index is not found, create it.
                 CoreDBError::IndexNotFound(_) => {
-                  status_code = 400;
+                  debug!(
+                    "Index {} not found in bulk operation. Creating.",
+                    index_name
+                  );
+                  let result = state.coredb.create_index(&index_name).await;
+                  if result.is_err() {
+                    let msg = format!("Could not create index {}", index_name);
+                    error!("{}", msg);
+                    status_code = 400;
+                  } else {
+                    debug!(
+                      "Successfully created index {} in bulk operation",
+                      index_name
+                    );
+                    i -= 2;
+                    continue;
+                  }
                 }
                 _ => {
                   status_code = 500;
@@ -2150,6 +2175,81 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    // *** Test comma delimited inserts
+    let bulk_request = format!(
+      r#"{{ "index": {{ "_index": "{}", "_id": "56301" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }},
+  {{ "index": {{ "_index": "{}", "_id": "56302" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }}"#,
+      index_name, index_name
+    );
+    let body = bulk_request;
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Make sure documents are inserted correctly.
+    assert_eq!(response_json["errors"], false);
+
+    // *** Test searches against the inserts
+    let query_dsl_request = "{\"query\":{\"match\":{\"test_field\":{\"query\":\"test_value\",\"operator\":\"OR\",\"prefix_length\":0,\"max_expansions\":50,\"fuzzy_transpositions\":true,\"lenient\":false,\"zero_terms_query\":\"NONE\",\"auto_generate_synonyms_phrase_query\":true,\"boost\":1.0}}}}";
+    let path = format!("/{}/search_logs", index_name);
+
+    let request = Request::builder()
+      .method(http::Method::GET)
+      .uri(path)
+      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+      .body(Body::from(query_dsl_request))
+      .unwrap();
+
+    let result = app.call(request).await;
+
+    let response = result.expect("Failed to make a call");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body();
+    let max_body_size = 10 * 1024 * 1024;
+    let bytes = to_bytes(body, max_body_size)
+      .await
+      .expect("Failed to read body");
+
+    let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
+    debug!("Response content: {}", body_str);
+  }
+
+  #[tokio::test]
+  async fn test_bulk_operation_no_index() {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "bulk_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
+
+    let (mut app, _, _) = app(config_dir_path).await;
 
     // *** Test comma delimited inserts
     let bulk_request = format!(
