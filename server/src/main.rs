@@ -562,6 +562,8 @@ async fn bulk(
 ) -> Result<String, (StatusCode, String)> {
   debug!("Executing bulk append request {}", json_body);
 
+  let mut errors = false;
+
   let append_start_time = Utc::now().timestamp_millis() as u64;
 
   let mut response = String::new();
@@ -635,6 +637,7 @@ async fn bulk(
             }
             Err(error) => {
               let mut status_code = 200;
+              errors = true;
               match error {
                 CoreDBError::TooManyAppendsError() => {
                   status_code = 429;
@@ -705,7 +708,7 @@ async fn bulk(
 
         if let Some(doc) = update_doc.as_object() {
           if doc.contains_key("doc") || doc.contains_key("doc_as_upsert") {
-            // Current unsupported
+            // Currently unsupported
           } else {
             let msg = "Invalid update document format.".to_string();
             error!("{}", msg);
@@ -729,7 +732,7 @@ async fn bulk(
   let response_json = json!({
       // Check_query_time will not throw an error when timeout is 0. Fine to unwrap().
       "took": check_query_time(0, append_start_time).unwrap(),
-      "errors": false,
+      "errors": errors,
       "items": items
   });
 
@@ -2310,5 +2313,55 @@ mod tests {
 
     let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
     debug!("Response content: {}", body_str);
+  }
+
+  #[tokio::test]
+  async fn test_bulk_operation_with_errors() {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "bulk_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
+
+    let (mut app, _, _) = app(config_dir_path).await;
+
+    // *** Test comma delimited inserts
+    let bulk_request = format!(
+      r#"{{ "index": {{ "_index": "{}" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }},
+  {{ "index": {{ "_index": "{}", "_id": "56302" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }}"#,
+      index_name, index_name
+    );
+    let body = bulk_request;
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Make sure the error is flagged
+    assert_eq!(response_json["errors"], true);
   }
 }
