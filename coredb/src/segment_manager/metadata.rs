@@ -1,11 +1,11 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
-
 use crossbeam::atomic::AtomicCell;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::storage_manager::constants::COMPRESSION_LEVEL;
+use crate::utils::atomic_vector::AtomicVector;
 use crate::utils::custom_serde::atomic_cell_serde;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -50,6 +50,9 @@ pub struct Metadata {
   /// End timestamp.
   #[serde(with = "atomic_cell_serde")]
   end_time: AtomicCell<u64>,
+
+  /// Deleted log ids.
+  deleted_log_ids: AtomicVector<u32>,
 }
 
 impl Metadata {
@@ -65,6 +68,7 @@ impl Metadata {
       compressed_size: AtomicCell::new(0),
       start_time: AtomicCell::new(u64::MAX),
       end_time: AtomicCell::new(0),
+      deleted_log_ids: AtomicVector::new(),
     }
   }
 
@@ -166,6 +170,23 @@ impl Metadata {
     let compressed_size = output.len() as u64;
 
     (uncomepressed_size, compressed_size)
+  }
+
+  pub fn get_deleted_log_ids(&self) -> Vec<u32> {
+    self.deleted_log_ids.get()
+  }
+
+  #[allow(dead_code)]
+  pub fn add_deleted_log_id(&self, log_id: u32) {
+    self.deleted_log_ids.push(log_id);
+  }
+
+  pub fn add_deleted_log_ids(&self, log_ids: Vec<u32>) {
+    self.deleted_log_ids.extend(log_ids);
+  }
+
+  pub fn empty_deleted_log_ids(&self) {
+    self.deleted_log_ids.empty();
   }
 }
 

@@ -31,21 +31,17 @@ impl InfinoApiClient {
   #[allow(unused)]
   async fn index_with_bulk(&self, client: &reqwest::Client, logs_batch: &[Value]) {
     // Join all elements in logs_batch delimitted by \n 
-    let body_str = logs_batch.iter()
-      .map(|v| v.to_string())
-      .collect::<Vec<_>>()
-      .join("\n");
+    let mut body_str = String::new();
+    body_str.push('\n');
+    logs_batch.iter().for_each(|log| {
+      body_str.push_str(&log.to_string());
+      body_str.push('\n');
+    });
 
-    // Prepend and append a newline to the body string
-    let mut body_str_newline = String::new();
-    body_str_newline.push('\n');
-    body_str_newline.push_str(&body_str);
-    body_str_newline.push('\n');
-
-    let _ = client
+    let resposne = client
       .post("http://localhost:3000/default/bulk")
       .header("Content-Type", "application/json")
-      .body(Body::from(body_str_newline))
+      .body(Body::from(body_str))
       .send()
       .await;
   }
@@ -77,8 +73,10 @@ impl InfinoApiClient {
           break;
         }
         if let Ok(message) = line {
+          if use_bulk {
+            logs_batch.push(json!({"index": {"_id": num_docs}}));
+          }
           logs_batch.push(json!({ 
-            "_id": num_docs,
             "date": Utc::now().timestamp_millis() as u64,
             "message": message,
           }));

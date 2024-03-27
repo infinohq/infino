@@ -516,6 +516,49 @@ impl CoreDB {
       index_entry.value().flush_wal().await;
     }
   }
+
+  /// Delete logs matching query, and return the number of logs deleted.
+  pub async fn delete_logs_by_query(
+    &self,
+    index_name: &str,
+    url_query: &str,
+    json_query: &str,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<u32, CoreDBError> {
+    debug!(
+      "COREDB: Delete logs by query for index name: {}, URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
+      index_name, url_query, json_query, range_start_time, range_end_time
+    );
+
+    // Call search_logs to get the list of logs to delete
+    let logs_to_delete = self
+      .search_logs(
+        index_name,
+        url_query,
+        json_query,
+        range_start_time,
+        range_end_time,
+      )
+      .await;
+
+    match logs_to_delete {
+      Ok(logs) => {
+        let mut log_ids = Vec::new();
+        for log in logs.get_messages() {
+          log_ids.push(log.get_id());
+        }
+        let index = self
+          .index_map
+          .get(index_name)
+          .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
+        index
+          .delete_logs_by_query(log_ids, range_start_time, range_end_time)
+          .await
+      }
+      Err(_) => Err(CoreDBError::QueryError(QueryError::SearchAndMarkLogsError)),
+    }
+  }
 }
 
 #[cfg(test)]
@@ -681,11 +724,20 @@ mod tests {
     assert_eq!(mp[0].get_value(), 1.0);
     assert_eq!(mp[1].get_value(), 2.0);
 
+    // delete by query
+    let deleted_count = coredb
+      .delete_logs_by_query(index_name, "message", "", start, end)
+      .await
+      .expect("Error in delete_logs_by_query");
+
+    assert_eq!(deleted_count, 2);
+
     coredb
       .trigger_retention()
       .await
       .expect("Error in retention policy");
 
+    coredb.trigger_merge().await.expect("Error in merge policy");
     Ok(())
   }
 }

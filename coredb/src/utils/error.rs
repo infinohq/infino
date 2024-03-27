@@ -79,6 +79,9 @@ pub enum CoreDBError {
 
   #[error("Invalid policy")]
   InvalidPolicy(),
+
+  #[error("Invalid log Id {0}")]
+  InvalidLogId(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -130,6 +133,9 @@ pub enum QueryError {
 
   #[error("Regexp Error: {0}")]
   RegexpError(String),
+
+  #[error("Unable to search and mark logs as deleted")]
+  SearchAndMarkLogsError,
 }
 
 impl From<object_store::Error> for CoreDBError {

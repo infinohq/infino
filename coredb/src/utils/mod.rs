@@ -3,6 +3,7 @@
 
 //! Utilities for managing CoreDB.
 
+pub mod atomic_vector;
 pub mod config;
 pub mod constants;
 pub(crate) mod custom_serde;

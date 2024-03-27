@@ -58,7 +58,8 @@ COPY --from=builder /usr/src/infino-opensearch-plugin/build/distributions/infino
 RUN printf \
    'grant {\n    // Add permissions to allow Infino OpenSearch Plugin to access Infino using OpenSearch threadpool\n\
     permission org.opensearch.secure_sm.ThreadPermission "modifyArbitraryThread";\n\
-    permission java.net.URLPermission "http://*:*/-", "*";\n};' \
+    permission java.net.URLPermission "http://*:*/-", "*:*";\n\
+    permission java.lang.RuntimePermission "accessUserInformation";\n};' \
    >> /usr/share/opensearch/jdk/conf/security/java.policy
 
 # Install the infino plugin
