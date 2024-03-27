@@ -300,6 +300,7 @@ impl CoreDB {
       .await
   }
 
+  /// Process natural language search query.
   pub async fn search_nl(
     &self,
     index_name: &str,

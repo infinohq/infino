@@ -25,11 +25,11 @@ mod utils;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use std::collections::HashMap;
+use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::result::Result;
 use std::sync::Arc;
-use std::{env, result};
 
 use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::response::IntoResponse;
