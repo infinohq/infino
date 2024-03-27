@@ -18,32 +18,13 @@ import org.opensearch.test.rest.FakeRestRequest;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
 
-import java.io.IOException;
-import java.net.Authenticator;
-import java.net.CookieHandler;
-import java.net.ProxySelector;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.http.HttpResponse.BodyHandler;
-import java.net.http.HttpResponse.PushPromiseHandler;
-import java.net.http.HttpHeaders;
-import java.time.Duration;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSession;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -73,31 +54,14 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
     private InfinoSerializeRequestURI mockInfinoSerializeRequestURI;
     private InfinoRestHandler handler;
     private ThreadPool threadPool;
-    private int mockStatusCode = 200;
-    private String mockPath = "/default/path";
-    private String mockBody = "Default body";
-    // private Map<String, List<String>> mockHeaders;
-
-    private MyHttpClient mockMyHttpClient = new MyHttpClient() {
-        @Override
-        public HttpResponse<String> sendRequest(HttpRequest request,
-                HttpResponse.BodyHandler<String> responseBodyHandler) {
-            // Return a mocked response
-            HttpResponse<String> response = createFakeResponse(mockStatusCode, mockPath, mockBody);
-            return response;
-        }
-    };
-
-    public interface MyHttpClient {
-        HttpResponse<String> sendRequest(HttpRequest request,
-                HttpResponse.BodyHandler<String> responseBodyHandler);
-    }
+    private InfinoPluginTestUtils utils;
 
     // Use a single thread for testing
     // Mock the client and URI serializer
     @Before
     public void setUp() throws Exception {
         super.setUp();
+        utils = new InfinoPluginTestUtils();
         executorService = Executors.newSingleThreadExecutor();
         mockInfinoSerializeRequestURI = mock(InfinoSerializeRequestURI.class);
         threadPool = new TestThreadPool(this.getClass().getSimpleName() + "ThreadPool");
@@ -105,10 +69,6 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
         // Override key methods in the handler
         handler = new InfinoRestHandler() {
-            @Override
-            protected ExecutorService getInfinoThreadPool() {
-                return executorService;
-            }
 
             @Override
             protected InfinoSerializeRequestURI getInfinoSerializeRequestURI(RestRequest request) {
@@ -117,7 +77,7 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
             @Override
             protected HttpClient getHttpClient() {
-                return getCustomHttpClient();
+                return utils.getCustomHttpClient();
             }
 
             @Override
@@ -144,132 +104,6 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
     }
 
-    // Create a fake HttpResponse for testing
-    private HttpResponse<String> createFakeResponse(int fakeStatusCode, String fakePath, String fakeBody) {
-        return new HttpResponse<>() {
-            @Override
-            public int statusCode() {
-                return fakeStatusCode;
-            }
-
-            @Override
-            public Optional<HttpResponse<String>> previousResponse() {
-                return Optional.empty();
-            }
-
-            @Override
-            public HttpRequest request() {
-                return HttpRequest.newBuilder().uri(URI.create(fakePath)).build();
-            }
-
-            @Override
-            public HttpHeaders headers() {
-                return HttpHeaders.of(new HashMap<>(), (s, s2) -> true);
-            }
-
-            @Override
-            public String body() {
-                return fakeBody; // Fake body content
-            }
-
-            @Override
-            public Optional<SSLSession> sslSession() {
-                return Optional.empty();
-            }
-
-            @Override
-            public URI uri() {
-                return request().uri();
-            }
-
-            @Override
-            public HttpClient.Version version() {
-                return HttpClient.Version.HTTP_1_1;
-            }
-        };
-    }
-
-    private HttpClient getCustomHttpClient() {
-        return new HttpClient() {
-            @Override
-            public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
-                    BodyHandler<T> responseBodyHandler, PushPromiseHandler<T> pushPromiseHandler) {
-                throw new UnsupportedOperationException("sendAsync Not implemented in mock");
-            }
-
-            @Override
-            public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
-                    BodyHandler<T> responseBodyHandler) {
-                throw new UnsupportedOperationException("sendAsync Not implemented in mock");
-            }
-
-            @Override
-            public <T> HttpResponse<T> send(HttpRequest request, BodyHandler<T> responseBodyHandler)
-                    throws IOException, InterruptedException {
-                HttpResponse<String> response = mockMyHttpClient.sendRequest(request,
-                        convertToSpecificHandler(responseBodyHandler));
-                return convertToGenericResponse(response, responseBodyHandler);
-            }
-
-            // Helper method to convert BodyHandler<T> to BodyHandler<String>
-            private BodyHandler<String> convertToSpecificHandler(BodyHandler<?> handler) {
-                return HttpResponse.BodyHandlers.ofString();
-            }
-
-            @Override
-            public Optional<CookieHandler> cookieHandler() {
-                return Optional.empty();
-            }
-
-            @Override
-            public Optional<Duration> connectTimeout() {
-                return Optional.empty();
-            }
-
-            @Override
-            public Redirect followRedirects() {
-                return null;
-            }
-
-            @Override
-            public Optional<ProxySelector> proxy() {
-                return Optional.empty();
-            }
-
-            @Override
-            public SSLContext sslContext() {
-                return null;
-            }
-
-            @Override
-            public SSLParameters sslParameters() {
-                return null;
-            }
-
-            @Override
-            public Optional<Authenticator> authenticator() {
-                return Optional.empty();
-            }
-
-            @Override
-            public Version version() {
-                return Version.HTTP_1_1;
-            }
-
-            @Override
-            public Optional<Executor> executor() {
-                return Optional.empty();
-            }
-        };
-    }
-
-    // Helper method to convert HttpResponse<String> to HttpResponse<T>
-    private <T> HttpResponse<T> convertToGenericResponse(HttpResponse<String> response, BodyHandler<T> handler) {
-        @SuppressWarnings("unchecked")
-        HttpResponse<T> genericResponse = (HttpResponse<T>) response;
-        return genericResponse;
-    }
-
     // We use our own FakeRestChannel (from BaseRestHandler tests) because we need
     // to access latch to wait on threads in the handler.
     public final class FakeRestChannel extends AbstractRestChannel {
@@ -287,7 +121,7 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
         public void sendResponse(RestResponse response) {
 
             this.capturedRestResponse = response;
-            if (response.status() == InfinoRestHandler.getRestStatusFromCode(200)) {
+            if (response.status() == InfinoPluginUtils.getRestStatusFromCode(200)) {
                 responses.incrementAndGet();
             } else {
                 errors.incrementAndGet();
@@ -310,46 +144,47 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
     // Test handling of a 2xx GET response
     public void testGetRequest() throws Exception {
-        runRequestHandler(RestRequest.Method.GET, "Default body");
+        runRequestHandler(RestRequest.Method.GET, utils.getMockBody());
     }
 
     // Test handling of a 2xx POST response
     public void testPostRequest() throws Exception {
-        runRequestHandler(RestRequest.Method.POST, "Default body");
+        runRequestHandler(RestRequest.Method.POST, utils.getMockBody());
     }
 
     // Test handling of a 2xx HEAD response
     public void testHeadRequest() throws Exception {
-        runRequestHandler(RestRequest.Method.HEAD, "Default body");
+        runRequestHandler(RestRequest.Method.HEAD, utils.getMockBody());
     }
 
     // Test handling of a 4xx response
     public void testNonExistentEndpoint() throws Exception {
-        mockStatusCode = 410;
-        mockBody = "Not Found";
-        runRequestHandler(RestRequest.Method.GET, "Not Found", InfinoRestHandler.getRestStatusFromCode(mockStatusCode),
+        utils.setMockStatusCode(410);
+        utils.setMockBody("Not Found");
+        runRequestHandler(RestRequest.Method.GET, "Not Found",
+                InfinoPluginUtils.getRestStatusFromCode(utils.getMockStatusCode()),
                 "/non-existent-endpoint");
     }
 
     // Test handling of a 5xx response
     public void testServerError() throws Exception {
         String path = "/infino/test-index/_ping?invalidParam=value";
-        mockStatusCode = 500;
-        mockBody = "Internal Server Error";
+        utils.setMockStatusCode(500);
+        utils.setMockBody("Internal Server Error");
         runRequestHandler(RestRequest.Method.GET, "Internal Server Error",
-                InfinoRestHandler.getRestStatusFromCode(mockStatusCode), path);
+                InfinoPluginUtils.getRestStatusFromCode(utils.getMockStatusCode()), path);
     }
 
     // Helper method to test requests with a specific method and expected response
     private void runRequestHandler(RestRequest.Method method, String expectedBody) throws Exception {
-        runRequestHandler(method, expectedBody, InfinoRestHandler.getRestStatusFromCode(200),
+        runRequestHandler(method, expectedBody, InfinoPluginUtils.getRestStatusFromCode(200),
                 "/infino/test-index/_ping");
     }
 
     // Test response with a large payload
     public void testLargeResponsePayload() throws Exception {
-        mockBody = String.join("", Collections.nCopies(1000, "Large payload. "));
-        runRequestHandler(RestRequest.Method.GET, mockBody);
+        utils.setMockBody(String.join("", Collections.nCopies(1000, "Large payload. ")));
+        runRequestHandler(RestRequest.Method.GET, utils.getMockBody());
     }
 
     // Generic helper method to test requests
@@ -369,7 +204,7 @@ public class InfinoRestHandlerTests extends OpenSearchTestCase {
 
         int expectedErrors = 1;
         int expectedResponses = 0;
-        if (expectedStatus == InfinoRestHandler.getRestStatusFromCode(200)) {
+        if (expectedStatus == InfinoPluginUtils.getRestStatusFromCode(200)) {
             expectedErrors = 0;
             expectedResponses = 1;
         }

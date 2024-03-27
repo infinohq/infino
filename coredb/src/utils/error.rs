@@ -1,6 +1,8 @@
 // This code is licensed under Elastic License 2.0
 // https://www.elastic.co/licensing/elastic-license
 
+use std::num::ParseIntError;
+
 use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -77,6 +79,9 @@ pub enum CoreDBError {
 
   #[error("Invalid policy")]
   InvalidPolicy(),
+
+  #[error("Invalid log Id {0}")]
+  InvalidLogId(String),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -125,6 +130,12 @@ pub enum QueryError {
 
   #[error("No query provided")]
   NoQueryProvided,
+
+  #[error("Regexp Error: {0}")]
+  RegexpError(String),
+
+  #[error("Unable to search and mark logs as deleted")]
+  SearchAndMarkLogsError,
 }
 
 impl From<object_store::Error> for CoreDBError {
@@ -141,6 +152,12 @@ impl From<std::io::Error> for CoreDBError {
 
 impl From<serde_json::Error> for CoreDBError {
   fn from(error: serde_json::Error) -> Self {
+    CoreDBError::IOError(error.to_string())
+  }
+}
+
+impl From<ParseIntError> for CoreDBError {
+  fn from(error: ParseIntError) -> Self {
     CoreDBError::IOError(error.to_string())
   }
 }

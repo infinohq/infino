@@ -74,14 +74,9 @@ impl CoreDB {
         let index_names = storage.read_dir(index_dir_path).await;
         match index_names {
           Ok(index_names) => {
-            info!(
-              "Index directory {} already exists. Loading existing index",
-              index_dir_path
-            );
-
             if index_names.is_empty() {
               info!(
-                "Index directory {} does not exist. Creating it.",
+                "Index directory {} exists, but has no indices. Creating the default index.",
                 index_dir_path
               );
               let default_index_dir_path = format!("{}/{}", index_dir_path, default_index_name);
@@ -98,6 +93,10 @@ impl CoreDB {
               .await?;
               index_map.insert(default_index_name.to_string(), index);
             } else {
+              info!(
+                "Index directory {} already exists. Loading existing indices.",
+                index_dir_path
+              );
               for index_name in index_names {
                 let full_index_path_name = format!("{}/{}", index_dir_path, index_name);
                 let full_wal_path_name = format!("{}/{}", wal_dir_path, index_name);
@@ -390,6 +389,8 @@ impl CoreDB {
 
   /// Create a new index.
   pub async fn create_index(&self, index_name: &str) -> Result<(), CoreDBError> {
+    debug!("COREDB: Creating index {}", index_name);
+
     let coredb_settings = self.settings.get_coredb_settings();
     let index_dir_path = coredb_settings.get_index_dir_path();
     let wal_dir_path = coredb_settings.get_wal_dir_path();
@@ -419,17 +420,40 @@ impl CoreDB {
 
   /// Delete an index.
   pub async fn delete_index(&self, index_name: &str) -> Result<(), CoreDBError> {
-    let index = self.index_map.remove(index_name);
-    match index {
-      Some(index) => {
-        index.1.delete().await?;
-        Ok(())
-      }
-      None => {
-        let error = CoreDBError::IndexNotFound(index_name.to_string());
-        Err(error)
+    debug!("COREDB: Deleting index {}", index_name);
+
+    let mut indexes_to_delete = Vec::new();
+
+    if ["default", ".default", "Default", ".Default"].contains(&index_name) {
+      return Err(CoreDBError::CannotDeleteIndex(index_name.to_string()));
+    }
+
+    // Create the list of indexes to delete.
+    // TODO: Handle regexes.
+    if index_name.eq("*") || index_name.eq("_all") {
+      // Collect keys to delete
+      self.index_map.iter().for_each(|entry| {
+        let name = entry.key().clone();
+        if !["default", ".default", "Default", ".Default"].contains(&name.as_str()) {
+          indexes_to_delete.push(name);
+        }
+      });
+    } else {
+      indexes_to_delete.push(index_name.to_string());
+    }
+
+    // Now delete the indexes without holding references to the index_map
+    // which results in deadlock as the 'remove' will wait for the references
+    // to be released.
+    for name in indexes_to_delete {
+      if let Some((_, index)) = self.index_map.remove(&name) {
+        index.delete().await?;
+      } else {
+        return Err(CoreDBError::IndexNotFound(name));
       }
     }
+
+    Ok(())
   }
 
   pub fn get_default_index_name(&self) -> &str {
@@ -451,7 +475,7 @@ impl CoreDB {
       let merge_policy = self
         .get_merge_policy()
         .ok_or(CoreDBError::InvalidPolicy())?;
-      let all_segments_summaries = index_entry.get_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.read_all_segments_summaries().await?;
       // Get all the keys of the segments in memory
       let segments_in_memory = index_entry.get_memory_segments_numbers();
       // Apply the merge policy directly here based on the enum variant
@@ -477,7 +501,7 @@ impl CoreDB {
     for index_entry in self.get_index_map() {
       // TODO: this does not need to read all_segments_summaries from disk - can use the one already
       // in memory in Index::all_segments_summaries()
-      let all_segments_summaries = index_entry.value().get_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.value().read_all_segments_summaries().await?;
 
       let retention_policy = self
         .get_retention_policy()
@@ -506,6 +530,49 @@ impl CoreDB {
     // Flush the WAL for the indexes.
     for index_entry in self.get_index_map() {
       index_entry.value().flush_wal().await;
+    }
+  }
+
+  /// Delete logs matching query, and return the number of logs deleted.
+  pub async fn delete_logs_by_query(
+    &self,
+    index_name: &str,
+    url_query: &str,
+    json_query: &str,
+    range_start_time: u64,
+    range_end_time: u64,
+  ) -> Result<u32, CoreDBError> {
+    debug!(
+      "COREDB: Delete logs by query for index name: {}, URL query: {:?}, JSON query: {:?}, range_start_time: {}, range_end_time: {}",
+      index_name, url_query, json_query, range_start_time, range_end_time
+    );
+
+    // Call search_logs to get the list of logs to delete
+    let logs_to_delete = self
+      .search_logs(
+        index_name,
+        url_query,
+        json_query,
+        range_start_time,
+        range_end_time,
+      )
+      .await;
+
+    match logs_to_delete {
+      Ok(logs) => {
+        let mut log_ids = Vec::new();
+        for log in logs.get_messages() {
+          log_ids.push(log.get_id());
+        }
+        let index = self
+          .index_map
+          .get(index_name)
+          .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
+        index
+          .delete_logs_by_query(log_ids, range_start_time, range_end_time)
+          .await
+      }
+      Err(_) => Err(CoreDBError::QueryError(QueryError::SearchAndMarkLogsError)),
     }
   }
 }
@@ -673,11 +740,20 @@ mod tests {
     assert_eq!(mp[0].get_value(), 1.0);
     assert_eq!(mp[1].get_value(), 2.0);
 
+    // delete by query
+    let deleted_count = coredb
+      .delete_logs_by_query(index_name, "message", "", start, end)
+      .await
+      .expect("Error in delete_logs_by_query");
+
+    assert_eq!(deleted_count, 2);
+
     coredb
       .trigger_retention()
       .await
       .expect("Error in retention policy");
 
+    coredb.trigger_merge().await.expect("Error in merge policy");
     Ok(())
   }
 }

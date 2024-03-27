@@ -8,15 +8,15 @@
 //!
 //! See an Infino architecture overview [here](https://github.com/infinohq/infino).
 //! Infino has data ingestion APIs for storing data in Infino and query APIs
-//! for retrieving data form Infino. Ingested data is persisted in a queue and forwarded to the
-//! CoreDB database that stores and retrieves telemetry data in Infino.
+//! for retrieving data form Infino. Ingested data is forwarded to the CoreDB database that stores and retrieves
+//!  telemetry data in Infino. The data is written to a write ahead log for disaster recovery before being
+//! written to the index.
 //!
 //! We also summarize logs using Generative AI models; we are currently using [OpenAI](https://platform.openai.com/)
 //! but we are evaulating alternatives like [Llama2](https://github.com/facebookresearch/llama) and our own homegrown
 //! models. More to come.
 
 mod background_threads;
-mod queue_manager;
 mod utils;
 
 // If the `dhat-heap` feature is enabled, we use dhat to track heap usage.
@@ -54,7 +54,6 @@ use coredb::utils::request::{check_query_time, parse_time_range};
 use coredb::CoreDB;
 
 use crate::background_threads::check_and_start_background_threads;
-use crate::queue_manager::queue::RabbitMQ;
 use crate::utils::error::InfinoError;
 use crate::utils::openai_helper::OpenAIHelper;
 use crate::utils::settings::Settings;
@@ -66,8 +65,6 @@ lazy_static! {
 
 /// Represents application state.
 struct AppState {
-  // The queue will be created only if use_rabbitmq = yes is specified in server config.
-  queue: Option<RabbitMQ>,
   coredb: CoreDB,
   settings: Settings,
   wal_file: Arc<File>,
@@ -118,11 +115,7 @@ struct NaturalLanguageQuery {
 }
 
 /// Axum application for Infino server.
-async fn app(
-  config_dir_path: &str,
-  image_name: &str,
-  image_tag: &str,
-) -> (Router, JoinHandle<()>, Arc<AppState>) {
+async fn app(config_dir_path: &str) -> (Router, JoinHandle<()>, Arc<AppState>) {
   // Read the settings from the config directory.
   let settings = Settings::new(config_dir_path).unwrap();
 
@@ -131,27 +124,6 @@ async fn app(
     Ok(coredb) => coredb,
     Err(err) => panic!("Unable to initialize coredb with err {}", err),
   };
-
-  // Create RabbitMQ to store incoming requests.
-  let rabbitmq_settings = settings.get_rabbitmq_settings();
-  let container_name = rabbitmq_settings.get_container_name();
-  let listen_port = rabbitmq_settings.get_listen_port();
-  let stream_port = rabbitmq_settings.get_stream_port();
-
-  let use_rabbitmq = settings.get_server_settings().get_use_rabbitmq();
-  let mut queue = None;
-  if use_rabbitmq {
-    queue = Some(
-      RabbitMQ::new(
-        container_name,
-        image_name,
-        image_tag,
-        listen_port,
-        stream_port,
-      )
-      .await,
-    );
-  }
 
   let openai_helper = OpenAIHelper::new();
   let wal_file = Arc::new(
@@ -164,7 +136,6 @@ async fn app(
   );
 
   let shared_state = Arc::new(AppState {
-    queue,
     coredb,
     settings,
     openai_helper,
@@ -195,6 +166,10 @@ async fn app(
     // PUT and DELETE methods
     .route("/:index_name", put(create_index))
     .route("/:index_name", delete(delete_index))
+    .route(
+      "/:index_name/_delete_by_query",
+      delete(delete_logs_by_query),
+    )
     // ---
     // State that is passed to each request.
     .with_state(shared_state.clone())
@@ -212,12 +187,8 @@ async fn run_server() {
   // Defaults to "config" if not set.
   let config_dir_path = &env::var("INFINO_CONFIG_DIR_PATH").unwrap_or_else(|_| "config".to_owned());
 
-  let image_name = "rabbitmq";
-  let image_tag = "3";
-
   // Create app.
-  let (app, background_threads_handle, shared_state) =
-    app(config_dir_path, image_name, image_tag).await;
+  let (app, background_threads_handle, shared_state) = app(config_dir_path).await;
 
   // Start server.
   let port = shared_state.settings.get_server_settings().get_port();
@@ -232,28 +203,24 @@ async fn run_server() {
     connection_string
   );
 
-  axum::serve(listener, app)
+  if let Err(err) = axum::serve(listener, app)
     .with_graceful_shutdown(shutdown_signal())
     .await
-    .unwrap();
-
-  if shared_state.queue.is_some() {
-    info!("Closing RabbitMQ connection...");
-    let queue = shared_state.queue.as_ref().unwrap();
-    queue.close_connection().await;
-
-    info!("Stopping RabbitMQ container...");
-    let rabbitmq_container_name = queue.get_container_name();
-    RabbitMQ::stop_queue_container(rabbitmq_container_name)
-      .expect("Could not stop rabbitmq container");
+  {
+    error!("Error while starting or running axum server: {}", err);
   }
 
   // Set the flag to indicate the background threads to shutdown, and wait for them to finish.
   IS_SHUTDOWN.store(true);
-  info!("Shutting down background threads and waiting for it to finish...");
-  background_threads_handle
-    .await
-    .expect("Error while shutting down the background threads");
+  info!("Shutting down background threads and waiting for them to finish...");
+  if let Err(err) = background_threads_handle.await {
+    error!("Error while shutting down the background threads {}", err);
+  }
+
+  info!("Starting final commit of coredb...");
+  if let Err(err) = shared_state.clone().coredb.commit(true).await {
+    error!("Failed to commit coredb: {}", err);
+  }
 
   info!("Completed Infino server shutdown");
 }
@@ -338,22 +305,10 @@ fn get_timestamp(value: &Map<String, Value>, timestamp_key: &str) -> Result<u64,
 // Helper function to append log messages
 async fn append_single_log_message(
   obj: Map<String, Value>,
-  is_queue: bool,
   index_name: &str,
   state: Arc<AppState>,
   timestamp_key: &str,
 ) -> Result<u32, CoreDBError> {
-  let obj_string = serde_json::to_string(&obj).unwrap();
-  if is_queue {
-    state
-      .queue
-      .as_ref()
-      .unwrap()
-      .publish(&obj_string)
-      .await
-      .unwrap();
-  }
-
   let timestamp = get_timestamp(&obj, timestamp_key).unwrap_or_else(|err| {
     warn!(
       "Timestamp error, adding current time stamp. Entry {:?}: {}",
@@ -403,8 +358,6 @@ async fn append_log(
     .write_all(&log_json.to_string().into_bytes()[..])
     .unwrap();
 
-  let is_queue = state.queue.is_some();
-
   let result = parse_json(&log_json);
   if result.is_err() {
     let msg = format!("Invalid log entry {}", log_json);
@@ -421,8 +374,7 @@ async fn append_log(
   // Append each entry
   // TODO: Skip logs with errors instead of throwing
   for obj in log_json_objects {
-    let result =
-      append_single_log_message(obj, is_queue, &index_name, state.clone(), timestamp_key).await;
+    let result = append_single_log_message(obj, &index_name, state.clone(), timestamp_key).await;
 
     match result {
       Ok(doc_id) => {
@@ -486,8 +438,6 @@ async fn append_metric(
 ) -> Result<(), (StatusCode, String)> {
   debug!("Appending metric entry: {:?}", ts_json);
 
-  let is_queue = state.queue.is_some();
-
   let result = parse_json(&ts_json);
   if result.is_err() {
     let msg = format!("Invalid time series entry {}", ts_json);
@@ -501,18 +451,6 @@ async fn append_metric(
   let labels_key: &str = server_settings.get_labels_key();
 
   for obj in ts_objects {
-    let obj_string = serde_json::to_string(&obj).unwrap();
-
-    if is_queue {
-      state
-        .queue
-        .as_ref()
-        .unwrap()
-        .publish(&obj_string)
-        .await
-        .unwrap();
-    }
-
     // Retrieve the timestamp for this time series entry.
     let result = get_timestamp(&obj, timestamp_key);
     if result.is_err() {
@@ -565,7 +503,7 @@ async fn append_metric(
               return Err((StatusCode::TOO_MANY_REQUESTS, error.to_string()));
             }
             _ => {
-              println!("An unexpected error occurred.");
+              error!("An unexpected error occurred.");
             }
           }
         }
@@ -576,15 +514,62 @@ async fn append_metric(
   Ok(())
 }
 
+/// Process the bulk request body that may include newline-delimited JSON, comma-delimited entries,
+/// or a mix of both, into a Vec of serde_json::Value.
+fn process_bulk_json_body(json_body: &str) -> Result<Vec<Value>, (StatusCode, String)> {
+  let mut processed_entries = Vec::new();
+
+  // Trim the leading '[' and trailing ']' to handle JSON array input
+  let trimmed_json_body = json_body
+    .trim()
+    .trim_start_matches('[')
+    .trim_end_matches(']');
+
+  // Normalize the input: replace "}," with "}\n" to ensure each JSON object is on its own line
+  let normalized_json_body = trimmed_json_body
+    .replace("},", "}\n")
+    .replace(",\n", "\n")
+    .replace(", \n", "\n");
+
+  // Split the normalized input into lines
+  for line in normalized_json_body.lines() {
+    let trimmed_line = line.trim();
+    // Skip empty lines
+    if trimmed_line.is_empty() {
+      continue;
+    }
+
+    // Attempt to parse each line as a separate JSON object
+    match serde_json::from_str::<Value>(trimmed_line) {
+      Ok(json_obj) => processed_entries.push(json_obj),
+      Err(e) => {
+        // Log and return an error if parsing fails
+        error!("Failed to parse JSON object: {}", e);
+        return Err((
+          StatusCode::BAD_REQUEST,
+          format!("Failed to parse JSON object: {}", trimmed_line),
+        ));
+      }
+    }
+  }
+
+  // Log the successful parsing of entries
+  debug!(
+    "Successfully parsed {} JSON objects",
+    processed_entries.len()
+  );
+  Ok(processed_entries)
+}
+
 /// Bulk append data to CoreDB.
 #[allow(unused_assignments)]
 #[allow(dead_code)]
 async fn bulk(
   State(state): State<Arc<AppState>>,
   Path(index_name): Path<String>,
-  Json(request_json): Json<serde_json::Value>,
+  json_body: String,
 ) -> Result<String, (StatusCode, String)> {
-  debug!("Executing bulk append request {}", request_json);
+  debug!("Executing bulk append request {}", json_body);
 
   let append_start_time = Utc::now().timestamp_millis() as u64;
 
@@ -593,23 +578,15 @@ async fn bulk(
   state
     .wal_file
     .clone()
-    .write_all(&request_json.to_string().into_bytes()[..])
+    .write_all(&json_body.to_string().into_bytes()[..])
     .unwrap();
 
-  let is_queue = state.queue.is_some();
-
-  if !request_json.is_array() {
-    let msg =
-      "Invalid bulk append request format: Expected an array of actions and documents.".to_string();
-    error!("{}", msg);
-    return Err((StatusCode::BAD_REQUEST, msg));
-  }
+  let actions = process_bulk_json_body(&json_body)?;
 
   let server_settings = state.settings.get_server_settings();
   let timestamp_key = server_settings.get_timestamp_key();
 
   let mut items = Vec::new();
-  let actions = request_json.as_array().unwrap();
   let mut i = 0;
 
   while i < actions.len() {
@@ -632,14 +609,9 @@ async fn bulk(
 
         // Ensure document is an object and convert to Map<String, Value>
         if let Some(doc_map) = document.as_object() {
-          let result = append_single_log_message(
-            doc_map.clone(),
-            is_queue,
-            &index_name,
-            state.clone(),
-            timestamp_key,
-          )
-          .await;
+          let result =
+            append_single_log_message(doc_map.clone(), &index_name, state.clone(), timestamp_key)
+              .await;
 
           match result {
             Ok(doc_id) => {
@@ -796,6 +768,80 @@ async fn search_logs(
       let result_json =
         serde_json::to_string(&log_messages).expect("Could not convert search results to JSON");
       Ok(result_json)
+    }
+    Err(coredb_error) => {
+      match coredb_error {
+        CoreDBError::QueryError(ref search_logs_error) => {
+          // Handle the error and return an appropriate status code and error message.
+          match search_logs_error {
+            QueryError::JsonParseError(_) => {
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
+            }
+            QueryError::IndexNotFoundError(_) => {
+              Err((StatusCode::BAD_REQUEST, coredb_error.to_string()))
+            }
+            QueryError::TimeOutError(_) => {
+              Err((StatusCode::INTERNAL_SERVER_ERROR, coredb_error.to_string()))
+            }
+            QueryError::NoQueryProvided => Err((StatusCode::BAD_REQUEST, coredb_error.to_string())),
+            _ => Err((
+              StatusCode::INTERNAL_SERVER_ERROR,
+              "Internal server error".to_string(),
+            )),
+          }
+        }
+        _ => Err((
+          StatusCode::INTERNAL_SERVER_ERROR,
+          "Internal server error".to_string(),
+        )),
+      }
+    }
+  }
+}
+
+/// Delete logs by query in CoreDB.
+async fn delete_logs_by_query(
+  State(state): State<Arc<AppState>>,
+  Query(logs_query): Query<LogsQuery>,
+  Path(index_name): Path<String>,
+  json_body: String,
+) -> Result<String, (StatusCode, String)> {
+  debug!(
+    "Deleting logs with URL query: {:?}, JSON body: {:?}",
+    logs_query, json_body
+  );
+
+  let start_time = logs_query
+    .start_time
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or(0); // Default to 0 if None
+
+  let end_time = logs_query
+    .end_time
+    .as_deref()
+    .map(|s| s.replace(' ', "+")) // Correct the format from Axum
+    .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+    .map(|dt| dt.timestamp_millis() as u64)
+    .unwrap_or_else(|| Utc::now().timestamp_millis() as u64); // Default to current time if None
+
+  let results = state
+    .coredb
+    .delete_logs_by_query(
+      &index_name,
+      &logs_query.q.unwrap_or_default(),
+      &json_body,
+      start_time,
+      end_time,
+    )
+    .await;
+
+  match results {
+    Ok(log_messages) => {
+      // Return the number of deleted messages.
+      Ok(log_messages.to_string())
     }
     Err(coredb_error) => {
       match coredb_error {
@@ -1125,7 +1171,6 @@ mod tests {
   use chrono::{TimeZone, Utc};
   use serde_json::json;
   use tempdir::TempDir;
-  use test_case::test_case;
   use tokio::time::{sleep, Duration};
   use tower::Service;
   use urlencoding::encode;
@@ -1151,13 +1196,7 @@ mod tests {
   }
 
   /// Helper function to create a test configuration.
-  fn create_test_config(
-    config_dir_path: &str,
-    index_dir_path: &str,
-    wal_dir_path: &str,
-    container_name: &str,
-    use_rabbitmq: bool,
-  ) {
+  fn create_test_config(config_dir_path: &str, index_dir_path: &str, wal_dir_path: &str) {
     config_test_logger();
 
     // Create a test config in the directory config_dir_path.
@@ -1167,17 +1206,6 @@ mod tests {
       let index_dir_path_line = format!("index_dir_path = \"{}\"\n", index_dir_path);
       let default_index_name = format!("default_index_name = \"{}\"\n", "default");
       let wal_dir_path_line = format!("wal_dir_path = \"{}\"\n", wal_dir_path);
-      let container_name_line = format!("container_name = \"{}\"\n", container_name);
-      let use_rabbitmq_str = use_rabbitmq
-        .then(|| "yes".to_string())
-        .unwrap_or_else(|| "no".to_string());
-      let use_rabbitmq_line = format!("use_rabbitmq = \"{}\"\n", use_rabbitmq_str);
-
-      // Note that we use different rabbitmq ports from the Infino server as well as other tests, so that there is no port conflict.
-      let rabbitmq_listen_port = 2224;
-      let rabbitmq_stream_port = 2225;
-      let rabbimq_listen_port_line = format!("listen_port = \"{}\"\n", rabbitmq_listen_port);
-      let rabbimq_stream_port_line = format!("stream_port = \"{}\"\n", rabbitmq_stream_port);
 
       let mut file = File::create(config_file_path).unwrap();
 
@@ -1207,13 +1235,6 @@ mod tests {
       file.write_all(b"host = \"0.0.0.0\"\n").unwrap();
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();
-      file.write_all(use_rabbitmq_line.as_bytes()).unwrap();
-
-      // Write rabbitmq section.
-      file.write_all(b"[rabbitmq]\n").unwrap();
-      file.write_all(rabbimq_listen_port_line.as_bytes()).unwrap();
-      file.write_all(rabbimq_stream_port_line.as_bytes()).unwrap();
-      file.write_all(container_name_line.as_bytes()).unwrap();
     }
   }
 
@@ -1523,11 +1544,8 @@ mod tests {
     Ok(())
   }
 
-  // Only run the tests without rabbitmq, as that is the use-case we are targeting.
-  // #[test_case(true ; "use rabbitmq")]
-  #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_basic_main(use_rabbitmq: bool) -> Result<(), CoreDBError> {
+  async fn test_basic_main() -> Result<(), CoreDBError> {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_name = "test_basic_main_test";
@@ -1535,18 +1553,11 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
-    let container_name = "infino-test-main-rs";
 
-    create_test_config(
-      config_dir_path,
-      index_dir_path,
-      wal_dir_path,
-      container_name,
-      use_rabbitmq,
-    );
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     // Create the app.
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _) = app(config_dir_path).await;
 
     // Check whether the / works.
     let response = app
@@ -1842,9 +1853,6 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Stop the RabbbitMQ container.
-    let _ = RabbitMQ::stop_queue_container(container_name);
-
     Ok(())
   }
 
@@ -1857,18 +1865,11 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
-    let container_name = "infino-test-main-rs";
 
-    create_test_config(
-      config_dir_path,
-      index_dir_path,
-      wal_dir_path,
-      container_name,
-      false,
-    );
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     // Create the app.
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _) = app(config_dir_path).await;
 
     // We need a http body of >2MB and <5MB for this test.
     let num_log_messages = 15 * 1024;
@@ -1925,9 +1926,8 @@ mod tests {
   }
 
   /// Write test to test Create and Delete index APIs.
-  #[test_case(false ; "do not use rabbitmq")]
   #[tokio::test]
-  async fn test_create_delete_index(use_rabbitmq: bool) {
+  async fn test_create_delete_index() {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_name = "index_test";
@@ -1935,21 +1935,14 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
-    let container_name = "infino-test-main-rs";
     let storage = Storage::new(&StorageType::Local)
       .await
       .expect("Could not create storage");
 
-    create_test_config(
-      config_dir_path,
-      index_dir_path,
-      wal_dir_path,
-      container_name,
-      use_rabbitmq,
-    );
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     // Create the app.
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
+    let (mut app, _, _) = app(config_dir_path).await;
 
     // Create an index.
     let response = app
@@ -1984,14 +1977,81 @@ mod tests {
 
     // Check whether the index directory exists.
     assert!(!storage.check_path_exists(metadata_file_path).await);
-
-    // Stop the RabbbitMQ container.
-    let _ = RabbitMQ::stop_queue_container(container_name);
   }
 
-  #[test_case(false ; "do not use rabbitmq")]
+  /// Write test to test Create and Delete index APIs.
   #[tokio::test]
-  async fn test_bulk_operation(use_rabbitmq: bool) {
+  async fn test_create_delete_multiple_indexes() {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "index_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+    let storage = Storage::new(&StorageType::Local)
+      .await
+      .expect("Could not create storage");
+
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
+
+    let mut index_dirs = Vec::<String>::new();
+
+    // Create the app.
+    let (mut app, _, _) = app(config_dir_path).await;
+
+    for i in 0..9 {
+      let index_name = format!("index_test+{}", i);
+      index_dirs.push(index_name.to_string());
+
+      // Create an index.
+      let response = app
+        .call(
+          Request::builder()
+            .method(http::Method::PUT)
+            .uri(&format!("/{}", index_name))
+            .body(Body::from(""))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+      assert_eq!(response.status(), StatusCode::OK);
+
+      // Check whether the metadata file in the index directory exists.
+      let joined_index_dir_path = get_joined_path(index_dir_path, &index_name);
+      let metadata_file_path = &format!(
+        "{}/{}",
+        joined_index_dir_path,
+        Index::get_metadata_file_name()
+      );
+      assert!(storage.check_path_exists(metadata_file_path).await);
+    }
+
+    // Delete the index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::DELETE)
+          .uri("/*")
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Check whether the metadata file in the index directories exists.
+    // None of them should.
+    for index_dir in index_dirs.iter() {
+      let metadata_file_path = &format!("{}/{}", index_dir, Index::get_metadata_file_name());
+
+      // Check whether the index directory exists.
+      assert!(!storage.check_path_exists(metadata_file_path).await);
+    }
+  }
+
+  #[tokio::test]
+  async fn test_bulk_operation() {
     let config_dir = TempDir::new("config_test").unwrap();
     let config_dir_path = config_dir.path().to_str().unwrap();
     let index_name = "bulk_test";
@@ -1999,28 +2059,10 @@ mod tests {
     let index_dir_path = index_dir.path().to_str().unwrap();
     let wal_dir = TempDir::new("wal_test").unwrap();
     let wal_dir_path = wal_dir.path().to_str().unwrap();
-    let container_name = "infino-test-main-rs";
 
-    create_test_config(
-      config_dir_path,
-      index_dir_path,
-      wal_dir_path,
-      container_name,
-      use_rabbitmq,
-    );
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
-    let (mut app, _, _) = app(config_dir_path, "rabbitmq", "3").await;
-
-    // Prepare the bulk request body
-    let bulk_request = json!([
-        { "index": { "_index": index_name, "_id": "1" } },
-        { "title": "Document 1", "content": "Example content 1" },
-        { "delete": { "_index": index_name, "_id": "2" } },
-        { "create": { "_index": index_name, "_id": "3" } },
-        { "title": "Document 3", "content": "Example content 3" },
-        { "update": { "_index": index_name, "_id": "1" } },
-        { "doc": { "content": "Updated content 1" } },
-    ]);
+    let (mut app, _, _) = app(config_dir_path).await;
 
     // Create a single index.
     let response = app
@@ -2035,15 +2077,21 @@ mod tests {
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = serde_json::to_string(&bulk_request).unwrap();
+    // *** Test newline delimited inserts
+    let bulk_request = format!(
+      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"title\": \"Document 1\", \"content\": \"Example content 1\"}}\r\n{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"2\"}}}}\r\n{{\"create\": {{\"_index\": \"{}\", \"_id\": \"3\"}}}}\r\n{{\"title\": \"Document 3\", \"content\": \"Example content 3\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"1\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 1\"}}}}",
+      index_name, index_name, index_name, index_name
+    );
+
+    let body = bulk_request;
     let path = format!("/{}/bulk", index_name);
 
     let response = app
       .call(
         Request::builder()
           .method(http::Method::POST)
-          .uri(path)
-          .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
           .body(Body::from(body))
           .unwrap(),
       )
@@ -2059,7 +2107,153 @@ mod tests {
       .unwrap();
     let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
 
-    // Example assertion on the response
+    // Make sure documents are inserted correctly.
     assert_eq!(response_json["errors"], false);
+
+    // *** Test comma delimited inserts
+    let bulk_request = format!(
+      "{{\"index\": {{\"_index\": \"{}\", \"_id\": \"5\"}}}},{{\"title\": \"Document 5\", \"content\": \"Example content 5\"}},{{\"delete\": {{\"_index\": \"{}\", \"_id\": \"6\"}}}},{{\"create\": {{\"_index\": \"{}\", \"_id\": \"7\"}}}},{{\"title\": \"Document 7\", \"content\": \"Example content 7\"}}\r\n{{\"update\": {{\"_index\": \"{}\", \"_id\": \"8\"}}}}\r\n{{\"doc\": {{\"content\": \"Updated content 8\"}}}}",
+      index_name, index_name, index_name, index_name
+    );
+
+    let body = bulk_request;
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Make sure documents are inserted correctly.
+    assert_eq!(response_json["errors"], false);
+
+    // *** Test searches against the inserts
+    let query_dsl_request = "{\"query\":{\"match\":{\"test_field\":{\"query\":\"test_value\",\"operator\":\"OR\",\"prefix_length\":0,\"max_expansions\":50,\"fuzzy_transpositions\":true,\"lenient\":false,\"zero_terms_query\":\"NONE\",\"auto_generate_synonyms_phrase_query\":true,\"boost\":1.0}}}}";
+    let path = format!("/{}/search_logs", index_name);
+
+    let request = Request::builder()
+      .method(http::Method::GET)
+      .uri(path)
+      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+      .body(Body::from(query_dsl_request))
+      .unwrap();
+
+    let result = app.call(request).await;
+
+    let response = result.expect("Failed to make a call");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body();
+    let max_body_size = 10 * 1024 * 1024;
+    let bytes = to_bytes(body, max_body_size)
+      .await
+      .expect("Failed to read body");
+
+    let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
+    debug!("Response content: {}", body_str);
+  }
+
+  #[tokio::test]
+  async fn test_bulk_operation_no_timestamp() {
+    let config_dir = TempDir::new("config_test").unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = "bulk_test";
+    let index_dir = TempDir::new(index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new("wal_test").unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+
+    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
+
+    let (mut app, _, _) = app(config_dir_path).await;
+
+    // Create a single index.
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::PUT)
+          .uri(&format!("/{}", index_name))
+          .body(Body::from(""))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // *** Test comma delimited inserts
+    let bulk_request = format!(
+      r#"{{ "index": {{ "_index": "{}", "_id": "56301" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }},
+  {{ "index": {{ "_index": "{}", "_id": "56302" }} }},
+  {{ "date": 1711333726401, "message": "[Mon Feb 27 05:40:53 2006] [error] [client 212.34.140.103] File does not exist: /var/www/html/articles" }}"#,
+      index_name, index_name
+    );
+    let body = bulk_request;
+    let path = format!("/{}/bulk", index_name);
+
+    let response = app
+      .call(
+        Request::builder()
+          .method(http::Method::POST)
+          .uri(&path)
+          .header("Content-Type", "application/x-ndjson")
+          .body(Body::from(body))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+
+    // Verify the response status code
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the response body and verify the expected outcome
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    let response_json: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+
+    // Make sure documents are inserted correctly.
+    assert_eq!(response_json["errors"], false);
+
+    // *** Test searches against the inserts
+    let query_dsl_request = "{\"query\":{\"match\":{\"test_field\":{\"query\":\"test_value\",\"operator\":\"OR\",\"prefix_length\":0,\"max_expansions\":50,\"fuzzy_transpositions\":true,\"lenient\":false,\"zero_terms_query\":\"NONE\",\"auto_generate_synonyms_phrase_query\":true,\"boost\":1.0}}}}";
+    let path = format!("/{}/search_logs", index_name);
+
+    let request = Request::builder()
+      .method(http::Method::GET)
+      .uri(path)
+      .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+      .body(Body::from(query_dsl_request))
+      .unwrap();
+
+    let result = app.call(request).await;
+
+    let response = result.expect("Failed to make a call");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body();
+    let max_body_size = 10 * 1024 * 1024;
+    let bytes = to_bytes(body, max_body_size)
+      .await
+      .expect("Failed to read body");
+
+    let body_str = std::str::from_utf8(&bytes).expect("Body was not valid UTF-8");
+    debug!("Response content: {}", body_str);
   }
 }

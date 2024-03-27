@@ -68,7 +68,7 @@ import com.google.gson.JsonObject;
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
 
-    private static final Logger logger = LogManager.getLogger(InfinoPlugin.class);
+    private static final Logger logger = LogManager.getLogger(InfinoTransportInterceptorTests.class);
 
     protected static final int MAX_RETRIES = 2;
     private ExecutorService executorService;
@@ -109,12 +109,6 @@ public class InfinoTransportInterceptorTests extends OpenSearchTestCase {
 
             @Override
             protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(BulkShardRequest request,
-                    InfinoOperation operation) {
-                return mockInfinoSerializeTransportRequest;
-            }
-
-            @Override
-            protected InfinoSerializeTransportRequest getInfinoSerializeTransportRequest(ShardSearchRequest request,
                     InfinoOperation operation) {
                 return mockInfinoSerializeTransportRequest;
             }

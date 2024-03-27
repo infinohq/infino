@@ -24,6 +24,9 @@ pub struct SegmentSummary {
 
   /// Uncompressed size (i.e., size when the segment is loaded in memory)
   uncompressed_size: u64,
+  // TODO: add these later when update / delete by doc id needs to be implemented
+  // start_log_id: u32,
+  // end_log_id: u32,
 }
 
 impl SegmentSummary {
@@ -153,9 +156,9 @@ mod tests {
     for i in 1..=num_segments {
       let segment = Segment::new_with_temp_wal();
       segment
-        .append_log_message(i, &HashMap::new(), "some log message")
+        .append_log_message(i, i.into(), &HashMap::new(), "some log message")
         .expect("Could not append to segment");
-      let segment_summary = SegmentSummary::new(i as u32, &segment);
+      let segment_summary = SegmentSummary::new(i, &segment);
       segment_summaries.push(segment_summary);
 
       // The latest created segment is expected to the first one in sorted segement_summaries - since the

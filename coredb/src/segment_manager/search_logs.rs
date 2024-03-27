@@ -135,8 +135,6 @@ impl Serialize for QueryLogMessage {
     let log_message = &self.message;
     let mut map = serializer.serialize_map(None)?;
 
-    //TODO: Inject the index name
-    map.serialize_entry("_index", "DUMMY")?;
     map.serialize_entry("_id", &self.id)?;
     map.serialize_entry("_score", &1.0)?;
 
@@ -252,6 +250,8 @@ impl Segment {
     ),
     QueryError,
   > {
+    debug!("SEGMENT: Getting postings list for terms {:?}", terms);
+
     let mut initial_values_list: Vec<Vec<u32>> = Vec::new();
     let mut postings_lists: Vec<Vec<PostingsBlockCompressed>> = Vec::new();
     let mut last_block_list: Vec<PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>> = Vec::new();
@@ -306,6 +306,8 @@ impl Segment {
     shortest_list_index: usize,
     results: &mut Vec<u32>,
   ) -> Result<(), QueryError> {
+    debug!("SEGMENT: Get matching doc IDs with logical and");
+
     let accumulator = &mut Vec::new();
 
     if postings_lists.is_empty() {
@@ -472,6 +474,8 @@ impl Segment {
     last_block_list: &[PostingsBlock<BLOCK_SIZE_FOR_LOG_MESSAGES>],
     results: &mut Vec<u32>,
   ) -> Result<(), QueryError> {
+    debug!("SEGMENT: Getting matching doc ids with logical OR");
+
     if postings_lists.is_empty() {
       debug!("No postings lists. Returning");
       return Ok(());
@@ -530,6 +534,140 @@ impl Segment {
     matching_document_ids
   }
 
+  /// Retrieve document IDs with regular expression term match.
+  ///
+  /// # Arguments
+  ///
+  /// * `regexp_term` - A regular expression term to match.
+  /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
+
+  pub async fn get_doc_ids_with_regexp_term(
+    &self,
+    regexp_term: &str,
+    case_insensitive: bool,
+  ) -> Result<Vec<u32>, QueryError> {
+    let regex = Regex::new(regexp_term);
+
+    // Get terms with the prefix formed by the regular expression
+    let prefix_matches =
+      self.get_terms_with_prefix(&self.regexp_to_prefix(regexp_term), case_insensitive);
+
+    let regex = match regex {
+      Ok(regex) => regex,
+      Err(err) => {
+        eprintln!("Error: {}", err);
+        return Err(QueryError::RegexpError(err.to_string()));
+      }
+    };
+
+    // Check all the terms for regex match
+    let matching_terms: Vec<String> = prefix_matches
+      .into_iter()
+      .filter(|term| regex.is_match(term.as_bytes()))
+      .collect();
+
+    // Search inverted index for matching terms
+    let or_doc_ids = self.search_inverted_index(matching_terms, "OR").await?;
+
+    Ok(or_doc_ids)
+  }
+
+  /// Converts a regular expression pattern into a prefix suitable for prefix matching.
+  /// TODO: This method needs to be more nuanced to handle OR (|), Negations (~), and complex regex operators
+  fn regexp_to_prefix(&self, regexp: &str) -> String {
+    let mut prefix = String::new();
+    let mut is_escaping = false;
+
+    for c in regexp.chars() {
+      match c {
+        '\\' => {
+          if is_escaping {
+            prefix.push(c);
+            is_escaping = false;
+          } else {
+            is_escaping = true;
+          }
+        }
+        '*' | '?' | '+' | '[' | ']' | '.' | '|' | '$' => {
+          if !is_escaping {
+            break;
+          }
+          prefix.push(c);
+        }
+        _ => {
+          if !is_escaping {
+            prefix.push(c);
+          }
+          is_escaping = false;
+        }
+      }
+    }
+
+    prefix
+  }
+
+  /// Retrieve document IDs with wildcard expression term match.
+  ///
+  /// # Arguments
+  ///
+  /// * `wildcard_term` - A wildcard expression term to match.
+  /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
+
+  pub async fn get_doc_ids_with_wildcard_term(
+    &self,
+    wildcard_term: &str,
+    case_insensitive: bool,
+  ) -> Result<Vec<u32>, QueryError> {
+    // Convert wildcard term to regex pattern
+    let regex_pattern = self.wildcard_to_regex(wildcard_term);
+
+    // Use the existing method for regex to get document IDs
+    self
+      .get_doc_ids_with_regexp_term(&regex_pattern, case_insensitive)
+      .await
+  }
+
+  /// Converts a wildcard query pattern into a regex pattern.
+  fn wildcard_to_regex(&self, wildcard: &str) -> String {
+    let mut regex_pattern = String::new();
+    let mut is_escaping = false;
+
+    for c in wildcard.chars() {
+      match c {
+        '\\' => {
+          if is_escaping {
+            regex_pattern.push(c);
+            is_escaping = false;
+          } else {
+            is_escaping = true;
+          }
+        }
+        '*' => {
+          if !is_escaping {
+            regex_pattern.push_str(".*");
+          } else {
+            regex_pattern.push(c);
+          }
+          is_escaping = false;
+        }
+        '?' => {
+          if !is_escaping {
+            regex_pattern.push('.');
+          } else {
+            regex_pattern.push(c);
+          }
+          is_escaping = false;
+        }
+        _ => {
+          regex_pattern.push(c);
+          is_escaping = false;
+        }
+      }
+    }
+
+    regex_pattern
+  }
+
   /// Retrieve document IDs with prefix phrase match.
   ///
   /// # Arguments
@@ -538,13 +676,15 @@ impl Segment {
   /// * `field` - The field to search within.
   /// * `prefix_text_str` - The exact prefix text string to match.
   /// * `case_insensitive` - A boolean flag indicating whether the search is case-insensitive.
+  /// * `is_full_text_phrase` - Signifies whether it is term query or match phase query, for differentiating in the matching logic
   ///
-  pub async fn get_doc_ids_with_prefix_phrase(
+  pub async fn get_doc_ids_with_prefix_term_or_full_text_phrase(
     &self,
     prefix_phrase_terms: Vec<String>,
     field: &str,
     prefix_text_str: &str,
     case_insensitive: bool,
+    is_full_text_phrase: bool,
   ) -> Result<Vec<u32>, QueryError> {
     let mut matching_document_ids = Vec::new();
 
@@ -584,15 +724,25 @@ impl Segment {
 
       or_doc_ids.dedup();
 
-      // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
-      // and return the specific document IDs
+      if is_full_text_phrase {
+        // From the given document IDs, filter document IDs which contain the exact phrase (in the given field)
+        // and return the specific document IDs
+        matching_document_ids.extend(self.get_exact_phrase_matches(
+          &or_doc_ids,
+          Some(field),
+          prefix_text_str,
+        ));
+      } else {
+        // From the given document IDs, filter document IDs which start with the exact phrase (in the given field)
+        // and return the specific document IDs
 
-      matching_document_ids.extend(self.get_bool_prefix_matches(
-        &or_doc_ids,
-        field,
-        prefix_text_str,
-        case_insensitive,
-      ));
+        matching_document_ids.extend(self.get_bool_prefix_matches(
+          &or_doc_ids,
+          field,
+          prefix_text_str,
+          case_insensitive,
+        ));
+      }
     }
 
     Ok(matching_document_ids)
@@ -1828,13 +1978,13 @@ mod tests {
     let segment = Segment::new_with_temp_wal();
 
     segment
-      .append_log_message(1001, &HashMap::new(), "log 1")
+      .append_log_message(0, 1001, &HashMap::new(), "log 1")
       .unwrap();
     segment
-      .append_log_message(1002, &HashMap::new(), "log 2")
+      .append_log_message(1, 1002, &HashMap::new(), "log 2")
       .unwrap();
     segment
-      .append_log_message(1003, &HashMap::new(), "log 3")
+      .append_log_message(2, 1003, &HashMap::new(), "log 3")
       .unwrap();
 
     // Get all log message IDs from the forward map.
@@ -1852,7 +2002,7 @@ mod tests {
     let mut fields = HashMap::new();
     fields.insert("field_name".to_string(), "log 3".to_string());
     segment
-      .append_log_message(1004, &fields, "some message")
+      .append_log_message(3, 1004, &fields, "some message")
       .unwrap();
 
     let all_log_ids_with_fields: Vec<u32> = segment

@@ -99,14 +99,15 @@ prefix_terms  = { (case_insensitive | rewrite) }
 
 // Regexp Queries: https://opensearch.org/docs/latest/query-dsl/term/regexp/
 regexp_query  = { start_brace ~ quote ~ "regexp" ~ quote ~ colon ~ regexp_search ~ end_brace }
-regexp_search = { start_brace ~ (regexp_field | (fieldname ~ colon ~ regexp_array)) ~ end_brace }
-regexp_array  = { start_brace ~ (regexp ~ (comma ~ regexp)*)? ~ end_brace }
-regexp        = { (regexp_field | case_insensitive | rewrite | flags | max_determinized_states) }
+regexp_search = { start_brace ~ fieldname ~ colon ~ (regexp_string | regexp_array) ~ end_brace }
+regexp_array  = { start_brace ~ value ~ (comma ~ regexp_terms)* ~ end_brace }
+regexp_terms  = { (case_insensitive | rewrite | flags | max_determinized_states) }
 
 // Wildcard Queries: https://opensearch.org/docs/latest/query-dsl/term/wildcard/
 wildcard_query  = { start_brace ~ quote ~ "wildcard" ~ quote ~ colon ~ wildcard_search ~ end_brace }
-wildcard_search = { start_brace ~ fieldname ~ colon ~ start_brace ~ (wildcard ~ (comma ~ wildcard)*)? ~ end_brace ~ end_brace }
-wildcard        = { (wildcard_value | boost | case_insensitive) }
+wildcard_search = { start_brace ~ fieldname ~ colon ~ (wildcard_string | wildcard_array) ~ end_brace }
+wildcard_array  = { start_brace ~ value ~ (comma ~ wildcard_terms)* ~ end_brace }
+wildcard_terms  = { (boost | case_insensitive) }
 
 // Fuzzy Queries: https://opensearch.org/docs/latest/query-dsl/term/fuzzy/
 fuzzy_query  = { start_brace ~ quote ~ "fuzzy" ~ quote ~ colon ~ fuzzy_search ~ end_brace }
@@ -140,9 +141,9 @@ match_phrase_terms  = { (analyzer | slop | zero_terms_query) }
 
 // Match Phrase Queries: https://opensearch.org/docs/latest/query-dsl/full-text/match-phrase/
 match_phrase_prefix_query  = { start_brace ~ quote ~ "match_phrase_prefix" ~ quote ~ colon ~ match_phrase_prefix_search ~ end_brace }
-match_phrase_prefix_search = { start_brace ~ fieldname ~ colon ~ match_phrase_prefix_array ~ end_brace }
-match_phrase_prefix_array  = { start_brace ~ query ~ (comma ~ match_phrase_prefix)* ~ end_brace }
-match_phrase_prefix        = { (analyzer | slop | zero_terms_query) }
+match_phrase_prefix_search = { start_brace ~ fieldname ~ colon ~ ( match_phrase_prefix_string | match_phrase_prefix_array )~ end_brace }
+match_phrase_prefix_array  = { start_brace ~ query ~ (comma ~ match_phrase_prefix_terms)* ~ end_brace }
+match_phrase_prefix_terms  = { (analyzer | slop | zero_terms_query) }
 
 // Multi Match Queries: https://opensearch.org/docs/latest/query-dsl/full-text/multi-match/
 multi_match_query  = { start_brace ~ quote ~ "multi_match" ~ quote ~ colon ~ multi_match_search ~ end_brace }
@@ -448,6 +449,7 @@ line_string                  = { geo_type ~ "lineString" ~ quote ~ "" ~ comma ~ 
 linear_ring                  = { start_bracket ~ (geo_coordinate ~ (comma ~ geo_coordinate)*)? ~ end_bracket }
 lt                           = { quote ~ "lt" ~ quote ~ colon ~ (number | date) }
 lte                          = { quote ~ "lte" ~ quote ~ colon ~ (number | date) }
+match_phrase_prefix_string   = { string }
 match_phrase_string          = { string }
 match_string                 = { string }
 max_boost                    = { quote ~ "max_boost" ~ quote ~ colon ~ float }
@@ -491,6 +493,7 @@ quote_analyzer               = { quote ~ "quote_analyzer" ~ quote ~ colon ~ stri
 quote_field_suffix           = { quote ~ "quote_field_suffix" ~ quote ~ colon ~ string }
 range_filter                 = { quote ~ "range" ~ quote ~ start_brace ~ quote ~ "field" ~ quote ~ colon ~ fieldname ~ comma ~ range_search ~ end_brace }
 regexp_field                 = { fieldname ~ colon ~ string }
+regexp_string                = { string }
 relation                     = { quote ~ "relation" ~ quote ~ colon ~ (quote ~ "INTERSECTS" ~ quote | quote ~ "DISJOINT" ~ quote | quote ~ "WITHIN" ~ quote | quote ~ "CONTAINS" ~ quote) }
 rewrite                      = { quote ~ "rewrite" ~ quote ~ colon ~ quote ~ "" ~ ("constant_score" | "scoring_boolean" | "constant_score_boolean" | "top_terms_N" | "top_terms_boost_N" | "top_terms_blended_freqs_N") ~ quote ~ "" }
 routing                      = { quote ~ "routing" ~ quote ~ colon ~ string }
@@ -520,11 +523,12 @@ wildcard_before              = { quote ~ "before" ~ quote ~ colon ~ string }
 wildcard_not_after           = { quote ~ "not_after" ~ quote ~ colon ~ string }
 wildcard_not_before          = { quote ~ "not_before" ~ quote ~ colon ~ string }
 wildcard_not_within          = { quote ~ "not_within" ~ quote ~ colon ~ string }
+wildcard_string              = { string }
 wildcard_value               = { quote ~ "value" ~ quote ~ colon ~ string }
 wildcard_within              = { quote ~ "within" ~ quote ~ colon ~ string }
 within                       = { quote ~ "within" ~ quote ~ colon ~ integer }
 wkt                          = { quote ~ "wkt" ~ quote ~ colon ~ string }
-zero_terms_query             = { quote ~ "lt" ~ quote ~ colon ~ (quote ~ "all" ~ quote | quote ~ "none" ~ quote) }
+zero_terms_query             = { quote ~ "zero_terms_query" ~ quote ~ colon ~ (quote ~ ("all" | "ALL") ~ quote | quote ~ ("none" | "NONE") ~ quote) }
 
 // **** Low-level semantic definitions ****
 // _ prefix means silent; lets Pest know that these rules shouldn't create an AST node

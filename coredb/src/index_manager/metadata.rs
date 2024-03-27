@@ -7,8 +7,8 @@ use crate::utils::custom_serde::atomic_cell_serde;
 /// Metadata for CoreDB's index.
 pub struct Metadata {
   /// Number of segments.
-  /// Note that this may not be same as the number of segments in the index, esp when
-  /// merging of older segments is implemented. The primary use of this field is to
+  /// Note that this may not be same as the number of segments in the index, esp with
+  /// merging of older segments. The primary use of this field is to
   /// provide a unique numeric key for each segment in the index.
   #[serde(with = "atomic_cell_serde")]
   segment_count: AtomicCell<u32>,
@@ -28,6 +28,10 @@ pub struct Metadata {
   /// Threshold of allowed number of uncommitted segments.
   #[serde(with = "atomic_cell_serde")]
   uncommitted_segments_threshold: AtomicCell<u32>,
+
+  /// Number of log messages.
+  #[serde(with = "atomic_cell_serde")]
+  log_message_count: AtomicCell<u32>,
 }
 
 impl Metadata {
@@ -45,6 +49,7 @@ impl Metadata {
       log_messages_threshold: AtomicCell::new(log_messages_threshold),
       metric_points_threshold: AtomicCell::new(metric_points_threshold),
       uncommitted_segments_threshold: AtomicCell::new(uncommitted_segments_threshold),
+      log_message_count: AtomicCell::new(0),
     }
   }
 
@@ -62,6 +67,11 @@ impl Metadata {
   /// Fetch the segment count and increment it by 1.
   pub fn fetch_increment_segment_count(&self) -> u32 {
     self.segment_count.fetch_add(1)
+  }
+
+  /// Set the segment count to the given value.
+  pub fn set_segment_count(&self, value: u32) {
+    self.segment_count.store(value);
   }
 
   /// Set the current segment number to the given value.
@@ -97,6 +107,16 @@ impl Metadata {
   /// Set uncommitted segments threshold
   pub fn set_uncommitted_segments_threshold(&self, val: u32) {
     self.uncommitted_segments_threshold.store(val);
+  }
+
+  /// Get number of log message in this segment.
+  pub fn get_log_message_count(&self) -> u32 {
+    self.log_message_count.load()
+  }
+
+  /// Get the current log message count in this segment and increment it by 1.
+  pub fn fetch_increment_log_message_count(&self) -> u32 {
+    self.log_message_count.fetch_add(1)
   }
 }
 
@@ -134,5 +154,7 @@ mod tests {
     assert_eq!(m.get_log_messages_threshold(), 5);
     assert_eq!(m.get_metric_points_threshold(), 50);
     assert_eq!(m.get_uncommitted_segments_threshold(), 3);
+    m.set_segment_count(20);
+    assert_eq!(m.get_segment_count(), 20);
   }
 }
