@@ -24,7 +24,6 @@ use crate::utils::error::QueryError;
 use crate::utils::io::get_joined_path;
 use crate::utils::range::is_overlap;
 use crate::utils::sync::{Arc, Mutex, RwLock, TokioMutex};
-use crate::utils::trie::Trie;
 
 const METADATA_FILE_NAME: &str = "metadata.bin";
 const SEGMENT_FILE_NAME: &str = "segment.bin";
@@ -59,10 +58,11 @@ pub struct Segment {
   // Mutex for only one thread to commit this segment at a time.
   commit_lock: TokioMutex<()>,
 
+  // Disabled Trie Temporarily
   /// Trie data structure containing terms present in this segment.
   /// Primarily used for efficient prefix searches on log message terms.
   /// The Trie is protected by an Arc (atomic reference counting) and RwLock to ensure concurrent access and modification safety.
-  trie: Arc<RwLock<Trie>>,
+  // trie: Arc<RwLock<Trie>>,
 
   // Write ahead log.
   wal: Arc<Mutex<WriteAheadLog>>,
@@ -81,7 +81,9 @@ impl Segment {
       labels: DashMap::new(),
       time_series_map: TimeSeriesMap::new(),
       commit_lock: TokioMutex::new(()),
-      trie: Arc::new(RwLock::new(Trie::new())),
+      // Disabled Trie Temporarily
+
+      // trie: Arc::new(RwLock::new(Trie::new())),
       wal,
     }
   }
@@ -255,13 +257,15 @@ impl Segment {
     // Increment the number of log messages appended so far
     let _ = self.metadata.fetch_increment_log_message_count();
 
-    let trie = self.trie.clone();
+    // Disabled Trie Temporarily
+
+    // let trie = self.trie.clone();
 
     // Update the inverted map.
     terms.into_iter().for_each(|term| {
       let term_id = *self
         .terms
-        .entry(term.clone())
+        .entry(term)
         .or_insert_with(|| self.metadata.fetch_increment_term_count());
 
       self
@@ -269,7 +273,7 @@ impl Segment {
         .append(term_id, log_message_id)
         .expect("Could not append to postings list");
 
-      trie.write().insert(&term);
+      // trie.write().insert(&term);
     });
 
     // Insert in the forward map.
@@ -400,10 +404,13 @@ impl Segment {
   }
 
   /// Get all terms with a certain prefix from the segment.
-  pub fn get_terms_with_prefix(&self, prefix: &str, case_insensitive: bool) -> Vec<String> {
-    let trie = self.trie.read();
+  pub fn get_terms_with_prefix(&self, prefix: &str, _case_insensitive: bool) -> Vec<String> {
+    // Disabled Trie Temporarily
+
+    // let trie = self.trie.read();
     // Use the Trie's method to collect terms with the given prefix
-    trie.get_terms_with_prefix(prefix, case_insensitive)
+    // trie.get_terms_with_prefix(prefix, case_insensitive)
+    vec![prefix.to_string()] // Just returning the prefix itself for illustration
   }
 
   pub async fn commit(&self, storage: &Storage, dir: &str) -> Result<(u64, u64), CoreDBError> {
@@ -477,16 +484,18 @@ impl Segment {
     let wal = WriteAheadLog::new("/tmp/x").unwrap();
     let wal = Arc::new(Mutex::new(wal));
 
+    // Disabled Trie Temporarily
+
     // Create a new thread-safe trie
-    let mut temp_trie = Trie::new();
+    // let mut temp_trie = Trie::new();
 
-    // Insert terms into the trie
-    for term_entry in terms.iter() {
-      let term = term_entry.key().clone();
-      temp_trie.insert(&term);
-    }
+    // // Insert terms into the trie
+    // for term_entry in terms.iter() {
+    //   let term = term_entry.key().clone();
+    //   temp_trie.insert(&term);
+    // }
 
-    let trie = Arc::new(RwLock::new(temp_trie));
+    // let trie = Arc::new(RwLock::new(temp_trie));
 
     let segment = Segment {
       metadata,
@@ -496,7 +505,7 @@ impl Segment {
       labels,
       time_series_map,
       commit_lock,
-      trie,
+      // trie,
       wal,
     };
 
@@ -706,7 +715,6 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-  use std::sync::Mutex;
 
   use crate::utils::sync::{Arc, RwLock};
 
@@ -1083,70 +1091,72 @@ mod tests {
     assert_eq!(expected, received);
   }
 
+  // Disabled Trie test Temporarily
+
   /// Tests concurrent log message appending and trie verification.
-  #[tokio::test]
-  async fn test_concurrent_append_log_messages() {
-    let num_threads = 20;
-    let num_log_messages_per_thread = 500;
+  // #[tokio::test]
+  // async fn test_concurrent_append_log_messages() {
+  //   let num_threads = 20;
+  //   let num_log_messages_per_thread = 500;
 
-    // Shared segment and trie for concurrent testing.
-    let segment = Arc::new(Segment::new_with_temp_wal());
-    let trie = Arc::clone(&segment.trie);
+  //   // Shared segment and trie for concurrent testing.
+  //   let segment = Arc::new(Segment::new_with_temp_wal());
+  //   let trie = Arc::clone(&segment.trie);
 
-    // Shared vector to collect expected words for trie verification.
-    let expected_words = Arc::new(Mutex::new(Vec::new()));
+  //   // Shared vector to collect expected words for trie verification.
+  //   let expected_words = Arc::new(Mutex::new(Vec::new()));
 
-    let mut handles = Vec::new();
-    for thread_number in 0..num_threads {
-      let segment_arc = Arc::clone(&segment);
-      let expected_words_arc = Arc::clone(&expected_words);
+  //   let mut handles = Vec::new();
+  //   for thread_number in 0..num_threads {
+  //     let segment_arc = Arc::clone(&segment);
+  //     let expected_words_arc = Arc::clone(&expected_words);
 
-      let handle = thread::spawn(move || {
-        for i in 0..num_log_messages_per_thread {
-          // Generate a unique identifier for the log message.
-          let i_thread_number = format!("{}_{}", i, thread_number);
+  //     let handle = thread::spawn(move || {
+  //       for i in 0..num_log_messages_per_thread {
+  //         // Generate a unique identifier for the log message.
+  //         let i_thread_number = format!("{}_{}", i, thread_number);
 
-          // Create log text and fields with unique values.
-          let log_text = format!("log message {} {}", i_thread_number, thread_number);
-          let mut fields = HashMap::new();
-          fields.insert("field12".to_owned(), format!("value1 {}", i_thread_number));
-          fields.insert("field34".to_owned(), format!("value3 {}", thread_number));
+  //         // Create log text and fields with unique values.
+  //         let log_text = format!("log message {} {}", i_thread_number, thread_number);
+  //         let mut fields = HashMap::new();
+  //         fields.insert("field12".to_owned(), format!("value1 {}", i_thread_number));
+  //         fields.insert("field34".to_owned(), format!("value3 {}", thread_number));
 
-          let time = Utc::now().timestamp_millis() as u64;
-          let log_message: LogMessage =
-            LogMessage::new_with_fields_and_text(time, &fields, &log_text);
-          let terms = log_message.get_terms();
+  //         let time = Utc::now().timestamp_millis() as u64;
+  //         let log_message: LogMessage =
+  //           LogMessage::new_with_fields_and_text(time, &fields, &log_text);
+  //         let terms = log_message.get_terms();
+  //
+  //          // Append the log message to the segment.
+  //         segment_arc
+  //           .append_log_message(i, time, &fields, &log_text)
+  //           .unwrap();
+  //
+  //         // Collect terms for trie verification.
+  //         let mut expected_words = expected_words_arc.lock().expect("Mutex lock failed");
+  //         expected_words.extend(terms.iter().map(|word| word.to_owned()));
+  //       }
+  //     });
 
-          // Append the log message to the segment.
-          segment_arc
-            .append_log_message(i, time, &fields, &log_text)
-            .unwrap();
+  //     handles.push(handle);
+  //   }
 
-          // Collect terms for trie verification.
-          let mut expected_words = expected_words_arc.lock().expect("Mutex lock failed");
-          expected_words.extend(terms.iter().map(|word| word.to_owned()));
-        }
-      });
+  //   // Wait for all threads to complete.
+  //   for handle in handles {
+  //     handle.join().unwrap();
+  //   }
 
-      handles.push(handle);
-    }
-
-    // Wait for all threads to complete.
-    for handle in handles {
-      handle.join().unwrap();
-    }
-
-    // Verify trie contains all expected words.
-    let trie_read_lock = trie.read();
-    let expected_words = expected_words.lock().expect("Mutex lock failed");
-    for word in &*expected_words {
-      assert!(
-        trie_read_lock.contains(word),
-        "Word not found in trie: {}",
-        word
-      );
-    }
-  }
+  //   // Verify trie contains all expected words.
+  //   let trie_read_lock = trie.read();
+  //   let expected_words = expected_words.lock().expect("Mutex lock failed");
+  //   for word in &*expected_words {
+  //     assert!(
+  //       trie_read_lock.contains(word),
+  //       "Word not found in trie: {}",
+  //       word
+  //     );
+  //   }
+  // }
 
   #[tokio::test]
   async fn test_range_overlap() {
