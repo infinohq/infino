@@ -193,7 +193,12 @@ impl CoreDB {
     };
 
     // Call the async method on the retrieved index
-    index.append_log_message(time, fields, text).await
+    let results = index.append_log_message(time, fields, text).await;
+
+    // Drop the read lock
+    drop(index_map_lock);
+
+    results
   }
 
   /// Append a metric point.
@@ -217,9 +222,14 @@ impl CoreDB {
       .get(index_name)
       .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
 
-    index
+    let results = index
       .append_metric_point(metric_name, labels, time, value)
-      .await
+      .await;
+
+    // Drop the read lock
+    drop(index_map_lock);
+
+    results
   }
 
   /// Search the log messages for given query and range.
@@ -275,9 +285,14 @@ impl CoreDB {
         index_name,
       )))?;
 
-    index
+    let results = index
       .search_logs(&ast, range_start_time, range_end_time)
-      .await
+      .await;
+
+    // Drop the read lock
+    drop(index_map_lock);
+
+    results
   }
 
   /// Get the metric points for given label and range.
