@@ -1101,7 +1101,7 @@ async fn get_index_dir(
   State(state): State<Arc<AppState>>,
   Path(index_name): Path<String>,
 ) -> String {
-  state.coredb.get_index_dir(&index_name)
+  state.coredb.get_index_dir(&index_name).await
 }
 
 /// Ping to check if the server is up.
@@ -1978,7 +1978,7 @@ mod tests {
     // Create the app.
     let (mut app, _, _) = app(config_dir_path).await;
 
-    for i in 0..9 {
+    for i in 0..99 {
       let index_name = format!("index_test+{}", i);
       index_dirs.push(index_name.to_string());
 

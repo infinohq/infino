@@ -12,10 +12,7 @@ pub mod segment_manager;
 pub mod storage_manager;
 pub mod utils;
 
-use std::collections::HashMap;
-
 use ::log::{debug, error, info};
-use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pest::error::Error as PestError;
 use policy_manager::merge_policy::{MergePolicy, SizeBasedMerge};
@@ -23,7 +20,10 @@ use policy_manager::retention_policy::TimeBasedRetention;
 use request_manager::promql::Rule;
 use request_manager::promql_object::PromQLObject;
 use request_manager::query_dsl_object::QueryDSLObject;
+use std::collections::HashMap;
+use std::sync::Arc;
 use storage_manager::storage::Storage;
+use tokio::sync::RwLock;
 use utils::constants;
 
 use crate::index_manager::index::Index;
@@ -45,7 +45,7 @@ enum PolicyType {
 
 /// Database for storing telemetry data, mapping string keys to index objects.
 pub struct CoreDB {
-  index_map: DashMap<String, Index>,
+  index_map: Arc<RwLock<HashMap<String, Index>>>,
   settings: Settings,
   policy: HashMap<String, PolicyType>,
 }
@@ -70,7 +70,8 @@ impl CoreDB {
         let storage = Storage::new(&storage_type).await?;
 
         // Check if index_dir_path exist and has some directories in it
-        let index_map = DashMap::new();
+        let index_map = Arc::new(RwLock::new(HashMap::new()));
+        let mut index_map_locked = index_map.write().await;
         let index_names = storage.read_dir(index_dir_path).await;
         match index_names {
           Ok(index_names) => {
@@ -91,7 +92,7 @@ impl CoreDB {
                 uncommitted_segments_threshold,
               )
               .await?;
-              index_map.insert(default_index_name.to_string(), index);
+              index_map_locked.insert(default_index_name.to_string(), index);
             } else {
               info!(
                 "Index directory {} already exists. Loading existing indices.",
@@ -107,7 +108,7 @@ impl CoreDB {
                   search_memory_budget_bytes,
                 )
                 .await?;
-                index_map.insert(index_name, index);
+                index_map_locked.insert(index_name, index);
               }
             }
           }
@@ -128,7 +129,7 @@ impl CoreDB {
               uncommitted_segments_threshold,
             )
             .await?;
-            index_map.insert(default_index_name.to_string(), index);
+            index_map_locked.insert(default_index_name.to_string(), index);
           }
         }
 
@@ -148,7 +149,7 @@ impl CoreDB {
           PolicyType::Merge(merge_policy),
         );
         let coredb = CoreDB {
-          index_map,
+          index_map: Arc::clone(&index_map),
           settings,
           policy,
         };
@@ -162,8 +163,8 @@ impl CoreDB {
     }
   }
 
-  pub fn get_index_map(&self) -> &DashMap<String, Index> {
-    &self.index_map
+  pub fn get_index_map(&self) -> Arc<RwLock<HashMap<String, Index>>> {
+    self.index_map.clone()
   }
 
   pub async fn append_log_message(
@@ -178,7 +179,11 @@ impl CoreDB {
       time, fields, text
     );
 
-    let index = match self.index_map.get(index_name) {
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    // Retrieve the index from the map
+    let index = match index_map_lock.get(index_name) {
       Some(index) => index,
       None => {
         let error = QueryError::IndexNotFoundError(index_name.to_string());
@@ -187,7 +192,13 @@ impl CoreDB {
       }
     };
 
-    index.append_log_message(time, fields, text).await
+    // Call the async method on the retrieved index
+    let results = index.append_log_message(time, fields, text).await;
+
+    // Drop the read lock
+    drop(index_map_lock);
+
+    results
   }
 
   /// Append a metric point.
@@ -204,14 +215,21 @@ impl CoreDB {
       time, value, labels, metric_name
     );
 
-    let index = self
-      .index_map
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    let index = index_map_lock
       .get(index_name)
       .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
 
-    index
+    let results = index
       .append_metric_point(metric_name, labels, time, value)
-      .await
+      .await;
+
+    // Drop the read lock
+    drop(index_map_lock);
+
+    results
   }
 
   /// Search the log messages for given query and range.
@@ -257,17 +275,24 @@ impl CoreDB {
     // Build the query AST
     let ast = Segment::parse_query(&json_query)?;
 
-    let index = self
-      .index_map
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    let index = index_map_lock
       .get(index_name)
       .ok_or(QueryError::IndexNotFoundError(format!(
         "Can't find index {}",
         index_name,
       )))?;
 
-    index
+    let results = index
       .search_logs(&ast, range_start_time, range_end_time)
-      .await
+      .await;
+
+    // Drop the read lock
+    drop(index_map_lock);
+
+    results
   }
 
   /// Get the metric points for given label and range.
@@ -290,21 +315,34 @@ impl CoreDB {
     // TODO: for now we'll ignore the json body but come back to this
     let ast = Index::parse_query(url_query)?;
 
-    let index = self
-      .index_map
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    let index = index_map_lock
       .get(index_name)
       .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
 
-    index
+    let results = index
       .search_metrics(&ast, timeout, range_start_time, range_end_time)
-      .await
+      .await?;
+
+    // Drop the read lock
+    drop(index_map_lock);
+
+    Ok(results)
   }
 
   /// Commit the index to disk.
   pub async fn commit(&self, is_shutdown: bool) -> Result<(), CoreDBError> {
-    for index_entry in self.get_index_map() {
-      index_entry.value().commit(is_shutdown).await?
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    for index_entry in index_map_lock.iter() {
+      index_entry.1.commit(is_shutdown).await?
     }
+
+    // Drop the read lock
+    drop(index_map_lock);
 
     Ok(())
   }
@@ -330,8 +368,10 @@ impl CoreDB {
     )
     .await?;
 
-    let index_map = DashMap::new();
-    index_map.insert(index_name.to_string(), index);
+    let index_map = Arc::new(RwLock::new(HashMap::new()));
+    let mut index_map_locked = index_map.write().await;
+
+    index_map_locked.insert(index_name.to_string(), index);
 
     let mut policy = HashMap::new();
     // Ideally decide which Retention object to create based on the config file
@@ -350,20 +390,17 @@ impl CoreDB {
     );
 
     Ok(CoreDB {
-      index_map,
+      index_map: Arc::clone(&index_map),
       settings,
       policy,
     })
   }
 
   /// Get the directory where the index is stored.
-  pub fn get_index_dir(&self, index_name: &str) -> String {
-    self
-      .index_map
-      .get(index_name)
-      .unwrap()
-      .value()
-      .get_index_dir()
+  pub async fn get_index_dir(&self, index_name: &str) -> String {
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+    index_map_lock.get(index_name).unwrap().get_index_dir()
   }
 
   /// Get the settings for this CoreDB.
@@ -398,7 +435,11 @@ impl CoreDB {
     )
     .await?;
 
-    self.index_map.insert(index_name.to_string(), index);
+    // Acquire write lock on the index map
+    let mut index_map_locked = self.index_map.write().await;
+
+    index_map_locked.insert(index_name.to_string(), index);
+
     Ok(())
   }
 
@@ -408,6 +449,9 @@ impl CoreDB {
 
     let mut indexes_to_delete = Vec::new();
 
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
     if ["default", ".default", "Default", ".Default"].contains(&index_name) {
       return Err(CoreDBError::CannotDeleteIndex(index_name.to_string()));
     }
@@ -416,8 +460,8 @@ impl CoreDB {
     // TODO: Handle regexes.
     if index_name.eq("*") || index_name.eq("_all") {
       // Collect keys to delete
-      self.index_map.iter().for_each(|entry| {
-        let name = entry.key().clone();
+      index_map_lock.iter().for_each(|entry| {
+        let name = entry.0.clone();
         if !["default", ".default", "Default", ".Default"].contains(&name.as_str()) {
           indexes_to_delete.push(name);
         }
@@ -426,16 +470,23 @@ impl CoreDB {
       indexes_to_delete.push(index_name.to_string());
     }
 
+    // Drop the read lock and acquire a write lock
+    drop(index_map_lock);
+    let mut index_map_locked = self.index_map.write().await;
+
     // Now delete the indexes without holding references to the index_map
     // which results in deadlock as the 'remove' will wait for the references
     // to be released.
     for name in indexes_to_delete {
-      if let Some((_, index)) = self.index_map.remove(&name) {
+      if let Some(index) = index_map_locked.remove(&name) {
         index.delete().await?;
       } else {
         return Err(CoreDBError::IndexNotFound(name));
       }
     }
+
+    // Drop the write lock
+    drop(index_map_locked);
 
     Ok(())
   }
@@ -454,20 +505,24 @@ impl CoreDB {
 
   pub async fn trigger_merge(&self) -> Result<Vec<u32>, CoreDBError> {
     let mut merged_segment_ids = Vec::new();
-    for index_entry in self.get_index_map() {
+
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    for index_entry in index_map_lock.iter() {
       // Assuming a method to safely retrieve and ensure we're getting a merge policy
       let merge_policy = self
         .get_merge_policy()
         .ok_or(CoreDBError::InvalidPolicy())?;
-      let all_segments_summaries = index_entry.read_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.1.read_all_segments_summaries().await?;
       // Get all the keys of the segments in memory
-      let segments_in_memory = index_entry.get_memory_segments_numbers();
+      let segments_in_memory = index_entry.1.get_memory_segments_numbers();
       // Apply the merge policy directly here based on the enum variant
       let segment_ids_to_merge = match merge_policy {
         PolicyType::Merge(policy) => policy.apply(&all_segments_summaries, &segments_in_memory),
         _ => return Err(CoreDBError::InvalidPolicy()),
       };
-      let merged_result = index_entry.merge_segments(&segment_ids_to_merge).await;
+      let merged_result = index_entry.1.merge_segments(&segment_ids_to_merge).await;
       match merged_result {
         Ok(merged_segment_id) => {
           merged_segment_ids.push(merged_segment_id);
@@ -477,15 +532,22 @@ impl CoreDB {
         }
       }
     }
+
+    // Drop the read lock
+    drop(index_map_lock);
+
     Ok(merged_segment_ids)
   }
 
   /// Function to help with triggering the retention policy
   pub async fn trigger_retention(&self) -> Result<(), CoreDBError> {
-    for index_entry in self.get_index_map() {
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    for index_entry in index_map_lock.iter() {
       // TODO: this does not need to read all_segments_summaries from disk - can use the one already
       // in memory in Index::all_segments_summaries()
-      let all_segments_summaries = index_entry.value().read_all_segments_summaries().await?;
+      let all_segments_summaries = index_entry.1.read_all_segments_summaries().await?;
 
       let retention_policy = self
         .get_retention_policy()
@@ -499,22 +561,31 @@ impl CoreDB {
 
       let mut deletion_futures: FuturesUnordered<_> = segment_ids_to_delete
         .into_iter()
-        .map(|segment_id| index_entry.value().delete_segment(segment_id))
+        .map(|segment_id| index_entry.1.delete_segment(segment_id))
         .collect();
 
       while let Some(result) = deletion_futures.next().await {
         result?;
       }
     }
+
+    // Drop the read lock
+    drop(index_map_lock);
+
     Ok(())
   }
 
   /// Flush write ahead log for all indices.
   pub async fn flush_wal(&self) {
-    // Flush the WAL for the indexes.
-    for index_entry in self.get_index_map() {
-      index_entry.value().flush_wal().await;
+    // Acquire read lock on the index map
+    let index_map_lock = self.index_map.read().await;
+
+    for index_entry in index_map_lock.iter() {
+      index_entry.1.flush_wal().await;
     }
+
+    // Drop the read lock
+    drop(index_map_lock);
   }
 
   /// Delete logs matching query, and return the number of logs deleted.
@@ -548,13 +619,22 @@ impl CoreDB {
         for log in logs.get_messages() {
           log_ids.push(log.get_id());
         }
-        let index = self
-          .index_map
+
+        // Acquire read lock on the index map
+        let index_map_lock = self.index_map.read().await;
+
+        let index = index_map_lock
           .get(index_name)
           .ok_or(QueryError::IndexNotFoundError(index_name.to_string()))?;
-        index
+
+        let results = index
           .delete_logs_by_query(log_ids, range_start_time, range_end_time)
-          .await
+          .await;
+
+        // Drop the read lock
+        drop(index_map_lock);
+
+        results
       }
       Err(_) => Err(CoreDBError::QueryError(QueryError::SearchAndMarkLogsError)),
     }
