@@ -398,7 +398,9 @@ impl CoreDB {
     )
     .await?;
 
+    info!("##### Inserting in index_map {}", index_name.to_string()); // temp log message
     self.index_map.insert(index_name.to_string(), index);
+    info!("##### Insertion complete"); // temp log message
     Ok(())
   }
 

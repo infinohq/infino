@@ -1978,7 +1978,7 @@ mod tests {
     // Create the app.
     let (mut app, _, _) = app(config_dir_path).await;
 
-    for i in 0..9 {
+    for i in 0..1024 {
       let index_name = format!("index_test+{}", i);
       index_dirs.push(index_name.to_string());
 
