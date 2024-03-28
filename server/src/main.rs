@@ -1181,7 +1181,20 @@ mod tests {
   }
 
   /// Helper function to create a test configuration.
-  fn create_test_config(config_dir_path: &str, index_dir_path: &str, wal_dir_path: &str) {
+  /// Returns index name, config directory, index direcory and wal directory.
+  ///
+  /// Note that these directories need to returned from this function so that these temporary directories are
+  /// around till the test that calls create_test_config is running. (As the temporary directory gets
+  /// deleted when the variable that points to it goes out of scope.)
+  fn create_test_config(test_name: &str) -> (String, TempDir, TempDir, TempDir) {
+    let config_dir = TempDir::new(&format!("config_{}", test_name)).unwrap();
+    let config_dir_path = config_dir.path().to_str().unwrap();
+    let index_name = format!("index_{}", test_name);
+    let index_dir = TempDir::new(&index_name).unwrap();
+    let index_dir_path = index_dir.path().to_str().unwrap();
+    let wal_dir = TempDir::new(&format!("wal_{}", test_name)).unwrap();
+    let wal_dir_path = wal_dir.path().to_str().unwrap();
+
     config_test_logger();
 
     // Create a test config in the directory config_dir_path.
@@ -1221,6 +1234,8 @@ mod tests {
       file.write_all(b"timestamp_key = \"date\"\n").unwrap();
       file.write_all(b"labels_key = \"labels\"\n").unwrap();
     }
+
+    (index_name, config_dir, index_dir, wal_dir)
   }
 
   async fn check_search_logs(
@@ -1531,15 +1546,8 @@ mod tests {
 
   #[tokio::test]
   async fn test_basic_main() -> Result<(), CoreDBError> {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (index_name, config_dir, _index_dir, _wal_dir) = create_test_config("test_basic_main");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "test_basic_main_test";
-    let index_dir = TempDir::new(index_name).unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     // Create the app.
     let (mut app, _, _) = app(config_dir_path).await;
@@ -1721,7 +1729,7 @@ mod tests {
     };
     check_search_logs(
       &mut app,
-      index_name,
+      &index_name,
       config_dir_path,
       search_query,
       query,
@@ -1752,7 +1760,7 @@ mod tests {
 
     check_search_logs(
       &mut app,
-      index_name,
+      &index_name,
       config_dir_path,
       search_query,
       query_too_old,
@@ -1806,7 +1814,7 @@ mod tests {
     };
     check_time_series(
       &mut app,
-      index_name,
+      &index_name,
       config_dir_path,
       query,
       metric_points_expected,
@@ -1823,7 +1831,7 @@ mod tests {
       start: Some(1),
       end: Some(10000),
     };
-    check_time_series(&mut app, index_name, config_dir_path, query, Vec::new()).await?;
+    check_time_series(&mut app, &index_name, config_dir_path, query, Vec::new()).await?;
 
     // Check whether the /flush works.
     let response = app
@@ -1843,15 +1851,8 @@ mod tests {
 
   #[tokio::test]
   async fn test_body_limit() -> Result<(), CoreDBError> {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (index_name, config_dir, _index_dir, _wal_dir) = create_test_config("test_body_limit");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "index_test";
-    let index_dir = TempDir::new(index_name).unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     // Create the app.
     let (mut app, _, _) = app(config_dir_path).await;
@@ -1913,18 +1914,14 @@ mod tests {
   /// Write test to test Create and Delete index APIs.
   #[tokio::test]
   async fn test_create_delete_index() {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (index_name, config_dir, index_dir, _wal_dir) =
+      create_test_config("test_create_delete_index");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "index_test";
-    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
+
     let storage = Storage::new(&StorageType::Local)
       .await
       .expect("Could not create storage");
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     // Create the app.
     let (mut app, _, _) = app(config_dir_path).await;
@@ -1943,7 +1940,7 @@ mod tests {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Check whether the metadata file in the index directory exists.
-    let index_dir_path = get_joined_path(index_dir_path, index_name);
+    let index_dir_path = get_joined_path(index_dir_path, &index_name);
     let metadata_file_path = &format!("{}/{}", index_dir_path, Index::get_metadata_file_name());
     assert!(storage.check_path_exists(metadata_file_path).await);
 
@@ -1967,18 +1964,14 @@ mod tests {
   /// Write test to test Create and Delete index APIs.
   #[tokio::test]
   async fn test_create_delete_multiple_indexes() {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (_index_name, config_dir, index_dir, _wal_dir) =
+      create_test_config("test_create_delete_multiple_indexes");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "index_test";
-    let index_dir = TempDir::new(index_name).unwrap();
     let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
+
     let storage = Storage::new(&StorageType::Local)
       .await
       .expect("Could not create storage");
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     let mut index_dirs = Vec::<String>::new();
 
@@ -2037,15 +2030,8 @@ mod tests {
 
   #[tokio::test]
   async fn test_bulk_operation() {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (index_name, config_dir, _index_dir, _wal_dir) = create_test_config("test_bulk_operation");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "bulk_test";
-    let index_dir = TempDir::new(index_name).unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     let (mut app, _, _) = app(config_dir_path).await;
 
@@ -2156,15 +2142,9 @@ mod tests {
 
   #[tokio::test]
   async fn test_bulk_operation_no_timestamp() {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (index_name, config_dir, _index_dir, _wal_dir) =
+      create_test_config("test_bulk_operation_no_timestamp");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "bulk_test";
-    let index_dir = TempDir::new(index_name).unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     let (mut app, _, _) = app(config_dir_path).await;
 
@@ -2244,15 +2224,9 @@ mod tests {
 
   #[tokio::test]
   async fn test_bulk_operation_no_index() {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (index_name, config_dir, _index_dir, _wal_dir) =
+      create_test_config("test_bulk_operation_no_index");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "bulk_test";
-    let index_dir = TempDir::new(index_name).unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     let (mut app, _, _) = app(config_dir_path).await;
 
@@ -2319,15 +2293,9 @@ mod tests {
 
   #[tokio::test]
   async fn test_bulk_operation_with_errors() {
-    let config_dir = TempDir::new("config_test").unwrap();
+    let (index_name, config_dir, _index_dir, _wal_dir) =
+      create_test_config("test_bulk_operation_with_errors");
     let config_dir_path = config_dir.path().to_str().unwrap();
-    let index_name = "bulk_test";
-    let index_dir = TempDir::new(index_name).unwrap();
-    let index_dir_path = index_dir.path().to_str().unwrap();
-    let wal_dir = TempDir::new("wal_test").unwrap();
-    let wal_dir_path = wal_dir.path().to_str().unwrap();
-
-    create_test_config(config_dir_path, index_dir_path, wal_dir_path);
 
     let (mut app, _, _) = app(config_dir_path).await;
 
