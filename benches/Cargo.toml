@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+base64 = "0.22.0"
 chrono = "*"
 clickhouse = "*"
 elasticsearch = "8.5.0-alpha.1"
+opensearch = "2.2.0"
 fs_extra = "1.2.0"
 serde = { version = "~1", features = ["derive"]}
 serde_json = "~1"
@@ -32,3 +34,6 @@ features = ["attributes"]
 
 [dev-dependencies]
 clickhouse = { version = "*", features = ["test-util"] }
+
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.7.1" }

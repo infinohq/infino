@@ -3,12 +3,13 @@
 use crate::logs::clickhouse::ClickhouseEngine;
 use crate::logs::es::ElasticsearchEngine;
 use crate::logs::infino_os_rest::InfinoOpenSearchEngine;
-use crate::logs::infino::InfinoEngine;
 use crate::logs::infino_rest::InfinoApiClient;
-#[allow(unused_imports)]
+use crate::logs::os::OpenSearchEngine;
 use crate::utils::io::get_directory_size;
 use metrics::{infino::InfinoMetricsClient, prometheus::PrometheusClient};
-use std::{fs, thread, time};
+use std::collections::HashMap;
+use std::process::Command;
+use std::{thread, time};
 use structopt::StructOpt;
 mod logs;
 mod metrics;
@@ -43,6 +44,16 @@ static ELASTICSEARCH_SEARCH_QUERIES: &[&str] = &[
   "unable to stat",
 ];
 
+static OPENSEARCH_SEARCH_QUERIES: &[&str] = &[
+  "Directory",
+  "Digest: done",
+  "2006] [notice] mod_jk2 Shutting down",
+  "mod_jk child workerEnv in error state 5",
+  "Directory index forbidden",
+  "Jun 09 06:07:05 2005] [notice] LDAP:",
+  "unable to stat",
+];
+
 static INFINO_OPENSEARCH_SEARCH_QUERIES: &[&str] = &[
   "Directory",
   "Digest: done",
@@ -61,15 +72,15 @@ struct Opt {
 
   #[structopt(short, long)]
   infino_rest: bool,
-  
-  #[structopt(short, long)]
-  infino_bulk: bool,
-  
+
   #[structopt(short, long)]
   infino_os: bool,
 
   #[structopt(short, long)]
   elastic: bool,
+
+  #[structopt(short, long)]
+  opensearch: bool,
 
   #[structopt(short, long)]
   clickhouse: bool,
@@ -87,17 +98,93 @@ struct Opt {
   print_markdown: bool,
 }
 
+struct SoftwareComponent {
+  name: &'static str,
+  docker_image: &'static str,
+  container_name: &'static str,
+  ports: &'static str,
+  environment_variables: Option<Vec<&'static str>>,
+  bind_mounts: Option<Vec<&'static str>>,
+}
+
+fn setup_docker_container(component: &SoftwareComponent) -> Result<(), Box<dyn std::error::Error>> {
+  println!("Removing existing {} docker container....", component.name);
+
+  // Remove the existing container if it exists
+  Command::new("docker")
+    .arg("rm")
+    .arg("-f")
+    .arg(&component.container_name)
+    .output()
+    .ok(); // Ignore any errors if the container doesn't exist
+
+  println!("Pulling {} docker image....", component.name);
+
+  Command::new("docker")
+    .arg("pull")
+    .arg(&component.docker_image)
+    .output()
+    .expect("Failed to pull Docker image");
+
+  println!("Running {} docker image....", component.name);
+
+  let mut cmd = Command::new("docker");
+  cmd
+    .arg("run")
+    .arg("-d")
+    .arg("--name")
+    .arg(&component.container_name)
+    .arg("-p")
+    .arg(&component.ports);
+
+  if let Some(env_vars) = &component.environment_variables {
+    for var in env_vars {
+      cmd.arg(var);
+    }
+  }
+
+  if let Some(bind_vars) = &component.bind_mounts {
+    for var in bind_vars {
+      cmd.arg(var);
+    }
+  }
+
+  cmd
+    .arg(&component.docker_image)
+    .output()
+    .expect("Failed to run Docker container");
+
+  println!("{} setup complete.", component.name);
+
+  Ok(())
+}
+
+fn teardown_docker_container(
+  component: &SoftwareComponent,
+) -> Result<(), Box<dyn std::error::Error>> {
+  println!("Starting {} teardown....", component.name);
+
+  Command::new("docker")
+    .arg("rm")
+    .arg("-f")
+    .arg(&component.container_name)
+    .output()
+    .expect("Failed to remove Docker container");
+
+  println!("{} teardown complete.", component.name);
+
+  Ok(())
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let opt = Opt::from_args();
-  let run_all = !opt.infino &&
-                !opt.infino_rest &&
-                !opt.infino_bulk &&
-                !opt.infino_os &&
-                !opt.elastic &&
-                !opt.clickhouse &&
-                !opt.infino_metrics &&
-                !opt.prometheus;
+  let run_all = !opt.infino_rest
+    && !opt.infino_os
+    && !opt.opensearch
+    && !opt.elastic
+    && !opt.clickhouse
+    && !opt.infino_metrics
+    && !opt.prometheus;
 
   // Some string variables to progressively collect the test results and print it at the end
   let mut idx_size_title_str = String::from("| dataset |");
@@ -122,56 +209,120 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Maximum number of documents to index. Set this to -1 to index all the documents.
   let max_docs = -1;
 
-  if run_all || opt.infino {
-    // INFINO START
-    println!("\n\n***Now running Infino via CoreDB library***");
+  // Note OS needs a strong password to be set for admin so we use a dummy password
+  let mut software_components: HashMap<&str, SoftwareComponent> = HashMap::new();
+  software_components.insert(
+    "infino",
+    SoftwareComponent {
+      name: "Infino",
+      docker_image: "infinohq/infino:latest",
+      container_name: "infino_test",
+      ports: "3000:3000",
+      environment_variables: None,
+      bind_mounts: Some(vec![
+        "-v",
+        "./build/infino_test/logs:/usr/share/infino/logs",
+        "-v",
+        "./build/infino_test/data:/opt/infino/data",
+      ]),
+    },
+  );
+  software_components.insert(
+    "infino_os",
+    SoftwareComponent {
+      name: "Infino OpenSearch",
+      docker_image: "infinohq/infino-opensearch:latest",
+      container_name: "infino_opensearch_test",
+      ports: "9200:9200,9300:9300,9600:9600,9650:9650",
+      environment_variables: Some(vec![
+        "-e",
+        "discovery.type=single-node",
+        "-e",
+        "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Tr0ub4dor&3$",
+      ]),
+      bind_mounts: Some(vec![
+        "-v",
+        "./build/infino_opensearch_test/logs:/usr/share/opensearch/logs",
+      ]),
+    },
+  );
+  software_components.insert(
+    "opensearch",
+    SoftwareComponent {
+      name: "OpenSearch",
+      docker_image: "opensearchproject/opensearch:2.11.0",
+      container_name: "opensearch_test",
+      ports: "9200:9200,9300:9300,9600:9600,9650:9650",
+      environment_variables: Some(vec![
+        "-e",
+        "discovery.type=single-node",
+        "-e",
+        "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Tr0ub4dor&3$",
+      ]),
+      bind_mounts: Some(vec![
+        "-v",
+        "./build/opensearch_test/logs:/usr/share/opensearch/logs",
+      ]),
+    },
+  );
+  software_components.insert(
+    "elasticsearch",
+    SoftwareComponent {
+      name: "Elasticsearch",
+      docker_image: "elasticsearch:8.13.0",
+      container_name: "elasticsearch_test",
+      ports: "9200:9200,9300:9300,9600:9600,9650:9650",
+      environment_variables: Some(vec!["-e", "discovery.type=single-node"]),
+      bind_mounts: Some(vec![
+        "-v",
+        "./build/elasticsearch_test/logs:/usr/share/elasticsearch/logs",
+      ]),
+    },
+  );
 
-    // Index the data using infino and find the output size.
-    let curr_dir = std::env::current_dir().unwrap();
-    let config_path = format!("{}/{}", &curr_dir.to_str().unwrap(), "config");
-    let mut infino = InfinoEngine::new(&config_path).await;
-    let cell_infino_index_time = infino.index_lines(&opt.input_file, max_docs).await;
-    let cell_infino_index_size = get_directory_size(infino.get_index_dir_path());
-    println!("Infino index size = {} bytes", cell_infino_index_size);
-
-    // Perform search on infino index
-    let cell_infino_search_time = infino.search_multiple_queries(INFINO_SEARCH_QUERIES).await;
-    let _ = fs::remove_dir_all(format! {"{}/index", &curr_dir.to_str().unwrap()});
-
-    idx_size_title_str += " Infino |";
-    idx_size_dashes_str += " ----- |";
-    idx_size_values_str += &format!(" {} |", cell_infino_index_size);
-
-    idx_lat_title_str += " Infino |";
-    idx_lat_dashes_str += " ----- |";
-    idx_lat_values_str += &format!(" {} |", cell_infino_index_time);
-
-    log_search_lat_title_str += " Infino |";
-    log_search_lat_dashes_str += " ----- |";
-    log_search_lat_values_str += &format!(" {} |",
-                  cell_infino_search_time / INFINO_SEARCH_QUERIES.len() as u128);
-    // INFINO END
-  }
+  software_components.insert(
+    "prometheus",
+    SoftwareComponent {
+      name: "Prometheus",
+      docker_image: "prom/prometheus:latest",
+      container_name: "prometheus_test",
+      ports: "9090:9090",
+      environment_variables: None,
+      bind_mounts: None,
+    },
+  );
+  software_components.insert(
+    "clickhouse",
+    SoftwareComponent {
+      name: "Clickhouse",
+      docker_image: "clickhouse/clickhouse-server:latest",
+      container_name: "clickhouse_test",
+      ports: "8123:8123",
+      environment_variables: None,
+      bind_mounts: None,
+    },
+  );
 
   if run_all || opt.infino_rest {
     // INFINO REST START
     println!("\n\n***Now running Infino via the REST API client***");
 
-    // Index the data using infino and find the output size.
+    setup_docker_container(software_components.get("infino").unwrap())?;
+
+    // Index the data and find the output size.
     let infino_rest = InfinoApiClient::new();
-    let cell_infino_rest_index_time = infino_rest.index_lines(&opt.input_file, max_docs, false).await;
+    let cell_infino_rest_index_time = infino_rest
+      .index_lines(&opt.input_file, max_docs, false)
+      .await;
 
     // TODO: The flush does not flush to disk reliably - anf it make take more time before the index is updated on disk.
     // Figure out how to flush reliably and the code below can be uncommented.
     // ---
     // Flush the index to disk - sleep for a second to let the OS complete flushing.
-    //let _ = infino_rest.flush();
-    //thread::sleep(std::time::Duration::from_millis(1000));
-    //let cell_infino_rest_index_size = get_directory_size(infino_rest.get_index_dir_path());
-    //println!(
-    //  "Infino via API index size = {} bytes",
-    //  cell_infino_rest_index_size
-    //);
+    let _ = infino_rest.flush();
+    thread::sleep(std::time::Duration::from_millis(1000));
+    let cell_infino_rest_index_size = get_directory_size(infino_rest.get_index_dir_path());
+    println!("Infino index size = {} bytes", cell_infino_rest_index_size);
 
     // Perform search on infino index
     let cell_infino_rest_search_time = infino_rest
@@ -188,84 +339,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log_search_lat_title_str += " Infino-REST |";
     log_search_lat_dashes_str += " ----- |";
-    log_search_lat_values_str += &format!(" {} |",
-                  cell_infino_rest_search_time / INFINO_SEARCH_QUERIES.len() as u128);
+    log_search_lat_values_str += &format!(
+      " {} |",
+      cell_infino_rest_search_time / INFINO_SEARCH_QUERIES.len() as u128
+    );
+
+    teardown_docker_container(software_components.get("infino").unwrap())?;
+
     // INFINO REST END
   }
 
-  if run_all || opt.infino_bulk{
-    // INFINO REST BULK START
-    println!("\n\n***Now running Infino Bulk via the REST API client***");
-
-    // Index the data using infino and find the output size.
-    let infino_bulk = InfinoApiClient::new();
-    let cell_infino_bulk_index_time = infino_bulk.index_lines(&opt.input_file, max_docs, true).await;
-
-    // TODO: The flush does not flush to disk reliably - anf it make take more time before the index is updated on disk.
-    // Figure out how to flush reliably and the code below can be uncommented.
-    // ---
-    // Flush the index to disk - sleep for a second to let the OS complete flushing.
-    //let _ = infino_rest.flush();
-    //thread::sleep(std::time::Duration::from_millis(1000));
-    //let cell_infino_rest_index_size = get_directory_size(infino_rest.get_index_dir_path());
-    //println!(
-    //  "Infino via API index size = {} bytes",
-    //  cell_infino_rest_index_size
-    //);
-
-    // Perform search on infino index
-    let cell_infino_bulk_search_time = infino_bulk
-      .search_multiple_queries(INFINO_SEARCH_QUERIES)
-      .await;
-
-    idx_size_title_str += " Infino-Bulk-REST |";
-    idx_size_dashes_str += " ----- |";
-    idx_size_values_str += " Not available via API |";
-
-    idx_lat_title_str += " Infino-Bulk-REST |";
-    idx_lat_dashes_str += " ----- |";
-    idx_lat_values_str += &format!(" {} |", cell_infino_bulk_index_time);
-
-    log_search_lat_title_str += " Infino-REST |";
-    log_search_lat_dashes_str += " ----- |";
-    log_search_lat_values_str += &format!(" {} |",
-                  cell_infino_bulk_search_time / INFINO_SEARCH_QUERIES.len() as u128);
-    // INFINO REST BULK END
-  }
-
   if run_all || opt.infino_os {
-    // INFINO OS REST START
-    println!("\n\n***Now running Infino OpenSearch via the Elastic REST API client***");
+    // INFINP OPENSEARCH START
+    println!("\n\n***Now running Infino OpenSearch via the OpenSearch REST API client***");
 
-    // Index the data using infino and find the output size.
-    let infino_os =  InfinoOpenSearchEngine::new().await;
+    setup_docker_container(software_components.get("infino_os").unwrap())?;
+
+    // Index the data and find the output size.
+    let infino_os = InfinoOpenSearchEngine::new().await;
     let cell_infino_os_index_time = infino_os.index_lines(&opt.input_file, max_docs).await;
 
-    // Perform search on infino index
+    // Force merge the index so that the index size is optimized.
+    infino_os.forcemerge().await;
+    let cell_infino_os_index_size = infino_os.get_index_size().await;
+
+    // Perform search on opensearch index
     let cell_infino_os_search_time = infino_os
-      .search_multiple_queries(INFINO_OPENSEARCH_SEARCH_QUERIES)
+      .search_multiple_queries(OPENSEARCH_SEARCH_QUERIES)
       .await;
 
-    idx_size_title_str += " Infino-OS |";
-    idx_size_dashes_str += " ----- |";
-    idx_size_values_str += " Not available via API |";
+    let infino_os_index_size = if cell_infino_os_index_size == 0 {
+      "<figure out from cat response>".to_owned()
+    } else {
+      cell_infino_os_index_size.to_string()
+    };
 
-    idx_lat_title_str += " Infino-OS |";
+    idx_size_title_str += " Infino OpenSearch |";
+    idx_size_dashes_str += " ----- |";
+    idx_size_values_str += &format!(" {} |", infino_os_index_size);
+
+    idx_lat_title_str += " Infino OpenSearch |";
     idx_lat_dashes_str += " ----- |";
     idx_lat_values_str += &format!(" {} |", cell_infino_os_index_time);
 
-    log_search_lat_title_str += " Infino-OS |";
+    log_search_lat_title_str += " Infino OpenSearch |";
     log_search_lat_dashes_str += " ----- |";
-    log_search_lat_values_str += &format!(" {} |",
-                  cell_infino_os_search_time / INFINO_OPENSEARCH_SEARCH_QUERIES.len() as u128);
-    // INFINO OS REST END
+    log_search_lat_values_str += &format!(
+      " {} |",
+      cell_infino_os_search_time / INFINO_OPENSEARCH_SEARCH_QUERIES.len() as u128
+    );
+
+    teardown_docker_container(software_components.get("infino_os").unwrap())?;
+
+    // OPENSEARCH END
   }
 
   if run_all || opt.elastic {
     // ELASTICSEARCH START
-    println!("\n\n***Now running Elasticsearch***");
+    println!("\n\n***Now running Elasticsearch via the Elasticsearch REST API client***");
 
-    // Index the data using elasticsearch and find the output size.
+    setup_docker_container(software_components.get("elastic").unwrap())?;
+
+    // Index the data and find the output size.
     let es = ElasticsearchEngine::new().await;
     let cell_es_index_time = es.index_lines(&opt.input_file, max_docs).await;
 
@@ -294,14 +429,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log_search_lat_title_str += " Elasticsearch |";
     log_search_lat_dashes_str += " ----- |";
-    log_search_lat_values_str += &format!(" {} |",
-                  cell_es_search_time / ELASTICSEARCH_SEARCH_QUERIES.len() as u128);
+    log_search_lat_values_str += &format!(
+      " {} |",
+      cell_es_search_time / ELASTICSEARCH_SEARCH_QUERIES.len() as u128
+    );
+
+    teardown_docker_container(software_components.get("elastic").unwrap())?;
+
     // ELASTICSEARCH END
+  }
+
+  if run_all || opt.opensearch {
+    // OPENSEARCH START
+    println!("\n\n***Now running OpenSearch via the OpenSearch REST API client***");
+
+    // setup_docker_container(software_components.get("opensearch").unwrap())?;
+
+    // Index the data using opensearch and find the output size.
+    let os = OpenSearchEngine::new().await;
+    let cell_os_index_time = os.index_lines(&opt.input_file, max_docs).await;
+
+    // Force merge the index so that the index size is optimized.
+    os.forcemerge().await;
+    let cell_os_index_size = os.get_index_size().await;
+
+    // Perform search on opensearch index
+    let cell_os_search_time = os.search_multiple_queries(OPENSEARCH_SEARCH_QUERIES).await;
+
+    let opensearch_index_size = if cell_os_index_size == 0 {
+      "<figure out from cat response>".to_owned()
+    } else {
+      cell_os_index_size.to_string()
+    };
+
+    idx_size_title_str += " OpenSearch |";
+    idx_size_dashes_str += " ----- |";
+    idx_size_values_str += &format!(" {} |", opensearch_index_size);
+
+    idx_lat_title_str += " OpenSearch |";
+    idx_lat_dashes_str += " ----- |";
+    idx_lat_values_str += &format!(" {} |", cell_os_index_time);
+
+    log_search_lat_title_str += " OpenSearch |";
+    log_search_lat_dashes_str += " ----- |";
+    log_search_lat_values_str += &format!(
+      " {} |",
+      cell_os_search_time / OPENSEARCH_SEARCH_QUERIES.len() as u128
+    );
+
+    // teardown_docker_container(software_components.get("opensearch").unwrap())?;
+
+    // OPENSEARCH END
   }
 
   if run_all || opt.clickhouse {
     // CLICKHOUSE START
     println!("\n\n***Now running Clickhouse***");
+
+    setup_docker_container(software_components.get("clickhouse").unwrap())?;
 
     let mut clickhouse = ClickhouseEngine::new().await;
     let cell_clickhouse_index_time = clickhouse.index_lines(&opt.input_file, max_docs).await;
@@ -329,8 +514,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log_search_lat_title_str += " Clickhouse |";
     log_search_lat_dashes_str += " ----- |";
-    log_search_lat_values_str += &format!(" {} |",
-                  cell_clickhouse_search_time / CLICKHOUSE_SEARCH_QUERIES.len() as u128);
+    log_search_lat_values_str += &format!(
+      " {} |",
+      cell_clickhouse_search_time / CLICKHOUSE_SEARCH_QUERIES.len() as u128
+    );
+
+    teardown_docker_container(software_components.get("clickhouse").unwrap())?;
+
     // CLICKHOUSE END
   }
 
@@ -363,6 +553,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // PROMETHEUS START
     println!("\n\n***Now running Prometheus for time series***");
 
+    setup_docker_container(software_components.get("prometheus").unwrap())?;
+
     let prometheus_client = PrometheusClient::new();
     let append_task = tokio::spawn(async move {
       prometheus_client.append_ts().await;
@@ -386,6 +578,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     metrics_search_lat_title_str += " Prometheus |";
     metrics_search_lat_dashes_str += " ----- |";
     metrics_search_lat_values_str += &format!(" {} |", cell_prometheus_search_time);
+
+    teardown_docker_container(software_components.get("prometheus").unwrap())?;
+
     // PROMETHEUS END
   }
 
@@ -399,13 +594,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nDataset size: {}bytes", cell_input_data_size);
     println!();
 
-    if run_all ||
-       opt.infino ||
-       opt.infino_rest ||
-       opt.infino_bulk ||
-       opt.infino_os ||
-       opt.elastic ||
-       opt.clickhouse {
+    if run_all
+      || opt.infino
+      || opt.infino_rest
+      || opt.opensearch
+      || opt.infino_os
+      || opt.elastic
+      || opt.clickhouse
+      || opt.prometheus
+      || opt.infino_metrics
+    {
       println!("\n\n### Index size\n");
       println!("{}", idx_size_title_str);
       println!("{}", idx_size_dashes_str);
@@ -417,7 +615,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       println!("{}", idx_lat_values_str);
 
       println!("\n\n### Log Search Latency\n");
-      println!("Average across different query types. See the detailed output for granular info.\n");
+      println!(
+        "Average across different query types. See the detailed output for granular info.\n"
+      );
       println!("{}", log_search_lat_title_str);
       println!("{}", log_search_lat_dashes_str);
       println!("{}", log_search_lat_values_str);

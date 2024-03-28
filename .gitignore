@@ -27,6 +27,9 @@ benches/index
 # ignore clickhouse binary
 benches/ch-tmp/
 
+# ignore benches logs from docker containers
+benches/build
+
 #ignore plugin build artifacts
 plugins/.gradle
 

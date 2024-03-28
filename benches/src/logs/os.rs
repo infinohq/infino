@@ -4,15 +4,17 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+#[allow(unused_imports)]
 use chrono::Utc;
 use opensearch::auth::Credentials;
 use opensearch::cert::CertificateValidation;
 use opensearch::http::request::JsonBody;
+use opensearch::http::transport::SingleNodeConnectionPool;
+use opensearch::http::transport::TransportBuilder;
 use opensearch::SearchParts;
 use opensearch::{
   cat::CatIndicesParts,
   http::headers::HeaderMap,
-  http::transport::{SingleNodeConnectionPool, TransportBuilder},
   http::Method,
   indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts, IndicesFlushParts},
   params::Refresh,
@@ -27,13 +29,13 @@ const FLUSH_LIMIT_BYTES: u64 = 524288000; // 500MB
 
 static INDEX_NAME: &str = "perftest";
 
-pub struct InfinoOpenSearchEngine {
+pub struct OpenSearchEngine {
   client: OpenSearch,
 }
 
-impl InfinoOpenSearchEngine {
-  pub async fn new() -> InfinoOpenSearchEngine {
-    let client = InfinoOpenSearchEngine::create_client().unwrap();
+impl OpenSearchEngine {
+  pub async fn new() -> OpenSearchEngine {
+    let client = OpenSearchEngine::create_client().unwrap();
 
     let exists = client
       .indices()
@@ -79,7 +81,7 @@ impl InfinoOpenSearchEngine {
       println!("Error while creating index {:?}", response);
     }
 
-    InfinoOpenSearchEngine { client }
+    OpenSearchEngine { client }
   }
 
   /// Indexes input data and returns the time required for insertion as microseconds.
@@ -196,6 +198,19 @@ impl InfinoOpenSearchEngine {
     }
   }
 
+  fn create_client() -> Result<OpenSearch, Error> {
+    let url = Url::parse("http://localhost:9200").unwrap();
+    let credentials = Credentials::Basic("admin".into(), "Tr0ub4dor&3$".into());
+    let conn_pool = SingleNodeConnectionPool::new(url);
+    let builder = TransportBuilder::new(conn_pool)
+      .cert_validation(CertificateValidation::None)
+      .auth(credentials)
+      .cert_validation(CertificateValidation::None)
+      .disable_proxy();
+    let transport = builder.build()?;
+    Ok(OpenSearch::new(transport))
+  }
+
   pub async fn get_index_size(&self) -> u64 {
     let cat = self
       .client
@@ -250,21 +265,6 @@ impl InfinoOpenSearchEngine {
     } else {
       0
     }
-  }
-
-  fn create_client() -> Result<OpenSearch, Error> {
-    let url = Url::parse("https://localhost:9200").unwrap();
-    let conn_pool = SingleNodeConnectionPool::new(url);
-
-    // Create credentials
-    let credentials = Credentials::Basic("admin".to_string(), "Tr0ub4dor&3$".to_string());
-
-    let builder = TransportBuilder::new(conn_pool)
-      .cert_validation(CertificateValidation::None)
-      .auth(credentials);
-
-    let transport = builder.build()?;
-    Ok(OpenSearch::new(transport))
   }
 
   /// Searches the given term and returns the time required in microseconds

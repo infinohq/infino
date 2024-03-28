@@ -1,6 +1,8 @@
 # Benchmark - ElasticSearch, Clickhouse and Prometheus performance comparison with Infino
 
-Benchmarks are always hard but are important to provide a reasonable sense of performance. This package contains a comparision of Infino with [Elasticsearch](https://github.com/elastic/elasticsearch-rs), [Clickhouse](https://github.com/ClickHouse/ClickHouse) and [Prometheus](https://github.com/prometheus/prometheus), the most popular storage tools for observability today. The raw output of comparison can be found [here](output.txt). Feedback is welcome; we will add more tests as we go.
+Benchmarks are always hard but are important to provide a reasonable sense of performance. 
+
+This package contains a comparision of Infino, Infino with OpenSearch, OpenSearch, Elasticsearch](https://github.com/elastic/elasticsearch-rs), [Prometheus](https://github.com/prometheus/prometheus), and [Clickhouse](https://github.com/ClickHouse/ClickHouse), the most popular OSS storage tools for observability today. The raw output of comparison can be found [here](output.txt). Feedback is welcome; we will add more tests as we go.
 
 Want to jump directly to the results? Scroll below towards the end of this page.
 
@@ -16,33 +18,8 @@ File is present in `benches/data` folder named Apache.log
 
 - Make sure to start from a clean slate (i.e., no other data indexed in any of the systems being compared),
   so that the results would be comparable.
-- Install Elasticsearch by running following commands
-  - `$ curl -O https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.6.0-linux-x86_64.tar.gz`
-  - `$ tar xvfz elasticsearch-8.6.0-linux-x86_64.tar.gz`
-  - Set `xpack.security.enabled` to `false` in `elasticsearch-8.6.0/config/elasticsearch.yml`
-  - You may need to install JDK, set `ES_JAVA_HOME` environment variable, set `xpack.ml.enabled: false` depending on
-    the hardware you are running on
-  - Start elasticsearch:
-    - `$ bin/elasticsearch`
-- Install [prometheus](https://prometheus.io/download/) based on your architecure
-  - Unzip and modify the prometheus.yml file as below
-  - add scrape_config
-    ```
-    - job_name: 'rust_app'
-    static_configs:
-      - targets: ['localhost:9000']
-    ```
-  - Change scrape interval to 1s `scrape_interval: 1s`
-  - Start prometheus simply by running the binary `./prometheus`
-- Install [Clickhouse](https://clickhouse.com/docs/en/install)
-  - Create directory `benches/ch-tmp` and move clickhouse binary there, start server from this directory using `./clickhouse server`
-  - Drop database `test_logs` using clickhouse client, in case it exists already
-  - Create database `test_logs` using clickhouse client using command `create database test_logs`
-- Start Infino server
-
-  - Make sure the `index` directory is empty - so that we are starting from a clean slate
-  - Run `make run` from `infino` directory
-
+- Make the Infino docker image
+  - `make docker-build`
 - Run benchmark
 
 ```

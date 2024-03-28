@@ -30,7 +30,7 @@ impl InfinoApiClient {
 
   #[allow(unused)]
   async fn index_with_bulk(&self, client: &reqwest::Client, logs_batch: &[Value]) {
-    // Join all elements in logs_batch delimitted by \n 
+    // Join all elements in logs_batch delimitted by \n
     let mut body_str = String::new();
     body_str.push('\n');
     logs_batch.iter().for_each(|log| {
@@ -76,7 +76,7 @@ impl InfinoApiClient {
           if use_bulk {
             logs_batch.push(json!({"index": {"_id": num_docs}}));
           }
-          logs_batch.push(json!({ 
+          logs_batch.push(json!({
             "date": Utc::now().timestamp_millis() as u64,
             "message": message,
           }));
@@ -150,6 +150,6 @@ impl InfinoApiClient {
 
   #[allow(unused)]
   pub fn get_index_dir_path(&self) -> &str {
-    "../index"
+    "./build/infino_test/data/"
   }
 }
